@@ -34,7 +34,7 @@ const api = {
   updatePacking: (id, patch) => sb(`packing_list?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePacking: (id) => sb(`packing_list?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
-  getSetting: (key) => sb(`settings?setting_name=eq.${key}`),
+  getSetting: () => sb("settings"),
   upsertSetting: (key, value) => sb(`settings?setting_name=eq.${key}`, { method: "PATCH", body: JSON.stringify({ value }), headers: { Prefer: "return=representation" } }),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
@@ -165,12 +165,12 @@ export default function App() {
         api.getItems(),
         api.getEvents(),
         api.getAllPacking(),
-        api.getSetting("org_logo"),
+        api.getSetting(),
       ]);
       setItems(i);
       setEvents(e);
       setPacking(p);
-      setOrgLogo(logoRows?.[0]?.value || null);
+      setOrgLogo(logoRows?.find(r => r.setting_name === "org_logo")?.value || null);
       setError(null);
     } catch { setError("Could not connect to database. Make sure your Supabase tables are set up correctly."); }
     finally { setLoading(false); }

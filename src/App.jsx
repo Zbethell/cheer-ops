@@ -35,7 +35,7 @@ const api = {
   deletePacking: (id) => sb(`packing_list?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   getSetting: (key) => sb(`settings?key=eq.${key}`),
-  upsertSetting: (key, value) => sb("settings", { method: "POST", body: JSON.stringify({ key, value }), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }),
+  upsertSetting: (key, value) => sb(`settings?key=eq.${key}`, { method: "PATCH", body: JSON.stringify({ value }), headers: { Prefer: "return=representation" } }),
 };
 
 const CATEGORIES = ["AV / Tech", "Signage / Decor", "Apparel / Merch", "Office / Admin", "Competition / Floor", "Other"];

@@ -53,6 +53,17 @@ async function checkOrgLogoExists() {
   } catch { return null; }
 }
 
+// ─── Responsive Hook ──────────────────────────────────────────────────────────
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+  useEffect(() => {
+    const fn = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return isMobile;
+}
+
 const CATEGORIES = ["AV / Tech", "Signage / Decor", "Apparel / Merch", "Office / Admin", "Competition / Floor", "Other"];
 const STATUS_CONFIG = {
   completed: { label: "Completed", color: "#6b7280", bg: "#f3f4f6" },
@@ -82,30 +93,33 @@ function parseCSV(text) {
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 function Checkmark() {
-  return <svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  return <svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function Modal({ title, onClose, onSave, saveLabel, saving, children, wide }) {
+// Modal adapts: bottom sheet on mobile, centered on desktop
+function Modal({ title, onClose, onSave, saveLabel, saving, children, wide, isMobile }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 500, padding: 0 }} onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", width: "100%", maxWidth: wide ? 600 : 480, padding: "24px 20px 32px", maxHeight: "90vh", overflowY: "auto" }}>
-        <div style={{ width: 36, height: 4, background: "#e5e7eb", borderRadius: 99, margin: "0 auto 20px" }} />
-        <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 20 }}>{title}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>{children}</div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button style={{ ...ghostBtn, flex: 1, padding: "12px 16px", fontSize: 15 }} onClick={onClose}>Cancel</button>
-          <button style={{ ...primaryBtn, flex: 2, padding: "12px 16px", fontSize: 15, opacity: saving ? 0.5 : 1 }} onClick={onSave} disabled={saving}>{saving ? "Saving..." : saveLabel}</button>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 500, padding: isMobile ? 0 : 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: "#fff", borderRadius: isMobile ? "16px 16px 0 0" : 10, border: isMobile ? "none" : "1px solid #e5e7eb", width: "100%", maxWidth: wide ? 580 : 440, padding: isMobile ? "20px 20px 32px" : 24, maxHeight: "90vh", overflowY: "auto" }}>
+        {isMobile && <div style={{ width: 36, height: 4, background: "#e5e7eb", borderRadius: 99, margin: "0 auto 18px" }} />}
+        <div style={{ fontWeight: 600, fontSize: isMobile ? 17 : 16, marginBottom: 20 }}>{title}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 14 : 12, marginBottom: 24 }}>{children}</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: isMobile ? "stretch" : "flex-end" }}>
+          <button style={{ ...ghostBtn, ...(isMobile ? { flex: 1, padding: "12px", fontSize: 15 } : {}) }} onClick={onClose}>Cancel</button>
+          <button style={{ ...primaryBtn, ...(isMobile ? { flex: 2, padding: "12px", fontSize: 15 } : {}), opacity: saving ? 0.5 : 1 }} onClick={onSave} disabled={saving}>{saving ? "Saving..." : saveLabel}</button>
         </div>
       </div>
     </div>
   );
 }
 
-const labelStyle = { fontSize: 14, fontWeight: 500, color: "#374151" };
-const inputStyle = { padding: "11px 14px", border: "1px solid #e5e7eb", borderRadius: 10, fontSize: 16, width: "100%", background: "#fff", outline: "none", fontFamily: "inherit", WebkitAppearance: "none" };
-const primaryBtn = { background: "#1a1a2e", color: "#fff", border: "none", padding: "10px 18px", borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textAlign: "center" };
-const ghostBtn = { background: "none", border: "1px solid #e5e7eb", padding: "10px 16px", borderRadius: 10, fontSize: 14, color: "#374151", cursor: "pointer", fontFamily: "inherit", textAlign: "center" };
-const dangerBtn = { background: "none", border: "1px solid #fca5a5", padding: "8px 12px", borderRadius: 8, fontSize: 13, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" };
+const labelStyle = { fontSize: 13, fontWeight: 500, color: "#374151" };
+const inputStyle = { padding: "8px 12px", border: "1px solid #e5e7eb", borderRadius: 7, fontSize: 14, width: "100%", background: "#fff", outline: "none", fontFamily: "inherit", WebkitAppearance: "none" };
+const inputStyleMobile = { ...inputStyle, padding: "11px 14px", fontSize: 16, borderRadius: 10 };
+const primaryBtn = { background: "#1a1a2e", color: "#fff", border: "none", padding: "8px 16px", borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textAlign: "center" };
+const ghostBtn = { background: "none", border: "1px solid #e5e7eb", padding: "7px 14px", borderRadius: 7, fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "inherit", textAlign: "center" };
+const dangerBtn = { background: "none", border: "1px solid #fca5a5", padding: "5px 10px", borderRadius: 6, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" };
 
 function LogoUpload({ value, onChange, label, size = 64, storageKey }) {
   const ref = useRef();
@@ -128,12 +142,12 @@ function LogoUpload({ value, onChange, label, size = 64, storageKey }) {
         : <div style={{ width: size, height: size, borderRadius: 8, border: "2px dashed #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 11, textAlign: "center", flexShrink: 0 }}>No logo</div>
       }
       <div style={{ flex: 1 }}>
-        {label && <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: "#374151" }}>{label}</div>}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...ghostBtn, fontSize: 13, padding: "8px 14px", opacity: uploading ? 0.5 : 1 }} onClick={() => ref.current.click()} type="button" disabled={uploading}>
+        {label && <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#374151" }}>{label}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={{ ...ghostBtn, opacity: uploading ? 0.5 : 1 }} onClick={() => ref.current.click()} type="button" disabled={uploading}>
             {uploading ? "Uploading..." : (value ? "Change" : "Upload")}
           </button>
-          {value && !uploading && <button style={{ ...dangerBtn, fontSize: 13 }} onClick={() => onChange(null)} type="button">Remove</button>}
+          {value && !uploading && <button style={dangerBtn} onClick={() => onChange(null)} type="button">Remove</button>}
         </div>
         <input ref={ref} type="file" accept="image/*" style={{ display: "none" }} onChange={handle} />
       </div>
@@ -143,6 +157,7 @@ function LogoUpload({ value, onChange, label, size = 64, storageKey }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const isMobile = useIsMobile();
   const [items, setItems] = useState([]);
   const [events, setEvents] = useState([]);
   const [packing, setPacking] = useState([]);
@@ -170,18 +185,19 @@ export default function App() {
 
   const saveSettings = () => { setOrgLogo(pendingLogo); showToast("Settings saved"); setShowSettings(false); };
 
-  if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280", fontSize: 15 }}>Loading Cheer Ops...</div>;
+  if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading Cheer Ops...</div>;
   if (error) return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", gap: 16, padding: 24, textAlign: "center" }}>
-      <div style={{ fontSize: 40 }}>⚠️</div>
-      <div style={{ fontWeight: 600, fontSize: 17 }}>Connection Error</div>
-      <div style={{ color: "#6b7280", fontSize: 14, maxWidth: 340 }}>{error}</div>
-      <button style={{ ...primaryBtn, padding: "12px 28px" }} onClick={loadAll}>Retry</button>
+      <div style={{ fontSize: 36 }}>⚠️</div>
+      <div style={{ fontWeight: 600 }}>Connection Error</div>
+      <div style={{ color: "#6b7280", fontSize: 14, maxWidth: 360 }}>{error}</div>
+      <button style={{ ...primaryBtn, padding: "10px 24px" }} onClick={loadAll}>Retry</button>
     </div>
   );
 
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
+  const m = isMobile;
 
   return (
     <div style={{ fontFamily: "'DM Sans', 'Segoe UI', sans-serif", minHeight: "100vh", background: "#f8f9fb", color: "#1a1a2e" }}>
@@ -189,62 +205,61 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         button { cursor: pointer; font-family: inherit; }
-        input, select, textarea { font-family: inherit; font-size: 16px; }
+        input, select, textarea { font-family: inherit; }
         .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; }
         .pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 500; }
-        .toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: #1a1a2e; color: #fff; padding: 12px 22px; border-radius: 10px; font-size: 14px; z-index: 1000; white-space: nowrap; box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
-        .check-box { width: 28px; height: 28px; border: 2px solid #d1d5db; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
-        .check-box.checked { background: #1a1a2e; border-color: #1a1a2e; }
+        .toast { position: fixed; bottom: ${m ? "90px" : "24px"}; left: 50%; transform: translateX(-50%); background: #1a1a2e; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; z-index: 1000; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+        .nav-btn { background: none; border: none; padding: 8px 14px; border-radius: 6px; font-size: 14px; font-weight: 500; color: #6b7280; transition: all 0.15s; cursor: pointer; }
+        .nav-btn:hover { background: #f3f4f6; color: #111; }
+        .nav-btn.active { background: #1a1a2e; color: #fff; }
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e5e7eb; display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
-        .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; font-size: 11px; font-weight: 500; color: #9ca3af; background: none; border: none; gap: 3px; transition: color 0.15s; }
+        .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; font-size: 11px; font-weight: 500; color: #9ca3af; background: none; border: none; gap: 3px; cursor: pointer; }
         .tab-btn.active { color: #1a1a2e; }
         .tab-icon { font-size: 22px; line-height: 1; }
-        .page { padding: 16px 16px 90px; max-width: 640px; margin: 0 auto; }
-        .header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0 16px; display: flex; align-items: center; height: 52px; position: sticky; top: 0; z-index: 50; gap: 10px; }
-        .row-action { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
-        @media (min-width: 640px) {
-          .page { padding: 24px 24px 100px; }
-          .header { padding: 0 24px; height: 56px; }
-          .check-box { width: 22px; height: 22px; }
-        }
+        .check-box-mobile { width: 28px; height: 28px; border: 2px solid #d1d5db; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+        .check-box-mobile.checked { background: #1a1a2e; border-color: #1a1a2e; }
+        .check-box-desktop { width: 18px; height: 18px; border: 2px solid #d1d5db; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+        .check-box-desktop.checked { background: #1a1a2e; border-color: #1a1a2e; }
       `}</style>
 
       {/* Header */}
-      <div className="header">
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: m ? "0 16px" : "0 24px", display: "flex", alignItems: "center", gap: 8, height: m ? 52 : 56, position: "sticky", top: 0, zIndex: 50 }}>
         {orgLogo
-          ? <img src={orgLogo} alt="logo" style={{ height: 32, width: "auto", objectFit: "contain" }} />
-          : <span style={{ fontWeight: 600, fontSize: 15, letterSpacing: "-0.3px" }}>⭐ Cheer Ops</span>
+          ? <img src={orgLogo} alt="logo" style={{ height: m ? 30 : 36, width: "auto", objectFit: "contain", marginRight: m ? 4 : 8 }} />
+          : <span style={{ fontWeight: 600, fontSize: m ? 15 : 16, marginRight: 4, letterSpacing: "-0.3px" }}>⭐ Cheer Ops</span>
         }
+        {/* Desktop nav */}
+        {!m && <>
+          <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
+          <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>
+          <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>
+        </>}
         <div style={{ flex: 1 }} />
-        <button style={{ background: "none", border: "none", fontSize: 22, padding: "8px", color: "#9ca3af", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>
+        <button style={{ background: "none", border: "none", fontSize: 20, padding: "8px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>
       </div>
 
-      {/* Page Content */}
-      <div className="page">
-        {view === "dashboard" && <Dashboard items={items} events={events} packing={packing} setView={setView} setSelectedEventId={setSelectedEventId} />}
-        {view === "inventory" && <Inventory items={items} setItems={setItems} showToast={showToast} />}
-        {view === "events" && <Events events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && selectedEvent && <EventDetail event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} setView={setView} showToast={showToast} />}
+      {/* Page */}
+      <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
+        {view === "dashboard" && <Dashboard isMobile={m} items={items} events={events} packing={packing} setView={setView} setSelectedEventId={setSelectedEventId} />}
+        {view === "inventory" && <Inventory isMobile={m} items={items} setItems={setItems} showToast={showToast} />}
+        {view === "events" && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
+        {view === "event-detail" && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} setView={setView} showToast={showToast} />}
       </div>
 
-      {/* Bottom Tab Bar */}
-      <nav className="tab-bar">
-        <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>
-          <span className="tab-icon">🏠</span>Dashboard
-        </button>
-        <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>
-          <span className="tab-icon">📦</span>Inventory
-        </button>
-        <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>
-          <span className="tab-icon">📅</span>Events
-        </button>
-      </nav>
+      {/* Mobile bottom tab bar */}
+      {m && (
+        <nav className="tab-bar">
+          <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}><span className="tab-icon">🏠</span>Dashboard</button>
+          <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>
+          <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>
+        </nav>
+      )}
 
-      {/* Settings Modal */}
+      {/* Settings */}
       {showSettings && (
-        <Modal title="Settings" onClose={() => setShowSettings(false)} onSave={saveSettings} saveLabel="Done" saving={false}>
+        <Modal title="Settings" onClose={() => setShowSettings(false)} onSave={saveSettings} saveLabel="Done" saving={false} isMobile={m}>
           <LogoUpload value={pendingLogo} onChange={setPendingLogo} label="Organization Logo" size={56} storageKey={ORG_LOGO_PATH} />
-          <p style={{ fontSize: 13, color: "#9ca3af" }}>Logo uploads to storage and appears for everyone on next page load.</p>
+          <p style={{ fontSize: 12, color: "#9ca3af" }}>Logo uploads to storage and appears for everyone on next page load.</p>
         </Modal>
       )}
 
@@ -254,7 +269,7 @@ export default function App() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({ items, events, packing, setView, setSelectedEventId }) {
+function Dashboard({ isMobile: m, items, events, packing, setView, setSelectedEventId }) {
   const activeEvent = events.find(e => e.status === "active");
   const upcomingEvents = events.filter(e => e.status === "upcoming");
   const activePacking = activeEvent ? packing.filter(p => p.event_id === activeEvent.id) : [];
@@ -262,80 +277,81 @@ function Dashboard({ items, events, packing, setView, setSelectedEventId }) {
   const packingProgress = activePacking.length > 0 ? Math.round((activePacking.filter(p => p.packed).length / activePacking.length) * 100) : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
       <div>
-        <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>Dashboard</h1>
+        <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Dashboard</h1>
         <p style={{ color: "#6b7280", fontSize: 14 }}>Your season at a glance</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: m ? 10 : 16 }}>
         {[
-          { label: "Items", value: items.length, sub: "in inventory" },
-          { label: "Out", value: itemsOut, sub: "not returned" },
+          { label: m ? "Items" : "Total Items", value: items.length, sub: "in master inventory" },
+          { label: "Items Out", value: itemsOut, sub: activeEvent ? `at ${activeEvent.name}` : "no active event" },
           { label: "Events", value: events.length, sub: `${upcomingEvents.length} upcoming` },
         ].map(s => (
-          <div key={s.label} className="card" style={{ padding: "14px 12px" }}>
-            <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-1px", lineHeight: 1 }}>{s.value}</div>
-            <div style={{ fontSize: 13, fontWeight: 500, marginTop: 3 }}>{s.label}</div>
-            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{s.sub}</div>
+          <div key={s.label} className="card" style={{ padding: m ? "12px 12px" : "18px 20px" }}>
+            <div style={{ fontSize: m ? 24 : 28, fontWeight: 600, letterSpacing: "-1px" }}>{s.value}</div>
+            <div style={{ fontSize: m ? 12 : 13, fontWeight: 500, marginTop: 2 }}>{s.label}</div>
+            {!m && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{s.sub}</div>}
           </div>
         ))}
       </div>
 
       {activeEvent && (
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            {activeEvent.logo_url && <img src={activeEvent.logo_url} alt="" style={{ width: 36, height: 36, objectFit: "contain", borderRadius: 6, border: "1px solid #e5e7eb", flexShrink: 0 }} />}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span className="pill" style={{ background: "#ecfdf5", color: "#059669", marginBottom: 4, display: "inline-flex" }}>● Active</span>
-              <div style={{ fontWeight: 600, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{activeEvent.name}</div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>{activeEvent.location}</div>
+        <div className="card" style={{ padding: m ? 14 : 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+              {activeEvent.logo_url && <img src={activeEvent.logo_url} alt="" style={{ width: m ? 34 : 40, height: m ? 34 : 40, objectFit: "contain", borderRadius: 6, border: "1px solid #e5e7eb", flexShrink: 0 }} />}
+              <div style={{ minWidth: 0 }}>
+                <span className="pill" style={{ background: "#ecfdf5", color: "#059669", marginBottom: 4, display: "inline-flex" }}>● Active</span>
+                <div style={{ fontWeight: 600, fontSize: m ? 15 : 16, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{activeEvent.name}</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>{activeEvent.location}{!m && activeEvent.date ? ` · ${activeEvent.date}` : ""}</div>
+              </div>
             </div>
+            {!m && <button style={primaryBtn} onClick={() => { setSelectedEventId(activeEvent.id); setView("event-detail"); }}>Open →</button>}
           </div>
           {packingProgress !== null && (
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: m ? 12 : 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6b7280", marginBottom: 5 }}>
-                <span>Packing progress</span><span>{packingProgress}%</span>
+                <span>Packing progress</span><span>{m ? `${packingProgress}%` : `${activePacking.filter(p => p.packed).length} / ${activePacking.length} packed`}</span>
               </div>
               <div style={{ background: "#f3f4f6", borderRadius: 99, height: 8, overflow: "hidden" }}>
                 <div style={{ width: `${packingProgress}%`, background: "#1a1a2e", height: "100%", borderRadius: 99, transition: "width 0.3s" }} />
               </div>
             </div>
           )}
-          <button style={{ ...primaryBtn, width: "100%", padding: "12px" }} onClick={() => { setSelectedEventId(activeEvent.id); setView("event-detail"); }}>
-            Open Packing List →
-          </button>
+          {m && <button style={{ ...primaryBtn, width: "100%", padding: "12px", marginTop: 4 }} onClick={() => { setSelectedEventId(activeEvent.id); setView("event-detail"); }}>Open Packing List →</button>}
         </div>
       )}
 
       {upcomingEvents.length > 0 && (
-        <div className="card" style={{ overflow: "hidden" }}>
-          <div style={{ padding: "14px 16px 10px", fontWeight: 600, fontSize: 14, borderBottom: "1px solid #f3f4f6" }}>Upcoming Events</div>
+        <div className="card" style={{ padding: m ? 0 : 20 }}>
+          {!m && <div style={{ fontWeight: 600, marginBottom: 14, fontSize: 14 }}>Upcoming Events</div>}
+          {m && <div style={{ padding: "14px 16px 10px", fontWeight: 600, fontSize: 14, borderBottom: "1px solid #f3f4f6" }}>Upcoming Events</div>}
           {upcomingEvents.map((e, i) => (
-            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: i < upcomingEvents.length - 1 ? "1px solid #f3f4f6" : "none" }}
-              onClick={() => { setSelectedEventId(e.id); setView("event-detail"); }}>
+            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: m ? "12px 16px" : "0 0 10px", marginBottom: !m && i < upcomingEvents.length - 1 ? 10 : 0, borderBottom: (m ? true : i < upcomingEvents.length - 1) ? "1px solid #f3f4f6" : "none", cursor: m ? "pointer" : "default" }}
+              onClick={m ? () => { setSelectedEventId(e.id); setView("event-detail"); } : undefined}>
               {e.logo_url && <img src={e.logo_url} alt="" style={{ width: 32, height: 32, objectFit: "contain", borderRadius: 5, border: "1px solid #e5e7eb", flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>
+                <div style={{ fontWeight: 500, fontSize: m ? 14 : 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>{e.location} · {e.date}</div>
               </div>
-              <span style={{ color: "#9ca3af", fontSize: 18 }}>›</span>
+              {m
+                ? <span style={{ color: "#9ca3af", fontSize: 18 }}>›</span>
+                : <button style={ghostBtn} onClick={() => { setSelectedEventId(e.id); setView("event-detail"); }}>View Packing List</button>
+              }
             </div>
           ))}
         </div>
       )}
 
-      {events.length === 0 && (
-        <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
-          No events yet — go to Events to add your schedule
-        </div>
-      )}
+      {events.length === 0 && <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet — go to Events to add your season schedule</div>}
     </div>
   );
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-function Inventory({ items, setItems, showToast }) {
+function Inventory({ isMobile: m, items, setItems, showToast }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("All");
   const [showModal, setShowModal] = useState(false);
@@ -403,37 +419,50 @@ function Inventory({ items, setItems, showToast }) {
     setImporting(false);
   };
 
-  // Group filtered items by category
+  // Group for mobile
   const grouped = {};
   filtered.forEach(item => {
     if (!grouped[item.category]) grouped[item.category] = [];
     grouped[item.category].push(item);
   });
 
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>Inventory</h1>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>{items.length} items</p>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Master Inventory</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>{items.length} items tracked</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={{ ...ghostBtn, fontSize: 13, padding: "9px 13px" }} onClick={() => { setCsvText(""); setCsvPreview(null); setCsvError(""); setShowImport(true); }}>Import</button>
-          <button style={{ ...primaryBtn, fontSize: 13, padding: "9px 13px" }} onClick={openAdd}>+ Add</button>
+          <button style={{ ...ghostBtn, fontSize: m ? 13 : 13, padding: m ? "9px 13px" : "7px 14px" }} onClick={() => { setCsvText(""); setCsvPreview(null); setCsvError(""); setShowImport(true); }}>{m ? "Import" : "Import CSV"}</button>
+          <button style={{ ...primaryBtn, padding: m ? "9px 13px" : "8px 16px" }} onClick={openAdd}>+ {m ? "Add" : "Add Item"}</button>
         </div>
       </div>
 
-      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={inputStyle} />
+      {/* Mobile: search + horizontal filter pills */}
+      {m && <>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={iStyle} />
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+          {["All", ...CATEGORIES].map(c => (
+            <button key={c} onClick={() => setFilterCat(c)} style={{ background: filterCat === c ? "#1a1a2e" : "#fff", color: filterCat === c ? "#fff" : "#374151", border: "1px solid #e5e7eb", borderRadius: 99, padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
+          ))}
+        </div>
+      </>}
 
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-        {["All", ...CATEGORIES].map(c => (
-          <button key={c} onClick={() => setFilterCat(c)} style={{ background: filterCat === c ? "#1a1a2e" : "#fff", color: filterCat === c ? "#fff" : "#374151", border: "1px solid #e5e7eb", borderRadius: 99, padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}>
-            {c}
-          </button>
-        ))}
-      </div>
+      {/* Desktop: search + category dropdown */}
+      {!m && (
+        <div style={{ display: "flex", gap: 10 }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={{ ...iStyle, flex: "1 1 160px" }} />
+          <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={iStyle}>
+            {["All", ...CATEGORIES].map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+      )}
 
-      {Object.entries(grouped).map(([cat, catItems]) => (
+      {/* Mobile: grouped list */}
+      {m && Object.entries(grouped).map(([cat, catItems]) => (
         <div key={cat}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>{cat}</div>
           <div className="card" style={{ overflow: "hidden" }}>
@@ -450,32 +479,60 @@ function Inventory({ items, setItems, showToast }) {
         </div>
       ))}
 
-      {filtered.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No items found</div>}
+      {/* Desktop: table */}
+      {!m && (
+        <div className="card" style={{ overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
+              {["Item", "Category", "Qty", "Notes", ""].map(h => <th key={h} style={{ textAlign: "left", padding: "10px 16px", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {filtered.map((item, i) => (
+                <tr key={item.id} style={{ borderBottom: i < filtered.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  <td style={{ padding: "12px 16px", fontWeight: 500, fontSize: 14 }}>{item.name}</td>
+                  <td style={{ padding: "12px 16px" }}><span className="pill" style={{ background: "#f3f4f6", color: "#374151", fontSize: 11 }}>{item.category}</span></td>
+                  <td style={{ padding: "12px 16px", fontSize: 14 }}>{item.qty}</td>
+                  <td style={{ padding: "12px 16px", fontSize: 13, color: "#6b7280", maxWidth: 200 }}>{item.notes || "—"}</td>
+                  <td style={{ padding: "12px 16px", whiteSpace: "nowrap" }}>
+                    <button style={{ ...ghostBtn, fontSize: 12, marginRight: 6 }} onClick={() => openEdit(item)}>Edit</button>
+                    <button style={dangerBtn} onClick={() => remove(item.id)}>Remove</button>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && <tr><td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No items found</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
 
+      {m && filtered.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No items found</div>}
+
+      {/* Add/Edit Modal */}
       {showModal && (
-        <Modal title={editItem ? "Edit Item" : "Add Item"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editItem ? "Save Changes" : "Add Item"} saving={saving}>
+        <Modal title={editItem ? "Edit Item" : "Add Item"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editItem ? "Save Changes" : "Add Item"} saving={saving} isMobile={m}>
           <label style={labelStyle}>Item Name</label>
-          <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={inputStyle} placeholder="e.g. Wireless Microphone" autoFocus />
+          <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="e.g. Wireless Microphone" autoFocus />
           <label style={labelStyle}>Category</label>
-          <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={inputStyle}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select>
+          <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={iStyle}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select>
           <label style={labelStyle}>Quantity</label>
-          <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: Number(e.target.value) }))} style={inputStyle} min={1} />
+          <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: Number(e.target.value) }))} style={iStyle} min={1} />
           <label style={labelStyle}>Notes (optional)</label>
-          <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={{ ...inputStyle, height: 80, resize: "none" }} placeholder="Any details..." />
+          <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={{ ...iStyle, height: 72, resize: "none" }} placeholder="Any details to remember..." />
           {editItem && <button style={{ ...dangerBtn, padding: "10px", width: "100%", textAlign: "center" }} onClick={async () => { await api.deleteItem(editItem.id); setItems(prev => prev.filter(i => i.id !== editItem.id)); setShowModal(false); showToast("Item removed"); }}>Remove Item</button>}
         </Modal>
       )}
 
+      {/* Import Modal */}
       {showImport && (
-        <Modal title="Import from CSV" onClose={() => setShowImport(false)} onSave={runImport} saveLabel={`Import ${csvPreview?.length || 0} Items`} saving={importing} wide>
-          <div style={{ background: "#f8f9fb", borderRadius: 8, padding: 12, fontSize: 13, color: "#374151" }}>
+        <Modal title="Import from CSV" onClose={() => setShowImport(false)} onSave={runImport} saveLabel={`Import ${csvPreview?.length || 0} Items`} saving={importing} wide isMobile={m}>
+          <div style={{ background: "#f8f9fb", borderRadius: 8, padding: 12, fontSize: 13 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Column headers:</div>
             <code style={{ fontSize: 12, color: "#6b7280" }}>name, category, qty, notes</code>
           </div>
-          <button style={{ ...ghostBtn, width: "100%", padding: "12px" }} onClick={() => fileRef.current.click()}>📂 Upload CSV File</button>
+          <button style={{ ...ghostBtn, width: "100%", padding: "11px" }} onClick={() => fileRef.current.click()}>📂 Upload CSV File</button>
           <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={handleFileUpload} />
           <label style={labelStyle}>Or paste CSV text:</label>
-          <textarea value={csvText} onChange={e => { setCsvText(e.target.value); previewCSV(e.target.value); }} style={{ ...inputStyle, height: 90, resize: "none", fontFamily: "monospace", fontSize: 13 }} placeholder={"name,category,qty\nWireless Mic,AV / Tech,2"} />
+          <textarea value={csvText} onChange={e => { setCsvText(e.target.value); previewCSV(e.target.value); }} style={{ ...iStyle, height: 90, resize: "none", fontFamily: "monospace", fontSize: 12 }} placeholder={"name,category,qty\nWireless Mic,AV / Tech,2"} />
           {csvError && <div style={{ color: "#dc2626", fontSize: 13, padding: "10px 12px", background: "#fef2f2", borderRadius: 8 }}>{csvError}</div>}
           {csvPreview?.length > 0 && (
             <div>
@@ -484,6 +541,7 @@ function Inventory({ items, setItems, showToast }) {
                 {csvPreview.slice(0, 20).map((row, i) => (
                   <div key={i} style={{ display: "flex", gap: 10, padding: "9px 12px", borderBottom: i < Math.min(csvPreview.length, 20) - 1 ? "1px solid #f3f4f6" : "none", fontSize: 13 }}>
                     <span style={{ fontWeight: 500, flex: 2 }}>{row.name}</span>
+                    <span style={{ color: "#6b7280", flex: 1 }}>{row.category}</span>
                     <span style={{ color: "#9ca3af" }}>×{row.qty}</span>
                   </div>
                 ))}
@@ -497,17 +555,18 @@ function Inventory({ items, setItems, showToast }) {
 }
 
 // ─── Event Form Fields ────────────────────────────────────────────────────────
-function EventFormFields({ form, setForm }) {
+function EventFormFields({ form, setForm, isMobile: m }) {
+  const iStyle = m ? inputStyleMobile : inputStyle;
   return (
     <>
       <label style={labelStyle}>Event Name</label>
-      <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={inputStyle} placeholder="e.g. Nationals Qualifier – Ottawa" autoFocus />
+      <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="e.g. Nationals Qualifier – Ottawa" autoFocus />
       <label style={labelStyle}>Date</label>
-      <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+      <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={iStyle} />
       <label style={labelStyle}>Location</label>
-      <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={inputStyle} placeholder="e.g. Toronto, ON" />
+      <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={iStyle} placeholder="e.g. Toronto, ON" />
       <label style={labelStyle}>Status</label>
-      <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+      <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={iStyle}>
         <option value="upcoming">Upcoming</option>
         <option value="active">Active</option>
         <option value="completed">Completed</option>
@@ -519,14 +578,14 @@ function EventFormFields({ form, setForm }) {
 }
 
 // ─── Events List ──────────────────────────────────────────────────────────────
-function Events({ events, setEvents, packing, setPacking, setView, setSelectedEventId, showToast }) {
+function Events({ isMobile: m, events, setEvents, packing, setPacking, setView, setSelectedEventId, showToast }) {
   const [showModal, setShowModal] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
   const [form, setForm] = useState({ name: "", date: "", location: "", status: "upcoming", logo_url: null });
   const [saving, setSaving] = useState(false);
 
   const openAdd = () => { setForm({ name: "", date: "", location: "", status: "upcoming", logo_url: null }); setEditEvent(null); setShowModal(true); };
-  const openEdit = (e, evt) => { evt.stopPropagation(); setForm({ name: e.name, date: e.date || "", location: e.location || "", status: e.status, logo_url: e.logo_url || null }); setEditEvent(e); setShowModal(true); };
+  const openEdit = (e, evt) => { evt && evt.stopPropagation(); setForm({ name: e.name, date: e.date || "", location: e.location || "", status: e.status, logo_url: e.logo_url || null }); setEditEvent(e); setShowModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) return;
@@ -547,7 +606,7 @@ function Events({ events, setEvents, packing, setPacking, setView, setSelectedEv
   };
 
   const remove = async (id, evt) => {
-    evt.stopPropagation();
+    evt && evt.stopPropagation();
     try {
       await api.deletePackingByEvent(id);
       await api.deleteEvent(id);
@@ -560,49 +619,57 @@ function Events({ events, setEvents, packing, setPacking, setView, setSelectedEv
   const sorted = [...events].sort((a, b) => new Date(a.date) - new Date(b.date));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>Events</h1>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>{events.length} this season</p>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Events</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>{events.length} events this season</p>
         </div>
-        <button style={{ ...primaryBtn, fontSize: 13, padding: "9px 14px" }} onClick={openAdd}>+ Add</button>
+        <button style={{ ...primaryBtn, padding: m ? "9px 14px" : "8px 16px" }} onClick={openAdd}>+ {m ? "Add" : "Add Event"}</button>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: m ? 10 : 12 }}>
         {sorted.map(e => {
           const ep = packing.filter(p => p.event_id === e.id);
           const sc = STATUS_CONFIG[e.status] || STATUS_CONFIG.upcoming;
           return (
-            <div key={e.id} className="card" style={{ padding: "14px 16px", cursor: "pointer" }}
+            <div key={e.id} className="card" style={{ padding: m ? "14px 16px" : "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, cursor: "pointer" }}
               onClick={() => { setSelectedEventId(e.id); setView("event-detail"); }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
                 {e.logo_url
                   ? <img src={e.logo_url} alt="" style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb", flexShrink: 0 }} />
                   : <div style={{ width: 40, height: 40, borderRadius: 8, background: "#f3f4f6", flexShrink: 0 }} />
                 }
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
                     <span className="pill" style={{ background: sc.bg, color: sc.color, fontSize: 11 }}>{sc.label}</span>
+                    {!m && <span style={{ fontWeight: 600, fontSize: 15 }}>{e.name}</span>}
                   </div>
-                  <div style={{ fontWeight: 600, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>
-                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>{e.location}{e.date ? ` · ${e.date}` : ""}</div>
+                  {m && <div style={{ fontWeight: 600, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>}
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{e.location}{e.date ? ` · ${e.date}` : ""}</div>
                   {ep.length > 0 && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{ep.filter(p => p.packed).length}/{ep.length} packed · {ep.filter(p => p.returned).length}/{ep.length} returned</div>}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-                  <button style={{ ...ghostBtn, fontSize: 12, padding: "6px 10px" }} onClick={(evt) => openEdit(e, evt)}>Edit</button>
-                  <button style={{ ...dangerBtn, fontSize: 12, padding: "6px 10px" }} onClick={(evt) => remove(e.id, evt)}>Delete</button>
-                </div>
               </div>
+              {m
+                ? <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+                    <button style={{ ...ghostBtn, fontSize: 12, padding: "6px 10px" }} onClick={(evt) => openEdit(e, evt)}>Edit</button>
+                    <button style={{ ...dangerBtn, fontSize: 12, padding: "6px 10px" }} onClick={(evt) => remove(e.id, evt)}>Delete</button>
+                  </div>
+                : <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button style={{ ...ghostBtn, fontSize: 12 }} onClick={(evt) => openEdit(e, evt)}>Edit</button>
+                    <button style={{ ...ghostBtn, fontSize: 12 }} onClick={(evt) => { evt.stopPropagation(); setSelectedEventId(e.id); setView("event-detail"); }}>Packing List →</button>
+                    <button style={dangerBtn} onClick={(evt) => remove(e.id, evt)}>Delete</button>
+                  </div>
+              }
             </div>
           );
         })}
-        {events.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet</div>}
+        {events.length === 0 && <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet</div>}
       </div>
 
       {showModal && (
-        <Modal title={editEvent ? "Edit Event" : "Add Event"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editEvent ? "Save Changes" : "Create Event"} saving={saving}>
-          <EventFormFields form={form} setForm={setForm} />
+        <Modal title={editEvent ? "Edit Event" : "Add Event"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editEvent ? "Save Changes" : "Create Event"} saving={saving} isMobile={m}>
+          <EventFormFields form={form} setForm={setForm} isMobile={m} />
         </Modal>
       )}
     </div>
@@ -610,7 +677,7 @@ function Events({ events, setEvents, packing, setPacking, setView, setSelectedEv
 }
 
 // ─── Event Detail ─────────────────────────────────────────────────────────────
-function EventDetail({ event, events, setEvents, items, eventPacking, packing, setPacking, setView, showToast }) {
+function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, setView, showToast }) {
   const [showAddItem, setShowAddItem] = useState(false);
   const [addItemId, setAddItemId] = useState("");
   const [addQty, setAddQty] = useState(1);
@@ -687,6 +754,7 @@ function EventDetail({ event, events, setEvents, items, eventPacking, packing, s
   const progress = total > 0 ? Math.round((totalPacked / total) * 100) : 0;
   const availableToAdd = items.filter(i => !eventPacking.find(p => p.item_id === i.id));
   const otherEvents = events.filter(e => e.id !== event.id && packing.some(p => p.event_id === e.id));
+  const iStyle = m ? inputStyleMobile : inputStyle;
 
   const grouped = {};
   eventPacking.forEach(p => {
@@ -697,53 +765,51 @@ function EventDetail({ event, events, setEvents, items, eventPacking, packing, s
   });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Back button */}
-      <button style={{ ...ghostBtn, alignSelf: "flex-start", fontSize: 14, padding: "8px 14px" }} onClick={() => setView("events")}>← Events</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
+      <button style={{ ...ghostBtn, alignSelf: "flex-start", fontSize: m ? 14 : 13 }} onClick={() => setView("events")}>← {m ? "Events" : "Back to Events"}</button>
 
-      {/* Event Header Card */}
-      <div className="card" style={{ padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
-          {event.logo_url && <img src={event.logo_url} alt="" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb", flexShrink: 0 }} />}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span className="pill" style={{ background: sc.bg, color: sc.color, marginBottom: 6, display: "inline-flex" }}>{sc.label}</span>
-            <div style={{ fontWeight: 700, fontSize: 17, lineHeight: 1.2, marginBottom: 3 }}>{event.name}</div>
-            <div style={{ fontSize: 13, color: "#6b7280" }}>{event.location}{event.date ? ` · ${event.date}` : ""}</div>
+      {/* Event header card */}
+      <div className="card" style={{ padding: m ? 14 : 20 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: total > 0 ? 14 : 0 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 0 }}>
+            {event.logo_url && <img src={event.logo_url} alt="" style={{ width: m ? 44 : 56, height: m ? 44 : 56, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb", flexShrink: 0 }} />}
+            <div style={{ minWidth: 0 }}>
+              <span className="pill" style={{ background: sc.bg, color: sc.color, marginBottom: 6, display: "inline-flex" }}>{sc.label}</span>
+              <div style={{ fontWeight: 700, fontSize: m ? 16 : 20, lineHeight: 1.2, marginBottom: 3 }}>{event.name}</div>
+              <div style={{ fontSize: m ? 13 : 14, color: "#6b7280" }}>{event.location}{event.date ? ` · ${event.date}` : ""}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
+            <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => setShowEdit(true)}>Edit</button>
+            {event.status !== "active" && <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => updateStatus("active")}>Active</button>}
+            {event.status !== "completed" && <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => updateStatus("completed")}>{m ? "Done" : "Completed"}</button>}
+            {event.status !== "upcoming" && <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => updateStatus("upcoming")}>Upcoming</button>}
           </div>
         </div>
-
         {total > 0 && (
-          <div style={{ marginBottom: 14 }}>
+          <div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6b7280", marginBottom: 5 }}>
-              <span>Packing progress</span><span>{totalPacked}/{total} packed</span>
+              <span>Packing progress</span><span>{totalPacked} / {total} packed</span>
             </div>
             <div style={{ background: "#f3f4f6", borderRadius: 99, height: 8, overflow: "hidden" }}>
               <div style={{ width: `${progress}%`, background: "#1a1a2e", height: "100%", borderRadius: 99, transition: "width 0.3s" }} />
             </div>
           </div>
         )}
-
-        {/* Status + Edit buttons */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...ghostBtn, fontSize: 13, padding: "8px 12px" }} onClick={() => setShowEdit(true)}>Edit</button>
-          {event.status !== "active" && <button style={{ ...ghostBtn, fontSize: 13, padding: "8px 12px" }} onClick={() => updateStatus("active")}>Mark Active</button>}
-          {event.status !== "completed" && <button style={{ ...ghostBtn, fontSize: 13, padding: "8px 12px" }} onClick={() => updateStatus("completed")}>Mark Done</button>}
-          {event.status !== "upcoming" && <button style={{ ...ghostBtn, fontSize: 13, padding: "8px 12px" }} onClick={() => updateStatus("upcoming")}>Mark Upcoming</button>}
-        </div>
       </div>
 
-      {/* Packing List Header */}
+      {/* Packing list header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 15, fontWeight: 600 }}>Packing List</div>
+        <div style={{ fontSize: m ? 15 : 14, fontWeight: 600 }}>Packing List</div>
         <div style={{ display: "flex", gap: 8 }}>
-          {otherEvents.length > 0 && <button style={{ ...ghostBtn, fontSize: 13, padding: "8px 12px" }} onClick={() => { setCopyEventId(otherEvents[0].id); setShowCopy(true); }}>Copy</button>}
-          <button style={{ ...primaryBtn, fontSize: 13, padding: "8px 14px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setShowAddItem(true); }}>+ Add</button>
+          {otherEvents.length > 0 && <button style={{ ...ghostBtn, fontSize: m ? 13 : 12, padding: m ? "8px 12px" : "7px 14px" }} onClick={() => { setCopyEventId(otherEvents[0].id); setShowCopy(true); }}>Copy</button>}
+          <button style={{ ...primaryBtn, fontSize: m ? 13 : 13, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setShowAddItem(true); }}>+ Add Item</button>
         </div>
       </div>
 
       {Object.keys(grouped).length === 0 && (
-        <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
-          No items yet — tap + Add or Copy from another event
+        <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+          No items yet — add from inventory or copy from another event
         </div>
       )}
 
@@ -752,29 +818,50 @@ function EventDetail({ event, events, setEvents, items, eventPacking, packing, s
           <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>{cat}</div>
           <div className="card" style={{ overflow: "hidden" }}>
             {entries.map((entry, i) => (
-              <div key={entry.id} style={{ padding: "14px 16px", borderBottom: i < entries.length - 1 ? "1px solid #f3f4f6" : "none" }}>
-                {/* Item name + qty */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 500, fontSize: 15, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
-                    <span style={{ fontSize: 13, color: "#9ca3af", marginLeft: 6 }}>×{entry.qty_needed}</span>
-                    {entry.item.notes && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
+              <div key={entry.id} style={{ padding: m ? "14px 16px" : "12px 16px", borderBottom: i < entries.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                {m ? (
+                  // Mobile: stacked with big tap targets
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 500, fontSize: 15, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
+                        <span style={{ fontSize: 13, color: "#9ca3af", marginLeft: 6 }}>×{entry.qty_needed}</span>
+                        {entry.item.notes && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
+                      </div>
+                      <button style={{ ...dangerBtn, padding: "6px 10px", marginLeft: 8 }} onClick={() => removeFromList(entry.id)}>✕</button>
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, background: entry.packed ? "#f0fdf4" : "#f8f9fb", borderRadius: 8, padding: "10px 14px", cursor: "pointer", border: `1px solid ${entry.packed ? "#bbf7d0" : "#e5e7eb"}` }}
+                        onClick={() => toggleField(entry, "packed")}>
+                        <div className={`check-box-mobile ${entry.packed ? "checked" : ""}`}>{entry.packed && <Checkmark />}</div>
+                        <span style={{ fontSize: 14, fontWeight: 500, color: entry.packed ? "#15803d" : "#374151" }}>Packed</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, background: entry.returned ? "#f0fdf4" : "#f8f9fb", borderRadius: 8, padding: "10px 14px", cursor: "pointer", border: `1px solid ${entry.returned ? "#bbf7d0" : "#e5e7eb"}` }}
+                        onClick={() => toggleField(entry, "returned")}>
+                        <div className={`check-box-mobile ${entry.returned ? "checked" : ""}`}>{entry.returned && <Checkmark />}</div>
+                        <span style={{ fontSize: 14, fontWeight: 500, color: entry.returned ? "#15803d" : "#374151" }}>Returned</span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  // Desktop: compact inline row
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div className={`check-box-desktop ${entry.packed ? "checked" : ""}`} onClick={() => toggleField(entry, "packed")}>{entry.packed && <Checkmark />}</div>
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>Packed</span>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
+                      <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 8 }}>×{entry.qty_needed}</span>
+                      {entry.item.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>Returned</span>
+                      <div className={`check-box-desktop ${entry.returned ? "checked" : ""}`} onClick={() => toggleField(entry, "returned")}>{entry.returned && <Checkmark />}</div>
+                    </div>
+                    <button style={{ ...dangerBtn, padding: "4px 8px", fontSize: 11 }} onClick={() => removeFromList(entry.id)}>✕</button>
                   </div>
-                  <button style={{ ...dangerBtn, padding: "6px 10px", fontSize: 13, marginLeft: 8 }} onClick={() => removeFromList(entry.id)}>✕</button>
-                </div>
-                {/* Packed / Returned row */}
-                <div style={{ display: "flex", gap: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, background: entry.packed ? "#f0fdf4" : "#f8f9fb", borderRadius: 8, padding: "10px 14px", cursor: "pointer", border: `1px solid ${entry.packed ? "#bbf7d0" : "#e5e7eb"}` }}
-                    onClick={() => toggleField(entry, "packed")}>
-                    <div className={`check-box ${entry.packed ? "checked" : ""}`}>{entry.packed && <Checkmark />}</div>
-                    <span style={{ fontSize: 14, fontWeight: 500, color: entry.packed ? "#15803d" : "#374151" }}>Packed</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, background: entry.returned ? "#f0fdf4" : "#f8f9fb", borderRadius: 8, padding: "10px 14px", cursor: "pointer", border: `1px solid ${entry.returned ? "#bbf7d0" : "#e5e7eb"}` }}
-                    onClick={() => toggleField(entry, "returned")}>
-                    <div className={`check-box ${entry.returned ? "checked" : ""}`}>{entry.returned && <Checkmark />}</div>
-                    <span style={{ fontSize: 14, fontWeight: 500, color: entry.returned ? "#15803d" : "#374151" }}>Returned</span>
-                  </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
@@ -782,26 +869,26 @@ function EventDetail({ event, events, setEvents, items, eventPacking, packing, s
       ))}
 
       {showEdit && (
-        <Modal title="Edit Event" onClose={() => setShowEdit(false)} onSave={saveEdit} saveLabel="Save Changes" saving={saving}>
-          <EventFormFields form={editForm} setForm={setEditForm} />
+        <Modal title="Edit Event" onClose={() => setShowEdit(false)} onSave={saveEdit} saveLabel="Save Changes" saving={saving} isMobile={m}>
+          <EventFormFields form={editForm} setForm={setEditForm} isMobile={m} />
         </Modal>
       )}
 
       {showAddItem && (
-        <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel="Add to List" saving={saving}>
+        <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel="Add to List" saving={saving} isMobile={m}>
           <label style={labelStyle}>Select Item</label>
-          <select value={addItemId} onChange={e => setAddItemId(e.target.value)} style={inputStyle}>
+          <select value={addItemId} onChange={e => setAddItemId(e.target.value)} style={iStyle}>
             {availableToAdd.length === 0 ? <option value="">All items already added</option> : availableToAdd.map(i => <option key={i.id} value={i.id}>{i.name} ({i.category})</option>)}
           </select>
           <label style={labelStyle}>Qty Needed</label>
-          <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={inputStyle} min={1} />
+          <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={iStyle} min={1} />
         </Modal>
       )}
 
       {showCopy && (
-        <Modal title="Copy from Event" onClose={() => setShowCopy(false)} onSave={copyFromEvent} saveLabel="Copy Items" saving={saving}>
+        <Modal title="Copy from Event" onClose={() => setShowCopy(false)} onSave={copyFromEvent} saveLabel="Copy Items" saving={saving} isMobile={m}>
           <label style={labelStyle}>Copy from which event?</label>
-          <select value={copyEventId} onChange={e => setCopyEventId(e.target.value)} style={inputStyle}>
+          <select value={copyEventId} onChange={e => setCopyEventId(e.target.value)} style={iStyle}>
             {otherEvents.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
           <p style={{ fontSize: 13, color: "#6b7280" }}>Items already on this list won't be duplicated. All copied items start as unpacked.</p>

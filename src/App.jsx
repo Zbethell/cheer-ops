@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
 
+const ORG_LOGO_PATH = "org-logo.png";
+const ORG_LOGO_PUBLIC_URL = `${SUPABASE_URL}/storage/v1/object/public/logos/${ORG_LOGO_PATH}`;
+
 const sb = async (path, options = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
@@ -34,8 +37,6 @@ const api = {
   updatePacking: (id, patch) => sb(`packing_list?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePacking: (id) => sb(`packing_list?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
-  getSetting: () => sb("settings"),
-  upsertSetting: (key, value) => sb(`settings?setting_name=eq.${key}`, { method: "PATCH", body: JSON.stringify({ value }), headers: { Prefer: "return=representation" } }),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
@@ -51,6 +52,14 @@ const api = {
     return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
   },
 };
+
+// Check if org logo exists in storage by doing a HEAD request
+async function checkOrgLogoExists() {
+  try {
+    const res = await fetch(`${ORG_LOGO_PUBLIC_URL}?t=${Date.now()}`, { method: "HEAD" });
+    return res.ok ? `${ORG_LOGO_PUBLIC_URL}?t=${Date.now()}` : null;
+  } catch { return null; }
+}
 
 const CATEGORIES = ["AV / Tech", "Signage / Decor", "Apparel / Merch", "Office / Admin", "Competition / Floor", "Other"];
 const STATUS_CONFIG = {
@@ -79,8 +88,6 @@ function parseCSV(text) {
     };
   }).filter(r => r.name);
 }
-
-
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 function Checkmark() {
@@ -153,7 +160,6 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [orgLogo, setOrgLogo] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsSaving, setSettingsSaving] = useState(false);
   const [pendingLogo, setPendingLogo] = useState(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
@@ -161,16 +167,16 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [i, e, p, logoRows] = await Promise.all([
+      const [i, e, p, logoUrl] = await Promise.all([
         api.getItems(),
         api.getEvents(),
         api.getAllPacking(),
-        api.getSetting(),
+        checkOrgLogoExists(),
       ]);
       setItems(i);
       setEvents(e);
       setPacking(p);
-      setOrgLogo(logoRows?.find(r => r.setting_name === "org_logo")?.value || null);
+      setOrgLogo(logoUrl);
       setError(null);
     } catch { setError("Could not connect to database. Make sure your Supabase tables are set up correctly."); }
     finally { setLoading(false); }
@@ -180,15 +186,10 @@ export default function App() {
 
   const openSettings = () => { setPendingLogo(orgLogo); setShowSettings(true); };
 
-  const saveSettings = async () => {
-    setSettingsSaving(true);
-    try {
-      await api.upsertSetting("org_logo", pendingLogo);
-      setOrgLogo(pendingLogo);
-      showToast("Settings saved");
-      setShowSettings(false);
-    } catch { showToast("Error saving settings"); }
-    setSettingsSaving(false);
+  const saveSettings = () => {
+    setOrgLogo(pendingLogo);
+    showToast("Settings saved");
+    setShowSettings(false);
   };
 
   if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading Cheer Ops...</div>;
@@ -244,15 +245,15 @@ export default function App() {
 
       {/* Settings Modal */}
       {showSettings && (
-        <Modal title="Settings" onClose={() => setShowSettings(false)} onSave={saveSettings} saveLabel="Save Settings" saving={settingsSaving}>
+        <Modal title="Settings" onClose={() => setShowSettings(false)} onSave={saveSettings} saveLabel="Done" saving={false}>
           <LogoUpload
             value={pendingLogo}
             onChange={setPendingLogo}
             label="Organization Logo (shown in header for all users)"
             size={56}
-            storageKey="org-logo.png"
+            storageKey={ORG_LOGO_PATH}
           />
-          <p style={{ fontSize: 12, color: "#9ca3af" }}>Upload your logo once and it will appear for everyone on the team automatically.</p>
+          <p style={{ fontSize: 12, color: "#9ca3af" }}>Logo uploads directly to storage and appears for everyone automatically on next page load.</p>
         </Modal>
       )}
 
@@ -490,7 +491,7 @@ function Inventory({ items, setItems, showToast }) {
   );
 }
 
-// ─── Event Form Fields (shared between Add and Edit) ──────────────────────────
+// ─── Event Form Fields ────────────────────────────────────────────────────────
 function EventFormFields({ form, setForm }) {
   return (
     <>
@@ -610,7 +611,6 @@ function EventDetail({ event, events, setEvents, items, eventPacking, packing, s
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
 
-  // Keep editForm in sync if event prop changes
   useEffect(() => {
     setEditForm({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
   }, [event]);

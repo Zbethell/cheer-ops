@@ -35,6 +35,10 @@ const api = {
   updatePacking: (id, patch) => sb(`packing_list?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePacking: (id) => sb(`packing_list?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
+  getCategories: () => sb("categories?order=sort_order,name"),
+  addCategory: (cat) => sb("categories", { method: "POST", body: JSON.stringify(cat) }),
+  updateCategory: (id, patch) => sb(`categories?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteCategory: (id) => sb(`categories?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
@@ -53,7 +57,6 @@ async function checkOrgLogoExists() {
   } catch { return null; }
 }
 
-// ─── Responsive Hook ──────────────────────────────────────────────────────────
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
   useEffect(() => {
@@ -64,14 +67,13 @@ function useIsMobile() {
   return isMobile;
 }
 
-const CATEGORIES = ["AV / Tech", "Signage / Decor", "Apparel / Merch", "Office / Admin", "Competition / Floor", "Other"];
 const STATUS_CONFIG = {
   completed: { label: "Completed", color: "#6b7280", bg: "#f3f4f6" },
   active: { label: "Active", color: "#059669", bg: "#ecfdf5" },
   upcoming: { label: "Upcoming", color: "#2563eb", bg: "#eff6ff" },
 };
 
-function parseCSV(text) {
+function parseCSV(text, categories) {
   const lines = text.trim().split("\n").map(l => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
   const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/['"]/g, ""));
@@ -80,11 +82,12 @@ function parseCSV(text) {
   const qtyIdx = headers.findIndex(h => h.includes("qty") || h.includes("quan"));
   const notesIdx = headers.findIndex(h => h.includes("note"));
   if (nameIdx === -1) return null;
+  const defaultCat = categories[0] || "Other";
   return lines.slice(1).map(line => {
     const cols = line.split(",").map(c => c.trim().replace(/^["']|["']$/g, ""));
     return {
       name: cols[nameIdx] || "",
-      category: catIdx >= 0 ? (cols[catIdx] || CATEGORIES[0]) : CATEGORIES[0],
+      category: catIdx >= 0 ? (cols[catIdx] || defaultCat) : defaultCat,
       qty: qtyIdx >= 0 ? (parseInt(cols[qtyIdx]) || 1) : 1,
       notes: notesIdx >= 0 ? (cols[notesIdx] || "") : "",
     };
@@ -96,18 +99,17 @@ function Checkmark() {
   return <svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-// Modal adapts: bottom sheet on mobile, centered on desktop
-function Modal({ title, onClose, onSave, saveLabel, saving, children, wide, isMobile }) {
+function Modal({ title, onClose, onSave, saveLabel, saving, children, wide, isMobile: m }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 500, padding: isMobile ? 0 : 16 }}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: m ? "flex-end" : "center", justifyContent: "center", zIndex: 500, padding: m ? 0 : 16 }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: "#fff", borderRadius: isMobile ? "16px 16px 0 0" : 10, border: isMobile ? "none" : "1px solid #e5e7eb", width: "100%", maxWidth: wide ? 580 : 440, padding: isMobile ? "20px 20px 32px" : 24, maxHeight: "90vh", overflowY: "auto" }}>
-        {isMobile && <div style={{ width: 36, height: 4, background: "#e5e7eb", borderRadius: 99, margin: "0 auto 18px" }} />}
-        <div style={{ fontWeight: 600, fontSize: isMobile ? 17 : 16, marginBottom: 20 }}>{title}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 14 : 12, marginBottom: 24 }}>{children}</div>
-        <div style={{ display: "flex", gap: 10, justifyContent: isMobile ? "stretch" : "flex-end" }}>
-          <button style={{ ...ghostBtn, ...(isMobile ? { flex: 1, padding: "12px", fontSize: 15 } : {}) }} onClick={onClose}>Cancel</button>
-          <button style={{ ...primaryBtn, ...(isMobile ? { flex: 2, padding: "12px", fontSize: 15 } : {}), opacity: saving ? 0.5 : 1 }} onClick={onSave} disabled={saving}>{saving ? "Saving..." : saveLabel}</button>
+      <div style={{ background: "#fff", borderRadius: m ? "16px 16px 0 0" : 10, border: m ? "none" : "1px solid #e5e7eb", width: "100%", maxWidth: wide ? 580 : 440, padding: m ? "20px 20px 32px" : 24, maxHeight: "90vh", overflowY: "auto" }}>
+        {m && <div style={{ width: 36, height: 4, background: "#e5e7eb", borderRadius: 99, margin: "0 auto 18px" }} />}
+        <div style={{ fontWeight: 600, fontSize: m ? 17 : 16, marginBottom: 20 }}>{title}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 12, marginBottom: 24 }}>{children}</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: m ? "stretch" : "flex-end" }}>
+          <button style={{ ...ghostBtn, ...(m ? { flex: 1, padding: "12px", fontSize: 15 } : {}) }} onClick={onClose}>Cancel</button>
+          <button style={{ ...primaryBtn, ...(m ? { flex: 2, padding: "12px", fontSize: 15 } : {}), opacity: saving ? 0.5 : 1 }} onClick={onSave} disabled={saving}>{saving ? "Saving..." : saveLabel}</button>
         </div>
       </div>
     </div>
@@ -155,12 +157,93 @@ function LogoUpload({ value, onChange, label, size = 64, storageKey }) {
   );
 }
 
+// ─── Category Manager (used inside Settings) ──────────────────────────────────
+function CategoryManager({ categories, setCategories, showToast, isMobile: m }) {
+  const [newName, setNewName] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  const add = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      const created = await api.addCategory({ name: newName.trim(), sort_order: categories.length + 1 });
+      setCategories(prev => [...prev, created[0]]);
+      setNewName("");
+      showToast("Category added");
+    } catch { showToast("Error — name may already exist"); }
+    setSaving(false);
+  };
+
+  const saveEdit = async (id) => {
+    if (!editName.trim()) return;
+    setSaving(true);
+    try {
+      await api.updateCategory(id, { name: editName.trim() });
+      setCategories(prev => prev.map(c => c.id === id ? { ...c, name: editName.trim() } : c));
+      setEditId(null);
+      showToast("Category updated");
+    } catch { showToast("Error — name may already exist"); }
+    setSaving(false);
+  };
+
+  const remove = async (id) => {
+    setSaving(true);
+    try {
+      await api.deleteCategory(id);
+      setCategories(prev => prev.filter(c => c.id !== id));
+      showToast("Category removed");
+    } catch { showToast("Error removing category"); }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Manage Categories</div>
+
+      {/* Existing categories */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        {categories.map((cat, i) => (
+          <div key={cat.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: i < categories.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+            {editId === cat.id ? (
+              <>
+                <input value={editName} onChange={e => setEditName(e.target.value)} style={{ ...iStyle, flex: 1 }}
+                  onKeyDown={e => { if (e.key === "Enter") saveEdit(cat.id); if (e.key === "Escape") setEditId(null); }} autoFocus />
+                <button style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12, opacity: saving ? 0.5 : 1 }} onClick={() => saveEdit(cat.id)} disabled={saving}>Save</button>
+                <button style={{ ...ghostBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditId(null)}>✕</button>
+              </>
+            ) : (
+              <>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{cat.name}</span>
+                <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => { setEditId(cat.id); setEditName(cat.name); }}>Rename</button>
+                <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(cat.id)}>Remove</button>
+              </>
+            )}
+          </div>
+        ))}
+        {categories.length === 0 && <div style={{ padding: "16px", fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No categories yet</div>}
+      </div>
+
+      {/* Add new */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={newName} onChange={e => setNewName(e.target.value)} style={{ ...iStyle, flex: 1 }} placeholder="New category name..."
+          onKeyDown={e => e.key === "Enter" && add()} />
+        <button style={{ ...primaryBtn, opacity: saving ? 0.5 : 1, whiteSpace: "nowrap" }} onClick={add} disabled={saving}>+ Add</button>
+      </div>
+      <p style={{ fontSize: 12, color: "#9ca3af" }}>Removing a category won't delete items in it — they'll still show under their old category name.</p>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const isMobile = useIsMobile();
   const [items, setItems] = useState([]);
   const [events, setEvents] = useState([]);
   const [packing, setPacking] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [view, setView] = useState("dashboard");
@@ -175,8 +258,12 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [i, e, p, logoUrl] = await Promise.all([api.getItems(), api.getEvents(), api.getAllPacking(), checkOrgLogoExists()]);
-      setItems(i); setEvents(e); setPacking(p); setOrgLogo(logoUrl); setError(null);
+      const [i, e, p, cats, logoUrl] = await Promise.all([
+        api.getItems(), api.getEvents(), api.getAllPacking(), api.getCategories(), checkOrgLogoExists()
+      ]);
+      setItems(i); setEvents(e); setPacking(p);
+      setCategories(cats);
+      setOrgLogo(logoUrl); setError(null);
     } catch { setError("Could not connect to database."); }
     finally { setLoading(false); }
   }, []);
@@ -184,6 +271,8 @@ export default function App() {
   useEffect(() => { loadAll(); }, [loadAll]);
 
   const saveSettings = () => { setOrgLogo(pendingLogo); showToast("Settings saved"); setShowSettings(false); };
+
+  const categoryNames = categories.map(c => c.name);
 
   if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading Cheer Ops...</div>;
   if (error) return (
@@ -220,6 +309,7 @@ export default function App() {
         .check-box-mobile.checked { background: #1a1a2e; border-color: #1a1a2e; }
         .check-box-desktop { width: 18px; height: 18px; border: 2px solid #d1d5db; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
         .check-box-desktop.checked { background: #1a1a2e; border-color: #1a1a2e; }
+        .settings-section { border-top: 1px solid #f3f4f6; padding-top: 20px; margin-top: 4px; }
       `}</style>
 
       {/* Header */}
@@ -228,7 +318,6 @@ export default function App() {
           ? <img src={orgLogo} alt="logo" style={{ height: m ? 30 : 36, width: "auto", objectFit: "contain", marginRight: m ? 4 : 8 }} />
           : <span style={{ fontWeight: 600, fontSize: m ? 15 : 16, marginRight: 4, letterSpacing: "-0.3px" }}>⭐ Cheer Ops</span>
         }
-        {/* Desktop nav */}
         {!m && <>
           <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
           <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>
@@ -241,12 +330,12 @@ export default function App() {
       {/* Page */}
       <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
         {view === "dashboard" && <Dashboard isMobile={m} items={items} events={events} packing={packing} setView={setView} setSelectedEventId={setSelectedEventId} />}
-        {view === "inventory" && <Inventory isMobile={m} items={items} setItems={setItems} showToast={showToast} />}
+        {view === "inventory" && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} showToast={showToast} />}
         {view === "events" && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
         {view === "event-detail" && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} setView={setView} showToast={showToast} />}
       </div>
 
-      {/* Mobile bottom tab bar */}
+      {/* Mobile tab bar */}
       {m && (
         <nav className="tab-bar">
           <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}><span className="tab-icon">🏠</span>Dashboard</button>
@@ -255,11 +344,14 @@ export default function App() {
         </nav>
       )}
 
-      {/* Settings */}
+      {/* Settings Modal */}
       {showSettings && (
-        <Modal title="Settings" onClose={() => setShowSettings(false)} onSave={saveSettings} saveLabel="Done" saving={false} isMobile={m}>
+        <Modal title="Settings" onClose={() => setShowSettings(false)} onSave={saveSettings} saveLabel="Done" saving={false} isMobile={m} wide>
           <LogoUpload value={pendingLogo} onChange={setPendingLogo} label="Organization Logo" size={56} storageKey={ORG_LOGO_PATH} />
-          <p style={{ fontSize: 12, color: "#9ca3af" }}>Logo uploads to storage and appears for everyone on next page load.</p>
+          <p style={{ fontSize: 12, color: "#9ca3af", marginTop: -4 }}>Logo uploads to storage and appears for everyone on next page load.</p>
+          <div className="settings-section">
+            <CategoryManager categories={categories} setCategories={setCategories} showToast={showToast} isMobile={m} />
+          </div>
         </Modal>
       )}
 
@@ -282,7 +374,6 @@ function Dashboard({ isMobile: m, items, events, packing, setView, setSelectedEv
         <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Dashboard</h1>
         <p style={{ color: "#6b7280", fontSize: 14 }}>Your season at a glance</p>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: m ? 10 : 16 }}>
         {[
           { label: m ? "Items" : "Total Items", value: items.length, sub: "in master inventory" },
@@ -296,7 +387,6 @@ function Dashboard({ isMobile: m, items, events, packing, setView, setSelectedEv
           </div>
         ))}
       </div>
-
       {activeEvent && (
         <div className="card" style={{ padding: m ? 14 : 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -313,7 +403,8 @@ function Dashboard({ isMobile: m, items, events, packing, setView, setSelectedEv
           {packingProgress !== null && (
             <div style={{ marginBottom: m ? 12 : 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6b7280", marginBottom: 5 }}>
-                <span>Packing progress</span><span>{m ? `${packingProgress}%` : `${activePacking.filter(p => p.packed).length} / ${activePacking.length} packed`}</span>
+                <span>Packing progress</span>
+                <span>{m ? `${packingProgress}%` : `${activePacking.filter(p => p.packed).length} / ${activePacking.length} packed`}</span>
               </div>
               <div style={{ background: "#f3f4f6", borderRadius: 99, height: 8, overflow: "hidden" }}>
                 <div style={{ width: `${packingProgress}%`, background: "#1a1a2e", height: "100%", borderRadius: 99, transition: "width 0.3s" }} />
@@ -323,40 +414,38 @@ function Dashboard({ isMobile: m, items, events, packing, setView, setSelectedEv
           {m && <button style={{ ...primaryBtn, width: "100%", padding: "12px", marginTop: 4 }} onClick={() => { setSelectedEventId(activeEvent.id); setView("event-detail"); }}>Open Packing List →</button>}
         </div>
       )}
-
       {upcomingEvents.length > 0 && (
         <div className="card" style={{ padding: m ? 0 : 20 }}>
-          {!m && <div style={{ fontWeight: 600, marginBottom: 14, fontSize: 14 }}>Upcoming Events</div>}
-          {m && <div style={{ padding: "14px 16px 10px", fontWeight: 600, fontSize: 14, borderBottom: "1px solid #f3f4f6" }}>Upcoming Events</div>}
+          {m
+            ? <div style={{ padding: "14px 16px 10px", fontWeight: 600, fontSize: 14, borderBottom: "1px solid #f3f4f6" }}>Upcoming Events</div>
+            : <div style={{ fontWeight: 600, marginBottom: 14, fontSize: 14 }}>Upcoming Events</div>
+          }
           {upcomingEvents.map((e, i) => (
-            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: m ? "12px 16px" : "0 0 10px", marginBottom: !m && i < upcomingEvents.length - 1 ? 10 : 0, borderBottom: (m ? true : i < upcomingEvents.length - 1) ? "1px solid #f3f4f6" : "none", cursor: m ? "pointer" : "default" }}
+            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: m ? "12px 16px" : "0 0 10px", marginBottom: !m && i < upcomingEvents.length - 1 ? 10 : 0, borderBottom: (m || i < upcomingEvents.length - 1) ? "1px solid #f3f4f6" : "none", cursor: m ? "pointer" : "default" }}
               onClick={m ? () => { setSelectedEventId(e.id); setView("event-detail"); } : undefined}>
               {e.logo_url && <img src={e.logo_url} alt="" style={{ width: 32, height: 32, objectFit: "contain", borderRadius: 5, border: "1px solid #e5e7eb", flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: m ? 14 : 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>
+                <div style={{ fontWeight: 500, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>{e.location} · {e.date}</div>
               </div>
-              {m
-                ? <span style={{ color: "#9ca3af", fontSize: 18 }}>›</span>
-                : <button style={ghostBtn} onClick={() => { setSelectedEventId(e.id); setView("event-detail"); }}>View Packing List</button>
-              }
+              {m ? <span style={{ color: "#9ca3af", fontSize: 18 }}>›</span>
+                : <button style={ghostBtn} onClick={() => { setSelectedEventId(e.id); setView("event-detail"); }}>View Packing List</button>}
             </div>
           ))}
         </div>
       )}
-
       {events.length === 0 && <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet — go to Events to add your season schedule</div>}
     </div>
   );
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-function Inventory({ isMobile: m, items, setItems, showToast }) {
+function Inventory({ isMobile: m, items, setItems, categories, showToast }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("All");
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [form, setForm] = useState({ name: "", category: CATEGORIES[0], qty: 1, notes: "" });
+  const [form, setForm] = useState({ name: "", category: categories[0] || "", qty: 1, notes: "" });
   const [saving, setSaving] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [csvText, setCsvText] = useState("");
@@ -366,7 +455,7 @@ function Inventory({ isMobile: m, items, setItems, showToast }) {
   const fileRef = useRef();
 
   const filtered = items.filter(i => (filterCat === "All" || i.category === filterCat) && i.name.toLowerCase().includes(search.toLowerCase()));
-  const openAdd = () => { setForm({ name: "", category: CATEGORIES[0], qty: 1, notes: "" }); setEditItem(null); setShowModal(true); };
+  const openAdd = () => { setForm({ name: "", category: categories[0] || "", qty: 1, notes: "" }); setEditItem(null); setShowModal(true); };
   const openEdit = (item) => { setForm({ name: item.name, category: item.category, qty: item.qty, notes: item.notes || "" }); setEditItem(item); setShowModal(true); };
 
   const save = async () => {
@@ -401,7 +490,7 @@ function Inventory({ isMobile: m, items, setItems, showToast }) {
 
   const previewCSV = (text) => {
     setCsvError("");
-    const parsed = parseCSV(text);
+    const parsed = parseCSV(text, categories);
     if (parsed === null) { setCsvError('Could not find a "name" column.'); setCsvPreview(null); return; }
     if (parsed.length === 0) { setCsvError("No rows found."); setCsvPreview(null); return; }
     setCsvPreview(parsed);
@@ -419,7 +508,6 @@ function Inventory({ isMobile: m, items, setItems, showToast }) {
     setImporting(false);
   };
 
-  // Group for mobile
   const grouped = {};
   filtered.forEach(item => {
     if (!grouped[item.category]) grouped[item.category] = [];
@@ -436,51 +524,50 @@ function Inventory({ isMobile: m, items, setItems, showToast }) {
           <p style={{ color: "#6b7280", fontSize: 14 }}>{items.length} items tracked</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={{ ...ghostBtn, fontSize: m ? 13 : 13, padding: m ? "9px 13px" : "7px 14px" }} onClick={() => { setCsvText(""); setCsvPreview(null); setCsvError(""); setShowImport(true); }}>{m ? "Import" : "Import CSV"}</button>
+          <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px" }} onClick={() => { setCsvText(""); setCsvPreview(null); setCsvError(""); setShowImport(true); }}>{m ? "Import" : "Import CSV"}</button>
           <button style={{ ...primaryBtn, padding: m ? "9px 13px" : "8px 16px" }} onClick={openAdd}>+ {m ? "Add" : "Add Item"}</button>
         </div>
       </div>
 
-      {/* Mobile: search + horizontal filter pills */}
-      {m && <>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={iStyle} />
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
-          {["All", ...CATEGORIES].map(c => (
-            <button key={c} onClick={() => setFilterCat(c)} style={{ background: filterCat === c ? "#1a1a2e" : "#fff", color: filterCat === c ? "#fff" : "#374151", border: "1px solid #e5e7eb", borderRadius: 99, padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
-          ))}
-        </div>
-      </>}
-
-      {/* Desktop: search + category dropdown */}
-      {!m && (
+      {m ? (
+        <>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={iStyle} />
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+            {["All", ...categories].map(c => (
+              <button key={c} onClick={() => setFilterCat(c)} style={{ background: filterCat === c ? "#1a1a2e" : "#fff", color: filterCat === c ? "#fff" : "#374151", border: "1px solid #e5e7eb", borderRadius: 99, padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
+            ))}
+          </div>
+        </>
+      ) : (
         <div style={{ display: "flex", gap: 10 }}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={{ ...iStyle, flex: "1 1 160px" }} />
           <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={iStyle}>
-            {["All", ...CATEGORIES].map(c => <option key={c}>{c}</option>)}
+            {["All", ...categories].map(c => <option key={c}>{c}</option>)}
           </select>
         </div>
       )}
 
-      {/* Mobile: grouped list */}
-      {m && Object.entries(grouped).map(([cat, catItems]) => (
-        <div key={cat}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>{cat}</div>
-          <div className="card" style={{ overflow: "hidden" }}>
-            {catItems.map((item, i) => (
-              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < catItems.length - 1 ? "1px solid #f3f4f6" : "none" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 15 }}>{item.name}</div>
-                  <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>Qty: {item.qty}{item.notes ? ` · ${item.notes}` : ""}</div>
-                </div>
-                <button style={{ ...ghostBtn, fontSize: 13, padding: "7px 12px" }} onClick={() => openEdit(item)}>Edit</button>
+      {m ? (
+        <>
+          {Object.entries(grouped).map(([cat, catItems]) => (
+            <div key={cat}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>{cat}</div>
+              <div className="card" style={{ overflow: "hidden" }}>
+                {catItems.map((item, i) => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < catItems.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, fontSize: 15 }}>{item.name}</div>
+                      <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>Qty: {item.qty}{item.notes ? ` · ${item.notes}` : ""}</div>
+                    </div>
+                    <button style={{ ...ghostBtn, fontSize: 13, padding: "7px 12px" }} onClick={() => openEdit(item)}>Edit</button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {/* Desktop: table */}
-      {!m && (
+            </div>
+          ))}
+          {filtered.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No items found</div>}
+        </>
+      ) : (
         <div className="card" style={{ overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
@@ -505,15 +592,14 @@ function Inventory({ isMobile: m, items, setItems, showToast }) {
         </div>
       )}
 
-      {m && filtered.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No items found</div>}
-
-      {/* Add/Edit Modal */}
       {showModal && (
         <Modal title={editItem ? "Edit Item" : "Add Item"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editItem ? "Save Changes" : "Add Item"} saving={saving} isMobile={m}>
           <label style={labelStyle}>Item Name</label>
           <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="e.g. Wireless Microphone" autoFocus />
           <label style={labelStyle}>Category</label>
-          <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={iStyle}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select>
+          <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={iStyle}>
+            {categories.map(c => <option key={c}>{c}</option>)}
+          </select>
           <label style={labelStyle}>Quantity</label>
           <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: Number(e.target.value) }))} style={iStyle} min={1} />
           <label style={labelStyle}>Notes (optional)</label>
@@ -522,12 +608,12 @@ function Inventory({ isMobile: m, items, setItems, showToast }) {
         </Modal>
       )}
 
-      {/* Import Modal */}
       {showImport && (
         <Modal title="Import from CSV" onClose={() => setShowImport(false)} onSave={runImport} saveLabel={`Import ${csvPreview?.length || 0} Items`} saving={importing} wide isMobile={m}>
           <div style={{ background: "#f8f9fb", borderRadius: 8, padding: 12, fontSize: 13 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Column headers:</div>
             <code style={{ fontSize: 12, color: "#6b7280" }}>name, category, qty, notes</code>
+            <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>Available categories: {categories.join(", ")}</div>
           </div>
           <button style={{ ...ghostBtn, width: "100%", padding: "11px" }} onClick={() => fileRef.current.click()}>📂 Upload CSV File</button>
           <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={handleFileUpload} />
@@ -627,7 +713,6 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, setView, 
         </div>
         <button style={{ ...primaryBtn, padding: m ? "9px 14px" : "8px 16px" }} onClick={openAdd}>+ {m ? "Add" : "Add Event"}</button>
       </div>
-
       <div style={{ display: "flex", flexDirection: "column", gap: m ? 10 : 12 }}>
         {sorted.map(e => {
           const ep = packing.filter(p => p.event_id === e.id);
@@ -666,7 +751,6 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, setView, 
         })}
         {events.length === 0 && <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet</div>}
       </div>
-
       {showModal && (
         <Modal title={editEvent ? "Edit Event" : "Add Event"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editEvent ? "Save Changes" : "Create Event"} saving={saving} isMobile={m}>
           <EventFormFields form={form} setForm={setForm} isMobile={m} />
@@ -768,7 +852,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
     <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
       <button style={{ ...ghostBtn, alignSelf: "flex-start", fontSize: m ? 14 : 13 }} onClick={() => setView("events")}>← {m ? "Events" : "Back to Events"}</button>
 
-      {/* Event header card */}
       <div className="card" style={{ padding: m ? 14 : 20 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: total > 0 ? 14 : 0 }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 0 }}>
@@ -798,12 +881,11 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         )}
       </div>
 
-      {/* Packing list header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: m ? 15 : 14, fontWeight: 600 }}>Packing List</div>
         <div style={{ display: "flex", gap: 8 }}>
           {otherEvents.length > 0 && <button style={{ ...ghostBtn, fontSize: m ? 13 : 12, padding: m ? "8px 12px" : "7px 14px" }} onClick={() => { setCopyEventId(otherEvents[0].id); setShowCopy(true); }}>Copy</button>}
-          <button style={{ ...primaryBtn, fontSize: m ? 13 : 13, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setShowAddItem(true); }}>+ Add Item</button>
+          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setShowAddItem(true); }}>+ Add Item</button>
         </div>
       </div>
 
@@ -820,7 +902,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
             {entries.map((entry, i) => (
               <div key={entry.id} style={{ padding: m ? "14px 16px" : "12px 16px", borderBottom: i < entries.length - 1 ? "1px solid #f3f4f6" : "none" }}>
                 {m ? (
-                  // Mobile: stacked with big tap targets
                   <>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -844,7 +925,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                     </div>
                   </>
                 ) : (
-                  // Desktop: compact inline row
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <div className={`check-box-desktop ${entry.packed ? "checked" : ""}`} onClick={() => toggleField(entry, "packed")}>{entry.packed && <Checkmark />}</div>
@@ -873,7 +953,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           <EventFormFields form={editForm} setForm={setEditForm} isMobile={m} />
         </Modal>
       )}
-
       {showAddItem && (
         <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel="Add to List" saving={saving} isMobile={m}>
           <label style={labelStyle}>Select Item</label>
@@ -884,7 +963,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={iStyle} min={1} />
         </Modal>
       )}
-
       {showCopy && (
         <Modal title="Copy from Event" onClose={() => setShowCopy(false)} onSave={copyFromEvent} saveLabel="Copy Items" saving={saving} isMobile={m}>
           <label style={labelStyle}>Copy from which event?</label>

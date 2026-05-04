@@ -34,8 +34,8 @@ const api = {
   updatePacking: (id, patch) => sb(`packing_list?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePacking: (id) => sb(`packing_list?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
-  getSetting: (key) => sb(`settings?key=eq.${key}`),
-  upsertSetting: (key, value) => sb(`settings?key=eq.${key}`, { method: "PATCH", body: JSON.stringify({ value }), headers: { Prefer: "return=representation" } }),
+  getSetting: (key) => sb(`settings?setting_name=eq.${key}`),
+  upsertSetting: (key, value) => sb(`settings?setting_name=eq.${key}`, { method: "PATCH", body: JSON.stringify({ value }), headers: { Prefer: "return=representation" } }),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",

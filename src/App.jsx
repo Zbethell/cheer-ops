@@ -36,6 +36,20 @@ const api = {
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }),
   getSetting: (key) => sb(`settings?key=eq.${key}`),
   upsertSetting: (key, value) => sb(`settings?key=eq.${key}`, { method: "PATCH", body: JSON.stringify({ value }), headers: { Prefer: "return=representation" } }),
+  uploadLogo: async (file, path) => {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": file.type,
+        "x-upsert": "true",
+      },
+      body: file,
+    });
+    if (!res.ok) { const err = await res.text(); throw new Error(err); }
+    return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
+  },
 };
 
 const CATEGORIES = ["AV / Tech", "Signage / Decor", "Apparel / Merch", "Office / Admin", "Competition / Floor", "Other"];
@@ -66,14 +80,7 @@ function parseCSV(text) {
   }).filter(r => r.name);
 }
 
-function fileToBase64(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
-}
+
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 function Checkmark() {
@@ -102,13 +109,19 @@ const ghostBtn = { background: "none", border: "1px solid #e5e7eb", padding: "7p
 const dangerBtn = { background: "none", border: "1px solid #fca5a5", padding: "5px 10px", borderRadius: 6, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" };
 
 // ─── Logo Upload Widget ───────────────────────────────────────────────────────
-function LogoUpload({ value, onChange, label, size = 64 }) {
+function LogoUpload({ value, onChange, label, size = 64, storageKey }) {
   const ref = useRef();
+  const [uploading, setUploading] = useState(false);
   const handle = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const b64 = await fileToBase64(file);
-    onChange(b64);
+    setUploading(true);
+    try {
+      const path = storageKey || `logo-${Date.now()}-${file.name}`;
+      const url = await api.uploadLogo(file, path);
+      onChange(url + "?t=" + Date.now());
+    } catch (err) { alert("Upload failed: " + err.message); }
+    setUploading(false);
   };
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -118,8 +131,10 @@ function LogoUpload({ value, onChange, label, size = 64 }) {
       }
       <div>
         {label && <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>{label}</div>}
-        <button style={ghostBtn} onClick={() => ref.current.click()} type="button">{value ? "Change" : "Upload"} Logo</button>
-        {value && <button style={{ ...dangerBtn, marginLeft: 6 }} onClick={() => onChange(null)} type="button">Remove</button>}
+        <button style={{ ...ghostBtn, opacity: uploading ? 0.5 : 1 }} onClick={() => ref.current.click()} type="button" disabled={uploading}>
+          {uploading ? "Uploading..." : (value ? "Change" : "Upload") + " Logo"}
+        </button>
+        {value && !uploading && <button style={{ ...dangerBtn, marginLeft: 6 }} onClick={() => onChange(null)} type="button">Remove</button>}
         <input ref={ref} type="file" accept="image/*" style={{ display: "none" }} onChange={handle} />
       </div>
     </div>
@@ -235,6 +250,7 @@ export default function App() {
             onChange={setPendingLogo}
             label="Organization Logo (shown in header for all users)"
             size={56}
+            storageKey="org-logo.png"
           />
           <p style={{ fontSize: 12, color: "#9ca3af" }}>Upload your logo once and it will appear for everyone on the team automatically.</p>
         </Modal>

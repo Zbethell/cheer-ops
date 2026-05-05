@@ -545,8 +545,10 @@ function Dashboard({ isMobile: m, items, events, packing, trailers, setView, set
 
   // Warehouse view: calculate qty available per item
   const itemsWithAvailable = items.map(item => {
-    const packedNotReturned = packing.filter(p => p.item_id === item.id && p.packed && !p.returned).length;
-    return { ...item, available: Math.max(0, item.qty - packedNotReturned), out: packedNotReturned };
+    const out = packing
+      .filter(p => p.item_id === item.id && p.packed && !p.returned)
+      .reduce((sum, p) => sum + (p.qty_needed || 1), 0);
+    return { ...item, available: Math.max(0, item.qty - out), out };
   });
   const itemsCurrentlyOut = itemsWithAvailable.filter(i => i.out > 0);
 
@@ -665,7 +667,9 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
 
   // Calculate warehouse availability
   const itemsWithAvailable = items.map(item => {
-    const out = packing.filter(p => p.item_id === item.id && p.packed && !p.returned).length;
+    const out = packing
+      .filter(p => p.item_id === item.id && p.packed && !p.returned)
+      .reduce((sum, p) => sum + (p.qty_needed || 1), 0);
     return { ...item, available: Math.max(0, item.qty - out), out };
   });
 
@@ -1223,7 +1227,9 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                           {/* Qty editor mobile */}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
                             <button style={{ ...ghostBtn, padding: "2px 10px", fontSize: 16, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed - 1)}>−</button>
-                            <span style={{ fontSize: 14, fontWeight: 500, minWidth: 20, textAlign: "center" }}>{entry.qty_needed}</span>
+                            <input type="number" value={entry.qty_needed} min={1}
+                              onChange={e => updateQty(entry, Number(e.target.value))}
+                              style={{ width: 52, textAlign: "center", padding: "5px 6px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit" }} />
                             <button style={{ ...ghostBtn, padding: "2px 10px", fontSize: 16, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed + 1)}>+</button>
                             <span style={{ fontSize: 12, color: "#9ca3af" }}>needed</span>
                           </div>
@@ -1257,7 +1263,9 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                       {/* Qty editor desktop */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <button style={{ ...ghostBtn, padding: "2px 8px", fontSize: 14, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed - 1)}>−</button>
-                        <span style={{ fontSize: 13, fontWeight: 500, minWidth: 20, textAlign: "center" }}>{entry.qty_needed}</span>
+                        <input type="number" value={entry.qty_needed} min={1}
+                          onChange={e => updateQty(entry, Number(e.target.value))}
+                          style={{ width: 46, textAlign: "center", padding: "3px 6px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 13, fontFamily: "inherit" }} />
                         <button style={{ ...ghostBtn, padding: "2px 8px", fontSize: 14, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed + 1)}>+</button>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

@@ -50,9 +50,14 @@ export default function Report() {
 
   useEffect(() => {
     (async () => {
+      // Load org logo
+      try {
+        const logoRes = await fetch(ORG_LOGO_URL, { method: "HEAD" });
+        if (logoRes.ok) setOrgLogo(ORG_LOGO_URL + "?t=" + Date.now());
+      } catch {}
+      // Load events, areas, items
       try {
         const [ev, ar, it] = await Promise.all([api.getActiveEvents(), api.getAreas(), api.getItems()]);
-        // If no active events, get all upcoming too
         const allEvents = ev.length > 0 ? ev : await sb("events?order=date&status=eq.upcoming");
         setEvents(allEvents);
         setAreas(ar);

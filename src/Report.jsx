@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
+const ORG_LOGO_URL = `${SUPABASE_URL}/storage/v1/object/public/logos/org-logo.png`;
 
 const sb = async (path, options = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -35,6 +36,7 @@ const ghostBtn = { background: "none", border: "1px solid #e5e7eb", padding: "12
 
 export default function Report() {
   const [step, setStep] = useState("loading"); // loading | setup | area | items | review | submitted
+  const [orgLogo, setOrgLogo] = useState(null);
   const [events, setEvents] = useState([]);
   const [areas, setAreas] = useState([]);
   const [allItems, setAllItems] = useState([]);
@@ -137,11 +139,12 @@ export default function Report() {
       `}</style>
 
       {/* Header */}
-      <div style={{ background: "#1a1a2e", padding: "16px 20px", display: "flex", alignItems: "center", gap: 12 }}>
-        <div>
-          <div style={{ color: "#fff", fontWeight: 600, fontSize: 17 }}>⭐ Cheer Ops</div>
-          <div style={{ color: "#9ca3af", fontSize: 13 }}>Event Report</div>
-        </div>
+      <div style={{ background: "#1a1a2e", padding: "14px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+        {orgLogo
+          ? <img src={orgLogo} alt="logo" style={{ height: 34, width: "auto", objectFit: "contain" }} />
+          : <div style={{ color: "#fff", fontWeight: 600, fontSize: 17 }}>⭐ Cheer Ops</div>
+        }
+        <div style={{ color: "#9ca3af", fontSize: 13 }}>Event Report</div>
       </div>
 
       <div style={{ maxWidth: 520, margin: "0 auto", padding: "24px 20px 60px" }}>

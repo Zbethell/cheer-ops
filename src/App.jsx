@@ -47,6 +47,16 @@ const api = {
   addEventTrailer: (et) => sb("event_trailers", { method: "POST", body: JSON.stringify(et) }),
   deleteEventTrailer: (id) => sb(`event_trailers?id=eq.${id}`, { method: "DELETE" }),
   deleteEventTrailersByEvent: (eventId) => sb(`event_trailers?event_id=eq.${eventId}`, { method: "DELETE" }),
+  getAreas: () => sb("areas?order=sort_order"),
+  getAreaItems: () => sb("area_items"),
+  addAreaItem: (ai) => sb("area_items", { method: "POST", body: JSON.stringify(ai) }),
+  updateAreaItem: (id, patch) => sb(`area_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteAreaItem: (id) => sb(`area_items?id=eq.${id}`, { method: "DELETE" }),
+  addArea: (a) => sb("areas", { method: "POST", body: JSON.stringify(a) }),
+  updateArea: (id, patch) => sb(`areas?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteArea: (id) => sb(`areas?id=eq.${id}`, { method: "DELETE" }),
+  getReports: () => sb("event_reports?order=submitted_at.desc"),
+  getReportItems: () => sb("report_items"),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
@@ -415,6 +425,10 @@ export default function App() {
   const [packing, setPacking] = useState([]);
   const [categories, setCategories] = useState([]);
   const [trailers, setTrailers] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [areaItems, setAreaItems] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [reportItems, setReportItems] = useState([]);
   const [eventTrailers, setEventTrailers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -430,13 +444,15 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [i, e, p, cats, tr, et, logoUrl] = await Promise.all([
+      const [i, e, p, cats, tr, et, ar, ai, rp, ri, logoUrl] = await Promise.all([
         api.getItems(), api.getEvents(), api.getAllPacking(),
         api.getCategories(), api.getTrailers(), api.getEventTrailers(),
+        api.getAreas(), api.getAreaItems(), api.getReports(), api.getReportItems(),
         checkOrgLogoExists()
       ]);
       setItems(i); setEvents(e); setPacking(p);
       setCategories(cats); setTrailers(tr); setEventTrailers(et);
+      setAreas(ar); setAreaItems(ai); setReports(rp); setReportItems(ri);
       setOrgLogo(logoUrl); setError(null);
     } catch { setError("Could not connect to database."); }
     finally { setLoading(false); }
@@ -497,6 +513,7 @@ export default function App() {
           <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
           <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>
           <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>
+          <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>
         </>}
         <div style={{ flex: 1 }} />
         <button style={{ background: "none", border: "none", fontSize: 20, padding: "8px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>
@@ -507,6 +524,7 @@ export default function App() {
         {view === "inventory" && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
         {view === "events" && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
         {view === "event-detail" && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} showToast={showToast} />}
+        {view === "reports" && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
       </div>
 
       {m && (
@@ -514,6 +532,7 @@ export default function App() {
           <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}><span className="tab-icon">🏠</span>Dashboard</button>
           <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>
           <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>
+          <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>
         </nav>
       )}
 
@@ -1376,6 +1395,331 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           </select>
           <p style={{ fontSize: 13, color: "#6b7280" }}>Items already on this list won't be duplicated. All copied items start as unpacked.</p>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Reports View (main app) ──────────────────────────────────────────────────
+function Reports({ isMobile: m, reports, setReports, reportItems, events, areas, setAreas, areaItems, setAreaItems, items, setItems, showToast }) {
+  const [activeSection, setActiveSection] = useState("submitted"); // submitted | areas | low-stock
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  // Low stock items
+  const lowStockItems = items.filter(i => i.is_consumable && i.low_threshold > 0 && i.qty <= i.low_threshold);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Reports</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>{reports.length} submitted reports</p>
+        </div>
+        <a href="/report" target="_blank" rel="noopener noreferrer"
+          style={{ ...primaryBtn, textDecoration: "none", display: "inline-block", padding: m ? "9px 13px" : "8px 16px", fontSize: 13 }}>
+          📋 Open Report Form ↗
+        </a>
+      </div>
+
+      {/* Section tabs */}
+      <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+        {[
+          { id: "submitted", label: "Submitted Reports" },
+          { id: "areas", label: "Manage Areas" },
+          { id: "low-stock", label: `⚠ Low Stock${lowStockItems.length > 0 ? ` (${lowStockItems.length})` : ""}` },
+        ].map(s => (
+          <button key={s.id} onClick={() => setActiveSection(s.id)}
+            style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${activeSection === s.id ? "#1a1a2e" : "#e5e7eb"}`, background: activeSection === s.id ? "#1a1a2e" : "#fff", color: activeSection === s.id ? "#fff" : "#374151", whiteSpace: "nowrap" }}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Submitted Reports */}
+      {activeSection === "submitted" && (
+        <SubmittedReports reports={reports} reportItems={reportItems} events={events} areas={areas} items={items} isMobile={m} />
+      )}
+
+      {/* Manage Areas */}
+      {activeSection === "areas" && (
+        <AreaManager areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} isMobile={m} />
+      )}
+
+      {/* Low Stock */}
+      {activeSection === "low-stock" && (
+        <div>
+          {lowStockItems.length === 0 ? (
+            <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+              ✅ All consumables are well stocked
+            </div>
+          ) : (
+            <div className="card" style={{ overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#dc2626" }}>⚠ Items Below Threshold</div>
+                <div style={{ fontSize: 13, color: "#ef4444", marginTop: 2 }}>These consumables need restocking before the next event</div>
+              </div>
+              {lowStockItems.map((item, i) => (
+                <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: i < lowStockItems.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, fontSize: 14 }}>{item.name}</div>
+                    <div style={{ fontSize: 12, color: "#9ca3af" }}>{item.category}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>{item.qty}</div>
+                    <div style={{ fontSize: 12, color: "#9ca3af" }}>threshold: {item.low_threshold}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Submitted Reports ────────────────────────────────────────────────────────
+function SubmittedReports({ reports, reportItems, events, areas, items, isMobile: m }) {
+  const [expandedId, setExpandedId] = useState(null);
+
+  if (reports.length === 0) {
+    return (
+      <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+        No reports submitted yet. Share the report link with your staff after the event.
+      </div>
+    );
+  }
+
+  // Group by event
+  const byEvent = {};
+  reports.forEach(r => {
+    if (!byEvent[r.event_id]) byEvent[r.event_id] = [];
+    byEvent[r.event_id].push(r);
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {Object.entries(byEvent).map(([eventId, eventReports]) => {
+        const event = events.find(e => e.id === eventId);
+        return (
+          <div key={eventId}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+              {event?.name || "Unknown Event"}
+            </div>
+            <div className="card" style={{ overflow: "hidden" }}>
+              {eventReports.map((report, i) => {
+                const area = areas.find(a => a.id === report.area_id);
+                const rItems = reportItems.filter(ri => ri.report_id === report.id);
+                const issues = rItems.filter(ri => ri.had_issue);
+                const isExpanded = expandedId === report.id;
+                return (
+                  <div key={report.id} style={{ borderBottom: i < eventReports.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", cursor: "pointer" }}
+                      onClick={() => setExpandedId(isExpanded ? null : report.id)}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, fontSize: 14 }}>{report.staff_name}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                          {area?.name} · {new Date(report.submitted_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {issues.length > 0 && <span style={{ background: "#fef2f2", color: "#dc2626", padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 500 }}>⚠ {issues.length} issue{issues.length > 1 ? "s" : ""}</span>}
+                        <span style={{ color: "#9ca3af", fontSize: 18 }}>{isExpanded ? "▴" : "▾"}</span>
+                      </div>
+                    </div>
+                    {isExpanded && rItems.length > 0 && (
+                      <div style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                        {rItems.map(ri => {
+                          const item = items.find(i => i.id === ri.item_id);
+                          return (
+                            <div key={ri.id} style={{ background: ri.had_issue ? "#fef2f2" : "#f8f9fb", borderRadius: 8, padding: "10px 12px", border: `1px solid ${ri.had_issue ? "#fecaca" : "#e5e7eb"}` }}>
+                              <div style={{ fontWeight: 500, fontSize: 13 }}>{item?.name || "Unknown item"}</div>
+                              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                                {ri.qty_used > 0 && <span>Used: <strong>{ri.qty_used}</strong></span>}
+                                {ri.qty_remaining !== null && <span>Remaining: <strong>{ri.qty_remaining}</strong></span>}
+                                {ri.had_issue
+                                  ? <span style={{ color: "#dc2626" }}>⚠ Issue</span>
+                                  : <span style={{ color: "#059669" }}>✓ OK</span>}
+                              </div>
+                              {ri.had_issue && ri.issue_notes && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 4, fontStyle: "italic" }}>"{ri.issue_notes}"</div>}
+                            </div>
+                          );
+                        })}
+                        {report.notes && <div style={{ fontSize: 13, color: "#6b7280", fontStyle: "italic" }}>Note: {report.notes}</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Area Manager ─────────────────────────────────────────────────────────────
+function AreaManager({ areas, setAreas, areaItems, setAreaItems, items, setItems, showToast, isMobile: m }) {
+  const [selectedAreaId, setSelectedAreaId] = useState(null);
+  const [showAddArea, setShowAddArea] = useState(false);
+  const [newAreaName, setNewAreaName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  const selectedArea = areas.find(a => a.id === selectedAreaId);
+  const selectedAreaItems = areaItems.filter(ai => ai.area_id === selectedAreaId);
+  const itemsNotInArea = items.filter(i => !selectedAreaItems.find(ai => ai.item_id === i.id));
+
+  const addArea = async () => {
+    if (!newAreaName.trim()) return;
+    setSaving(true);
+    try {
+      const created = await api.addArea({ name: newAreaName.trim(), sort_order: areas.length + 1 });
+      setAreas(prev => [...prev, created[0]]);
+      setNewAreaName(""); setShowAddArea(false);
+      showToast("Area added");
+    } catch { showToast("Error adding area"); }
+    setSaving(false);
+  };
+
+  const deleteArea = async (id) => {
+    try {
+      await api.deleteArea(id);
+      setAreas(prev => prev.filter(a => a.id !== id));
+      setAreaItems(prev => prev.filter(ai => ai.area_id !== id));
+      if (selectedAreaId === id) setSelectedAreaId(null);
+      showToast("Area removed");
+    } catch { showToast("Error removing area"); }
+  };
+
+  const addItemToArea = async (itemId) => {
+    try {
+      const created = await api.addAreaItem({ area_id: selectedAreaId, item_id: itemId, is_consumable: false, low_threshold: 0 });
+      setAreaItems(prev => [...prev, created[0]]);
+      showToast("Item added to area");
+    } catch { showToast("Error adding item"); }
+  };
+
+  const toggleConsumable = async (areaItem) => {
+    try {
+      await api.updateAreaItem(areaItem.id, { is_consumable: !areaItem.is_consumable });
+      setAreaItems(prev => prev.map(ai => ai.id === areaItem.id ? { ...ai, is_consumable: !ai.is_consumable } : ai));
+    } catch { showToast("Error updating"); }
+  };
+
+  const removeItemFromArea = async (id) => {
+    try {
+      await api.deleteAreaItem(id);
+      setAreaItems(prev => prev.filter(ai => ai.id !== id));
+      showToast("Item removed from area");
+    } catch { showToast("Error removing item"); }
+  };
+
+  const updateItemConsumable = async (itemId, isConsumable) => {
+    try {
+      await api.updateItem(itemId, { is_consumable: isConsumable });
+      setItems(prev => prev.map(i => i.id === itemId ? { ...i, is_consumable: isConsumable } : i));
+    } catch { showToast("Error updating item"); }
+  };
+
+  const updateLowThreshold = async (itemId, threshold) => {
+    try {
+      await api.updateItem(itemId, { low_threshold: threshold });
+      setItems(prev => prev.map(i => i.id === itemId ? { ...i, low_threshold: threshold } : i));
+    } catch { showToast("Error updating threshold"); }
+  };
+
+  if (!selectedAreaId) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ fontSize: 14, color: "#6b7280" }}>Select an area to manage its items, or add a new area.</div>
+        <div className="card" style={{ overflow: "hidden" }}>
+          {areas.map((area, i) => (
+            <div key={area.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < areas.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+              <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setSelectedAreaId(area.id)}>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{area.name}</div>
+                <div style={{ fontSize: 12, color: "#9ca3af" }}>{areaItems.filter(ai => ai.area_id === area.id).length} items</div>
+              </div>
+              <button style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px" }} onClick={() => setSelectedAreaId(area.id)}>Manage →</button>
+              <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => deleteArea(area.id)}>Delete</button>
+            </div>
+          ))}
+        </div>
+        {showAddArea ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newAreaName} onChange={e => setNewAreaName(e.target.value)} style={{ ...iStyle, flex: 1 }} placeholder="New area name..." autoFocus onKeyDown={e => e.key === "Enter" && addArea()} />
+            <button style={{ ...primaryBtn, width: "auto", padding: "8px 16px" }} onClick={addArea} disabled={saving}>Add</button>
+            <button style={{ ...ghostBtn, width: "auto", padding: "8px 12px" }} onClick={() => setShowAddArea(false)}>✕</button>
+          </div>
+        ) : (
+          <button style={{ ...ghostBtn, width: "100%" }} onClick={() => setShowAddArea(true)}>+ Add New Area</button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button style={{ ...ghostBtn, padding: "7px 12px", fontSize: 13, width: "auto" }} onClick={() => setSelectedAreaId(null)}>← Areas</button>
+        <div style={{ fontWeight: 600, fontSize: 16 }}>{selectedArea?.name}</div>
+      </div>
+
+      <div style={{ fontSize: 13, color: "#6b7280" }}>Items in this area will appear in the staff report form. Mark items as consumable to enable usage tracking.</div>
+
+      {/* Items in area */}
+      {selectedAreaItems.length > 0 && (
+        <div className="card" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "10px 16px", background: "#fafafa", borderBottom: "1px solid #f3f4f6", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Items in this area</div>
+          {selectedAreaItems.map((ai, i) => {
+            const item = items.find(it => it.id === ai.item_id);
+            if (!item) return null;
+            return (
+              <div key={ai.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: i < selectedAreaItems.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{item.name}</div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>{item.category}</div>
+                  {ai.is_consumable && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>Low threshold:</span>
+                      <input type="number" min={0} defaultValue={item.low_threshold || 0}
+                        onBlur={e => updateLowThreshold(item.id, Number(e.target.value))}
+                        style={{ width: 60, padding: "3px 8px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 12, fontFamily: "inherit" }} />
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => toggleConsumable(ai)}
+                  style={{ padding: "5px 10px", borderRadius: 99, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${ai.is_consumable ? "#f59e0b" : "#e5e7eb"}`, background: ai.is_consumable ? "#fef3c7" : "#fff", color: ai.is_consumable ? "#d97706" : "#6b7280", whiteSpace: "nowrap" }}>
+                  {ai.is_consumable ? "🔄 Consumable" : "Equipment"}
+                </button>
+                <button style={{ ...dangerBtn, padding: "5px 8px" }} onClick={() => removeItemFromArea(ai.id)}>✕</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add items to area */}
+      {itemsNotInArea.length > 0 && (
+        <div className="card" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "10px 16px", background: "#fafafa", borderBottom: "1px solid #f3f4f6", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Add Items to Area</div>
+          {itemsNotInArea.map((item, i) => (
+            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: i < itemsNotInArea.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{item.name}</div>
+                <div style={{ fontSize: 12, color: "#9ca3af" }}>{item.category}</div>
+              </div>
+              <button style={{ ...primaryBtn, width: "auto", padding: "6px 12px", fontSize: 12 }} onClick={() => addItemToArea(item.id)}>+ Add</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedAreaItems.length === 0 && itemsNotInArea.length === 0 && (
+        <div className="card" style={{ padding: 32, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+          No items in your inventory yet. Add items first then assign them to areas.
+        </div>
       )}
     </div>
   );

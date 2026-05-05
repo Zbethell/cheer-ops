@@ -1067,6 +1067,14 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
     } catch { showToast("Error updating qty"); }
   };
 
+  const assignTrailerToItem = async (entry, trailerId) => {
+    const val = trailerId === entry.trailer_id ? null : trailerId;
+    try {
+      await api.updatePacking(entry.id, { trailer_id: val });
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, trailer_id: val } : p));
+    } catch { showToast("Error assigning trailer"); }
+  };
+
   const removeFromList = async (entryId) => {
     try { await api.deletePacking(entryId); setPacking(prev => prev.filter(p => p.id !== entryId)); }
     catch { showToast("Error removing"); }
@@ -1222,7 +1230,16 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <span style={{ fontWeight: 500, fontSize: 15, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
-                          {entryTrailer && <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 8 }}>🚛 {entryTrailer.number}</span>}
+                          {assignedTrailers.length > 0 && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                              {assignedTrailers.map(t => (
+                                <button key={t.id} onClick={() => assignTrailerToItem(entry, t.id)}
+                                  style={{ padding: "4px 10px", borderRadius: 99, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${entry.trailer_id === t.id ? "#1a1a2e" : "#e5e7eb"}`, background: entry.trailer_id === t.id ? "#1a1a2e" : "#fff", color: entry.trailer_id === t.id ? "#fff" : "#6b7280" }}>
+                                  🚛 {t.number}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           {entry.item.notes && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
                           {/* Qty editor mobile */}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
@@ -1257,7 +1274,16 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ fontSize: 14, fontWeight: 500, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
-                        {entryTrailer && <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 8 }}>🚛 {entryTrailer.number}</span>}
+                        {assignedTrailers.length > 0 && (
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            {assignedTrailers.map(t => (
+                              <button key={t.id} onClick={() => assignTrailerToItem(entry, t.id)}
+                                style={{ padding: "3px 9px", borderRadius: 99, fontSize: 11, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${entry.trailer_id === t.id ? "#1a1a2e" : "#e5e7eb"}`, background: entry.trailer_id === t.id ? "#1a1a2e" : "#fff", color: entry.trailer_id === t.id ? "#fff" : "#6b7280" }}>
+                                🚛 {t.number}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {entry.item.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
                       </div>
                       {/* Qty editor desktop */}

@@ -1003,6 +1003,7 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 // ─── Event Detail ─────────────────────────────────────────────────────────────
 function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, eventTrailers, setEventTrailers, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
+  const [showDiagram, setShowDiagram] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [addItemId, setAddItemId] = useState("");
   const [addQty, setAddQty] = useState(1);
@@ -1180,7 +1181,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
 
       {/* Trailer tabs */}
       {assignedTrailers.length > 0 && (
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2, alignItems: "center" }}>
           <button className={`trailer-tab ${activeTab === "all" ? "active" : ""}`} onClick={() => setActiveTab("all")}>All Items</button>
           {assignedTrailers.map(t => (
             <button key={t.id} className={`trailer-tab ${activeTab === t.id ? "active" : ""}`} onClick={() => setActiveTab(t.id)}>
@@ -1188,11 +1189,17 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
             </button>
           ))}
           <button className={`trailer-tab ${activeTab === "unassigned" ? "active" : ""}`} onClick={() => setActiveTab("unassigned")}>Unassigned</button>
+          {activeTrailer && (
+            <button onClick={() => setShowDiagram(d => !d)}
+              style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: showDiagram ? "#1a1a2e" : "#fff", color: showDiagram ? "#fff" : "#374151", whiteSpace: "nowrap", flexShrink: 0 }}>
+              {showDiagram ? "Hide Diagram" : "Show Diagram"}
+            </button>
+          )}
         </div>
       )}
 
       {/* Trailer diagram */}
-      {activeTrailer && (
+      {activeTrailer && showDiagram && (
         <TrailerDiagram
           trailer={activeTrailer}
           packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id) }))}

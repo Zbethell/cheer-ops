@@ -1481,8 +1481,22 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
 // ─── Submitted Reports ────────────────────────────────────────────────────────
 function SubmittedReports({ reports, reportItems, events, areas, items, isMobile: m }) {
   const [expandedId, setExpandedId] = useState(null);
+  const [localReports, setLocalReports] = useState(reports);
 
-  if (reports.length === 0) {
+  // Keep in sync with parent
+  useEffect(() => { setLocalReports(reports); }, [reports]);
+
+  const deleteReport = async (reportId, e) => {
+    e.stopPropagation();
+    if (!window.confirm("Delete this report? This cannot be undone.")) return;
+    try {
+      await sb(`report_items?report_id=eq.${reportId}`, { method: "DELETE" });
+      await sb(`event_reports?id=eq.${reportId}`, { method: "DELETE" });
+      setLocalReports(prev => prev.filter(r => r.id !== reportId));
+    } catch { alert("Error deleting report"); }
+  };
+
+  if (localReports.length === 0) {
     return (
       <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
         No reports submitted yet. Share the report link with your staff after the event.
@@ -1490,45 +1504,68 @@ function SubmittedReports({ reports, reportItems, events, areas, items, isMobile
     );
   }
 
-  // Group by event
+  // Group by event, sorted by most recent event first
   const byEvent = {};
-  reports.forEach(r => {
+  localReports.forEach(r => {
     if (!byEvent[r.event_id]) byEvent[r.event_id] = [];
     byEvent[r.event_id].push(r);
   });
 
+  // Sort events by most recent submission
+  const sortedEventIds = Object.keys(byEvent).sort((a, b) => {
+    const latestA = Math.max(...byEvent[a].map(r => new Date(r.submitted_at)));
+    const latestB = Math.max(...byEvent[b].map(r => new Date(r.submitted_at)));
+    return latestB - latestA;
+  });
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {Object.entries(byEvent).map(([eventId, eventReports]) => {
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {sortedEventIds.map(eventId => {
         const event = events.find(e => e.id === eventId);
+        const eventReports = byEvent[eventId].sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+        const totalIssues = eventReports.reduce((sum, r) => sum + reportItems.filter(ri => ri.report_id === r.id && ri.had_issue).length, 0);
         return (
           <div key={eventId}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
-              {event?.name || "Unknown Event"}
+            {/* Event header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>{event?.name || "Unknown Event"}</div>
+                <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{eventReports.length} report{eventReports.length > 1 ? "s" : ""} submitted</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {totalIssues > 0 && <span style={{ background: "#fef2f2", color: "#dc2626", padding: "4px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600 }}>⚠ {totalIssues} issue{totalIssues > 1 ? "s" : ""}</span>}
+              </div>
             </div>
+
             <div className="card" style={{ overflow: "hidden" }}>
               {eventReports.map((report, i) => {
                 const area = areas.find(a => a.id === report.area_id);
                 const rItems = reportItems.filter(ri => ri.report_id === report.id);
                 const issues = rItems.filter(ri => ri.had_issue);
                 const isExpanded = expandedId === report.id;
+                const submittedDate = new Date(report.submitted_at);
                 return (
                   <div key={report.id} style={{ borderBottom: i < eventReports.length - 1 ? "1px solid #f3f4f6" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", cursor: "pointer" }}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", cursor: "pointer" }}
                       onClick={() => setExpandedId(isExpanded ? null : report.id)}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 500, fontSize: 14 }}>{report.staff_name}</div>
-                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                          {area?.name} · {new Date(report.submitted_at).toLocaleString()}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 15 }}>{report.staff_name}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ background: "#f3f4f6", padding: "2px 8px", borderRadius: 99 }}>{area?.name || "Unknown area"}</span>
+                          <span>{submittedDate.toLocaleDateString()} {submittedDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        {issues.length > 0 && <span style={{ background: "#fef2f2", color: "#dc2626", padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 500 }}>⚠ {issues.length} issue{issues.length > 1 ? "s" : ""}</span>}
-                        <span style={{ color: "#9ca3af", fontSize: 18 }}>{isExpanded ? "▴" : "▾"}</span>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                        {issues.length > 0 && <span style={{ background: "#fef2f2", color: "#dc2626", padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 500 }}>⚠ {issues.length}</span>}
+                        <button style={{ ...dangerBtn, padding: "4px 8px", fontSize: 12 }} onClick={(e) => deleteReport(report.id, e)}>Delete</button>
+                        <span style={{ color: "#9ca3af", fontSize: 16 }}>{isExpanded ? "▴" : "▾"}</span>
                       </div>
                     </div>
-                    {isExpanded && rItems.length > 0 && (
-                      <div style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {isExpanded && (
+                      <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                        {rItems.length === 0 && !report.notes && (
+                          <div style={{ fontSize: 13, color: "#9ca3af", fontStyle: "italic" }}>No item data in this report.</div>
+                        )}
                         {rItems.map(ri => {
                           const item = items.find(i => i.id === ri.item_id);
                           return (
@@ -1539,13 +1576,18 @@ function SubmittedReports({ reports, reportItems, events, areas, items, isMobile
                                 {ri.qty_remaining !== null && <span>Remaining: <strong>{ri.qty_remaining}</strong></span>}
                                 {ri.had_issue
                                   ? <span style={{ color: "#dc2626" }}>⚠ Issue</span>
-                                  : <span style={{ color: "#059669" }}>✓ OK</span>}
+                                  : <span style={{ color: "#059669" }}>✓ No issues</span>}
                               </div>
                               {ri.had_issue && ri.issue_notes && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 4, fontStyle: "italic" }}>"{ri.issue_notes}"</div>}
                             </div>
                           );
                         })}
-                        {report.notes && <div style={{ fontSize: 13, color: "#6b7280", fontStyle: "italic" }}>Note: {report.notes}</div>}
+                        {report.notes && (
+                          <div style={{ background: "#f8f9fb", borderRadius: 8, padding: "10px 12px", border: "1px solid #e5e7eb" }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>GENERAL NOTES</div>
+                            <div style={{ fontSize: 13, color: "#374151" }}>{report.notes}</div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

@@ -47,6 +47,7 @@ export default function Report() {
   const [responses, setResponses] = useState({}); // item_id -> { qty_used, qty_remaining, had_issue, issue_notes }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [generalNotes, setGeneralNotes] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -96,7 +97,7 @@ export default function Report() {
         event_id: selectedEvent.id,
         area_id: selectedArea.id,
         staff_name: staffName.trim(),
-        notes: "",
+        notes: generalNotes,
       });
       const reportId = report[0].id;
 
@@ -244,8 +245,13 @@ export default function Report() {
             </div>
 
             {itemsForArea.length === 0 && (
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
-                Items will be added to this area soon. You can still submit a general report below.
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 20 }}>
+                <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 8 }}>No items assigned to this area yet</div>
+                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 14 }}>You can still submit a general report with any notes or issues from your area.</div>
+                <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 8 }}>General Notes</label>
+                <textarea value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit", resize: "none", height: 100, outline: "none" }}
+                  placeholder="Any issues, observations, or notes from your area..." />
               </div>
             )}
 
@@ -374,7 +380,7 @@ export default function Report() {
             </div>
             <button style={{ ...primaryBtn, marginTop: 16 }} onClick={() => {
               setStep("setup"); setStaffName(""); setSelectedArea(null);
-              setSelectedEvent(null); setResponses({}); setAreaItems([]);
+              setSelectedEvent(null); setResponses({}); setAreaItems([]); setGeneralNotes("");
             }}>Submit Another Report</button>
           </div>
         )}

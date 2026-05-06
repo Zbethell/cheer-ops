@@ -57,6 +57,16 @@ const api = {
   deleteArea: (id) => sb(`areas?id=eq.${id}`, { method: "DELETE" }),
   getReports: () => sb("event_reports?order=submitted_at.desc"),
   getReportItems: () => sb("report_items"),
+  getTechSetups: () => sb("tech_setups?order=created_at"),
+  addTechSetup: (s) => sb("tech_setups", { method: "POST", body: JSON.stringify(s) }),
+  updateTechSetup: (id, patch) => sb(`tech_setups?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  getTechDevices: () => sb("tech_devices?order=created_at"),
+  addTechDevice: (d) => sb("tech_devices", { method: "POST", body: JSON.stringify(d) }),
+  updateTechDevice: (id, patch) => sb(`tech_devices?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteTechDevice: (id) => sb(`tech_devices?id=eq.${id}`, { method: "DELETE" }),
+  getTechConnections: () => sb("tech_connections?order=created_at"),
+  addTechConnection: (c) => sb("tech_connections", { method: "POST", body: JSON.stringify(c) }),
+  deleteTechConnection: (id) => sb(`tech_connections?id=eq.${id}`, { method: "DELETE" }),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
@@ -514,6 +524,7 @@ export default function App() {
           <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>
           <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>
           <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>
+          <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>
         </>}
         <div style={{ flex: 1 }} />
         <button style={{ background: "none", border: "none", fontSize: 20, padding: "8px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>
@@ -525,6 +536,7 @@ export default function App() {
         {view === "events" && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
         {view === "event-detail" && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} showToast={showToast} />}
         {view === "reports" && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
+        {view === "tech" && <TechSetups isMobile={m} events={events} showToast={showToast} />}
       </div>
 
       {m && (
@@ -533,6 +545,7 @@ export default function App() {
           <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>
           <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>
           <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>
+          <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>
         </nav>
       )}
 
@@ -1762,6 +1775,574 @@ function AreaManager({ areas, setAreas, areaItems, setAreaItems, items, setItems
         <div className="card" style={{ padding: 32, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
           No items in your inventory yet. Add items first then assign them to areas.
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tech Setups ──────────────────────────────────────────────────────────────
+
+const DEVICE_TYPES = {
+  router:  { label: "Router",          icon: "🌐", color: "#2563eb" },
+  switch:  { label: "Switch",          icon: "🔀", color: "#7c3aed" },
+  ap:      { label: "Access Point",    icon: "📡", color: "#059669" },
+  ptp:     { label: "Point-to-Point",  icon: "🔗", color: "#d97706" },
+  laptop:  { label: "Laptop",          icon: "💻", color: "#374151" },
+  printer: { label: "Printer",         icon: "🖨️",  color: "#6b7280" },
+  camera:  { label: "Camera",          icon: "📷", color: "#dc2626" },
+};
+
+const CONN_TYPES = {
+  ethernet: { label: "Ethernet",     dash: "0",   color: "#374151" },
+  fiber:    { label: "Fiber",        dash: "8,4", color: "#7c3aed" },
+  ptp:      { label: "P2P Wireless", dash: "4,4", color: "#d97706" },
+  wifi:     { label: "WiFi",         dash: "2,6", color: "#059669" },
+};
+
+function TechSetups({ isMobile: m, events, showToast }) {
+  const [setups, setSetups] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [connections, setConnections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedEventId, setSelectedEventId] = useState("");
+  const [viewMode, setViewMode] = useState("canvas");
+  const [placingType, setPlacingType] = useState(null);
+  const [connectingFrom, setConnectingFrom] = useState(null);
+  const [dragging, setDragging] = useState(null);
+  const [showDeviceModal, setShowDeviceModal] = useState(false);
+  const [pendingPos, setPendingPos] = useState(null);
+  const [showConnModal, setShowConnModal] = useState(false);
+  const [pendingConn, setPendingConn] = useState(null);
+  const [deviceForm, setDeviceForm] = useState({ label: "", network: "main", notes: "" });
+  const [connForm, setConnForm] = useState({ connection_type: "ethernet", label: "" });
+  const [saving, setSaving] = useState(false);
+  const [uploadingFP, setUploadingFP] = useState(false);
+  const canvasRef = useRef();
+  const fpRef = useRef();
+  const didDragRef = useRef(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  useEffect(() => {
+    Promise.all([api.getTechSetups(), api.getTechDevices(), api.getTechConnections()])
+      .then(([s, d, c]) => { setSetups(s); setDevices(d); setConnections(c); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const selectedSetup = setups.find(s => s.event_id === selectedEventId);
+  const setupDevices = selectedSetup ? devices.filter(d => d.setup_id === selectedSetup.id) : [];
+  const setupConns = selectedSetup ? connections.filter(c => c.setup_id === selectedSetup.id) : [];
+  const selectedEvent = events.find(e => e.id === selectedEventId);
+
+  const ensureSetup = async () => {
+    if (selectedSetup) return selectedSetup;
+    const [s] = await api.addTechSetup({ event_id: selectedEventId, notes: "" });
+    setSetups(prev => [...prev, s]);
+    return s;
+  };
+
+  const handleCanvasClick = (e) => {
+    if (didDragRef.current) { didDragRef.current = false; return; }
+    if (!placingType || !selectedEventId) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x_pct = ((e.clientX - rect.left) / rect.width) * 100;
+    const y_pct = ((e.clientY - rect.top) / rect.height) * 100;
+    setPendingPos({ type: placingType, x_pct, y_pct });
+    setDeviceForm({ label: DEVICE_TYPES[placingType].label, network: "main", notes: "" });
+    setShowDeviceModal(true);
+  };
+
+  const saveDevice = async () => {
+    if (!deviceForm.label.trim()) return;
+    setSaving(true);
+    try {
+      const setup = await ensureSetup();
+      const [d] = await api.addTechDevice({
+        setup_id: setup.id, type: pendingPos.type,
+        label: deviceForm.label, x_pct: pendingPos.x_pct, y_pct: pendingPos.y_pct,
+        network: deviceForm.network, notes: deviceForm.notes,
+      });
+      setDevices(prev => [...prev, d]);
+      setShowDeviceModal(false); setPlacingType(null);
+      showToast("Device added");
+    } catch { showToast("Error saving device"); }
+    setSaving(false);
+  };
+
+  const deleteDevice = async (id) => {
+    try {
+      await api.deleteTechDevice(id);
+      const toDelete = connections.filter(c => c.from_device_id === id || c.to_device_id === id);
+      await Promise.all(toDelete.map(c => api.deleteTechConnection(c.id)));
+      setDevices(prev => prev.filter(d => d.id !== id));
+      setConnections(prev => prev.filter(c => c.from_device_id !== id && c.to_device_id !== id));
+      showToast("Device removed");
+    } catch { showToast("Error removing device"); }
+  };
+
+  const handleDeviceClick = (e, deviceId) => {
+    e.stopPropagation();
+    if (didDragRef.current) return;
+    if (placingType) return;
+    if (connectingFrom === null) {
+      setConnectingFrom(deviceId);
+    } else if (connectingFrom === deviceId) {
+      setConnectingFrom(null);
+    } else {
+      const exists = connections.find(c =>
+        (c.from_device_id === connectingFrom && c.to_device_id === deviceId) ||
+        (c.from_device_id === deviceId && c.to_device_id === connectingFrom)
+      );
+      if (exists) { setConnectingFrom(null); showToast("Already connected"); return; }
+      setPendingConn({ from: connectingFrom, to: deviceId });
+      setConnForm({ connection_type: "ethernet", label: "" });
+      setShowConnModal(true);
+      setConnectingFrom(null);
+    }
+  };
+
+  const saveConnection = async () => {
+    setSaving(true);
+    try {
+      const setup = await ensureSetup();
+      const [c] = await api.addTechConnection({
+        setup_id: setup.id, from_device_id: pendingConn.from,
+        to_device_id: pendingConn.to, connection_type: connForm.connection_type, label: connForm.label,
+      });
+      setConnections(prev => [...prev, c]);
+      setShowConnModal(false); showToast("Connection added");
+    } catch { showToast("Error adding connection"); }
+    setSaving(false);
+  };
+
+  const deleteConnection = async (id) => {
+    try {
+      await api.deleteTechConnection(id);
+      setConnections(prev => prev.filter(c => c.id !== id));
+      showToast("Connection removed");
+    } catch { showToast("Error removing connection"); }
+  };
+
+  const startDrag = (e, device) => {
+    if (placingType) return;
+    e.stopPropagation();
+    didDragRef.current = false;
+    const rect = canvasRef.current.getBoundingClientRect();
+    setDragging({ id: device.id, startX: e.clientX, startY: e.clientY, origX: device.x_pct, origY: device.y_pct, rectW: rect.width, rectH: rect.height });
+  };
+
+  const onMouseMove = (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragging.startX;
+    const dy = e.clientY - dragging.startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) didDragRef.current = true;
+    const newX = Math.max(2, Math.min(98, dragging.origX + (dx / dragging.rectW) * 100));
+    const newY = Math.max(2, Math.min(98, dragging.origY + (dy / dragging.rectH) * 100));
+    setDevices(prev => prev.map(d => d.id === dragging.id ? { ...d, x_pct: newX, y_pct: newY } : d));
+  };
+
+  const onMouseUp = async () => {
+    if (!dragging) return;
+    const device = devices.find(d => d.id === dragging.id);
+    if (device && didDragRef.current) {
+      try { await api.updateTechDevice(dragging.id, { x_pct: device.x_pct, y_pct: device.y_pct }); }
+      catch { showToast("Error saving position"); }
+    }
+    setDragging(null);
+  };
+
+  const uploadFloorPlan = async (file) => {
+    setUploadingFP(true);
+    try {
+      const path = `floorplan-${selectedEventId}-${Date.now()}.${file.name.split(".").pop()}`;
+      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
+        method: "POST",
+        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+        body: file,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const url = `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
+      const setup = await ensureSetup();
+      await api.updateTechSetup(setup.id, { floor_plan_url: url });
+      setSetups(prev => prev.map(s => s.id === setup.id ? { ...s, floor_plan_url: url } : s));
+      showToast("Floor plan uploaded");
+    } catch { showToast("Upload failed"); }
+    setUploadingFP(false);
+  };
+
+  const removeFloorPlan = async () => {
+    if (!selectedSetup) return;
+    await api.updateTechSetup(selectedSetup.id, { floor_plan_url: null });
+    setSetups(prev => prev.map(s => s.id === selectedSetup.id ? { ...s, floor_plan_url: null } : s));
+  };
+
+  const buildGuideSteps = () => {
+    const steps = [];
+    const visited = new Set();
+    const inbound = new Set(setupConns.map(c => c.to_device_id));
+    const queue = setupDevices.filter(d => !inbound.has(d.id)).map(d => d.id);
+    while (queue.length) {
+      const id = queue.shift();
+      if (visited.has(id)) continue;
+      visited.add(id);
+      const device = setupDevices.find(d => d.id === id);
+      if (!device) continue;
+      steps.push({ type: "device", device });
+      setupConns.filter(c => c.from_device_id === id).forEach(c => {
+        const to = setupDevices.find(d => d.id === c.to_device_id);
+        if (to) { steps.push({ type: "conn", conn: c, from: device, to }); queue.push(c.to_device_id); }
+      });
+    }
+    setupDevices.filter(d => !visited.has(d.id)).forEach(d => steps.push({ type: "device", device: d }));
+    return steps;
+  };
+
+  const floorPlanUrl = selectedSetup?.floor_plan_url;
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading tech setups...</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}
+      onKeyDown={e => { if (e.key === "Escape") { setPlacingType(null); setConnectingFrom(null); } }} tabIndex={-1}>
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Tech Setups</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>Network diagrams per event</p>
+        </div>
+        {selectedEventId && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={{ ...ghostBtn, background: viewMode === "canvas" ? "#1a1a2e" : "none", color: viewMode === "canvas" ? "#fff" : "#374151" }} onClick={() => setViewMode("canvas")}>Diagram</button>
+            <button style={{ ...ghostBtn, background: viewMode === "guide" ? "#1a1a2e" : "none", color: viewMode === "guide" ? "#fff" : "#374151" }} onClick={() => setViewMode("guide")}>Setup Guide</button>
+          </div>
+        )}
+      </div>
+
+      {/* Event selector */}
+      <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px" }}>
+        <label style={{ ...labelStyle, display: "block", marginBottom: 8 }}>Select Event</label>
+        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setPlacingType(null); setConnectingFrom(null); }} style={iStyle}>
+          <option value="">— Choose an event —</option>
+          {events.map(e => <option key={e.id} value={e.id}>{e.name}{e.date ? ` · ${e.date}` : ""}</option>)}
+        </select>
+      </div>
+
+      {!selectedEventId && (
+        <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+          Select an event above to view or build its network tech setup
+        </div>
+      )}
+
+      {/* ── Diagram view ── */}
+      {selectedEventId && viewMode === "canvas" && (
+        <>
+          {/* Device palette */}
+          <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+              {placingType
+                ? `Placing: ${DEVICE_TYPES[placingType].icon} ${DEVICE_TYPES[placingType].label} — click the diagram`
+                : connectingFrom
+                ? `Connecting from: ${setupDevices.find(d => d.id === connectingFrom)?.label || "?"} — click target device (Esc to cancel)`
+                : "Add devices — pick a type then click the diagram to place it"}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {Object.entries(DEVICE_TYPES).map(([type, cfg]) => (
+                <button key={type}
+                  onClick={() => { setPlacingType(placingType === type ? null : type); setConnectingFrom(null); }}
+                  style={{ padding: "6px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500,
+                    border: `1px solid ${placingType === type ? cfg.color : "#e5e7eb"}`,
+                    background: placingType === type ? cfg.color + "18" : "#fff",
+                    color: placingType === type ? cfg.color : "#374151" }}>
+                  {cfg.icon} {cfg.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: "#9ca3af" }}>Floor plan:</span>
+              <button style={{ ...ghostBtn, fontSize: 12, padding: "5px 10px" }} onClick={() => fpRef.current.click()} disabled={uploadingFP}>
+                {uploadingFP ? "Uploading..." : floorPlanUrl ? "Change Image" : "Upload Image"}
+              </button>
+              {floorPlanUrl && <button style={{ ...dangerBtn, fontSize: 12, padding: "5px 10px" }} onClick={removeFloorPlan}>Remove</button>}
+              {floorPlanUrl && <span style={{ fontSize: 12, color: "#059669" }}>✓ Floor plan loaded</span>}
+              <input ref={fpRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) uploadFloorPlan(e.target.files[0]); e.target.value = ""; }} />
+            </div>
+          </div>
+
+          {/* Canvas */}
+          <div
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+            style={{
+              position: "relative", width: "100%", paddingTop: m ? "75%" : "56.25%",
+              background: "#f1f5f9",
+              backgroundImage: floorPlanUrl ? `url(${floorPlanUrl})` : "none",
+              backgroundSize: "cover", backgroundPosition: "center",
+              borderRadius: 12, border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`,
+              cursor: placingType ? "crosshair" : connectingFrom ? "cell" : "default",
+              overflow: "hidden", userSelect: "none",
+            }}>
+
+            {/* Grid */}
+            {!floorPlanUrl && (
+              <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.25 }}>
+                <defs>
+                  <pattern id="tgrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#64748b" strokeWidth="0.5" />
+                  </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#tgrid)" />
+              </svg>
+            )}
+
+            {/* Floor plan overlay tint */}
+            {floorPlanUrl && <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.12)" }} />}
+
+            {/* Connection lines */}
+            <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
+              {setupConns.map(conn => {
+                const from = setupDevices.find(d => d.id === conn.from_device_id);
+                const to = setupDevices.find(d => d.id === conn.to_device_id);
+                if (!from || !to) return null;
+                const cfg = CONN_TYPES[conn.connection_type] || CONN_TYPES.ethernet;
+                const mx = (from.x_pct + to.x_pct) / 2;
+                const my = (from.y_pct + to.y_pct) / 2;
+                return (
+                  <g key={conn.id}>
+                    <line x1={`${from.x_pct}%`} y1={`${from.y_pct}%`} x2={`${to.x_pct}%`} y2={`${to.y_pct}%`}
+                      stroke={cfg.color} strokeWidth="2.5" strokeDasharray={cfg.dash} opacity="0.85" />
+                    {conn.label && (
+                      <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="-5"
+                        fill={cfg.color} fontSize="10" fontWeight="600"
+                        style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>
+                        {conn.label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+
+            {/* Devices */}
+            {setupDevices.map(device => {
+              const cfg = DEVICE_TYPES[device.type] || DEVICE_TYPES.ap;
+              const netColor = device.network === "photo_video" ? "#ea580c" : "#2563eb";
+              const isFrom = connectingFrom === device.id;
+              return (
+                <div key={device.id}
+                  style={{
+                    position: "absolute", left: `${device.x_pct}%`, top: `${device.y_pct}%`,
+                    transform: "translate(-50%,-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                    cursor: dragging?.id === device.id ? "grabbing" : (connectingFrom !== null && !isFrom) ? "cell" : "grab",
+                    zIndex: dragging?.id === device.id ? 10 : 5,
+                  }}
+                  onMouseDown={e => startDrag(e, device)}
+                  onClick={e => handleDeviceClick(e, device.id)}>
+                  <div style={{
+                    width: m ? 40 : 48, height: m ? 40 : 48, borderRadius: 10, background: "#fff",
+                    border: `2.5px solid ${isFrom ? "#d97706" : netColor}`,
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: m ? 20 : 24,
+                    boxShadow: isFrom ? "0 0 0 3px #d97706aa" : "0 2px 8px rgba(0,0,0,0.15)",
+                  }}>
+                    {cfg.icon}
+                  </div>
+                  <div style={{
+                    background: "rgba(255,255,255,0.93)", borderRadius: 4, padding: "2px 6px",
+                    fontSize: 10, fontWeight: 600, color: "#1a1a2e", maxWidth: 80, textAlign: "center",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.1)", border: `1px solid ${netColor}30`,
+                  }}>
+                    {device.label}
+                  </div>
+                  {device.network === "photo_video" && (
+                    <div style={{ fontSize: 8, color: "#ea580c", fontWeight: 700, background: "#fff7ed", borderRadius: 3, padding: "1px 4px" }}>PV</div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Empty state */}
+            {setupDevices.length === 0 && !placingType && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+                <div style={{ textAlign: "center", color: "#94a3b8" }}>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>📶</div>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>Pick a device type above,</div>
+                  <div style={{ fontSize: 13 }}>then click here to place it</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Legend */}
+          <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px" }}>
+            <div style={{ display: "flex", gap: m ? 16 : 32, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Networks</div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  {[{ label: "Main", color: "#2563eb", bg: "#eff6ff" }, { label: "Photo/Video", color: "#ea580c", bg: "#fff7ed" }].map(n => (
+                    <div key={n.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: 3, border: `2px solid ${n.color}`, background: n.bg }} />{n.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Connections</div>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  {Object.entries(CONN_TYPES).map(([, cfg]) => (
+                    <div key={cfg.label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                      <svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke={cfg.color} strokeWidth="2" strokeDasharray={cfg.dash} /></svg>
+                      {cfg.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
+              Tip: Click a device to start connecting — then click another device to link them. Drag to reposition. Press Esc to cancel.
+            </div>
+          </div>
+
+          {/* Devices list */}
+          {setupDevices.length > 0 && (
+            <div className="card" style={{ overflow: "hidden" }}>
+              <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, borderBottom: "1px solid #f3f4f6", color: "#374151" }}>
+                Devices ({setupDevices.length})
+              </div>
+              {setupDevices.map((d, i) => {
+                const cfg = DEVICE_TYPES[d.type] || DEVICE_TYPES.ap;
+                const netColor = d.network === "photo_video" ? "#ea580c" : "#2563eb";
+                return (
+                  <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: i < setupDevices.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                    <span style={{ fontSize: 18 }}>{cfg.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, fontSize: 14 }}>{d.label}</div>
+                      <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                        {cfg.label}
+                        <span style={{ marginLeft: 6, color: netColor, fontWeight: 500 }}>● {d.network === "photo_video" ? "Photo/Video" : "Main"}</span>
+                        {d.notes && ` · ${d.notes}`}
+                      </div>
+                    </div>
+                    <button style={{ ...dangerBtn, fontSize: 11, padding: "4px 8px" }} onClick={() => deleteDevice(d.id)}>Remove</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Connections list */}
+          {setupConns.length > 0 && (
+            <div className="card" style={{ overflow: "hidden" }}>
+              <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, borderBottom: "1px solid #f3f4f6", color: "#374151" }}>
+                Connections ({setupConns.length})
+              </div>
+              {setupConns.map((conn, i) => {
+                const from = setupDevices.find(d => d.id === conn.from_device_id);
+                const to = setupDevices.find(d => d.id === conn.to_device_id);
+                const cfg = CONN_TYPES[conn.connection_type] || CONN_TYPES.ethernet;
+                return (
+                  <div key={conn.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < setupConns.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                    <svg width="20" height="10" style={{ flexShrink: 0 }}><line x1="0" y1="5" x2="20" y2="5" stroke={cfg.color} strokeWidth="2" strokeDasharray={cfg.dash} /></svg>
+                    <div style={{ flex: 1, fontSize: 13 }}>
+                      <span style={{ fontWeight: 500 }}>{from?.label || "?"}</span>
+                      <span style={{ color: "#9ca3af", margin: "0 6px" }}>→</span>
+                      <span style={{ fontWeight: 500 }}>{to?.label || "?"}</span>
+                      {conn.label && <span style={{ color: "#6b7280", marginLeft: 6 }}>({conn.label})</span>}
+                      <span className="pill" style={{ background: "#f3f4f6", color: "#374151", fontSize: 11, marginLeft: 8 }}>{cfg.label}</span>
+                    </div>
+                    <button style={{ ...dangerBtn, fontSize: 11, padding: "4px 8px" }} onClick={() => deleteConnection(conn.id)}>Remove</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Setup Guide view ── */}
+      {selectedEventId && viewMode === "guide" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px", background: "#f0f9ff", borderColor: "#bae6fd" }}>
+            <div style={{ fontWeight: 600, fontSize: 14, color: "#0369a1", marginBottom: 4 }}>Setup Guide — {selectedEvent?.name}</div>
+            <div style={{ fontSize: 13, color: "#0284c7" }}>Follow these steps in order. Start at the router and work outward through the network.</div>
+          </div>
+          {setupDevices.length === 0 ? (
+            <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+              No devices added yet — switch to Diagram view to build the setup
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {buildGuideSteps().map((step, i) => {
+                if (step.type === "device") {
+                  const cfg = DEVICE_TYPES[step.device.type] || DEVICE_TYPES.ap;
+                  const netColor = step.device.network === "photo_video" ? "#ea580c" : "#2563eb";
+                  return (
+                    <div key={step.device.id} className="card" style={{ padding: m ? "12px 14px" : "14px 16px", display: "flex", gap: 14, alignItems: "flex-start", borderLeft: `4px solid ${netColor}` }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 8, background: netColor + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0, border: `1px solid ${netColor}30` }}>
+                        {cfg.icon}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{step.device.label}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                          {cfg.label} · {step.device.network === "photo_video" ? "Photo/Video Network" : "Main Network"}
+                          {step.device.notes && <span style={{ fontStyle: "italic" }}> · {step.device.notes}</span>}
+                        </div>
+                      </div>
+                      <div style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: 99, padding: "2px 10px", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                        {i + 1}
+                      </div>
+                    </div>
+                  );
+                } else {
+                  const cfg = CONN_TYPES[step.conn.connection_type] || CONN_TYPES.ethernet;
+                  return (
+                    <div key={step.conn.id + "c"} style={{ display: "flex", gap: 12, alignItems: "center", paddingLeft: m ? 14 : 20 }}>
+                      <div style={{ width: 2, background: cfg.color, alignSelf: "stretch", borderRadius: 1, opacity: 0.5, flexShrink: 0 }} />
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "#6b7280", padding: "6px 0", flexWrap: "wrap" }}>
+                        <svg width="18" height="8" style={{ flexShrink: 0 }}><line x1="0" y1="4" x2="18" y2="4" stroke={cfg.color} strokeWidth="2" strokeDasharray={cfg.dash} /></svg>
+                        <span>Connect <strong style={{ color: "#374151" }}>{step.from.label}</strong> → <strong style={{ color: "#374151" }}>{step.to.label}</strong></span>
+                        <span style={{ color: cfg.color, fontSize: 12, fontWeight: 500 }}>{cfg.label}</span>
+                        {step.conn.label && <span style={{ color: "#9ca3af" }}>({step.conn.label})</span>}
+                      </div>
+                    </div>
+                  );
+                }
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add Device modal */}
+      {showDeviceModal && (
+        <Modal title={`Add ${DEVICE_TYPES[pendingPos?.type]?.label || "Device"}`} onClose={() => { setShowDeviceModal(false); setPlacingType(null); }} onSave={saveDevice} saveLabel="Add to Diagram" saving={saving} isMobile={m}>
+          <label style={labelStyle}>Label</label>
+          <input value={deviceForm.label} onChange={e => setDeviceForm(f => ({ ...f, label: e.target.value }))} style={iStyle} placeholder="e.g. Main Router, AP-Stage-Left" autoFocus />
+          <label style={labelStyle}>Network</label>
+          <select value={deviceForm.network} onChange={e => setDeviceForm(f => ({ ...f, network: e.target.value }))} style={iStyle}>
+            <option value="main">Main Network</option>
+            <option value="photo_video">Photo / Video Network</option>
+          </select>
+          <label style={labelStyle}>Notes (optional)</label>
+          <input value={deviceForm.notes} onChange={e => setDeviceForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="e.g. SSID: CheerNet, IP: 192.168.1.1" />
+        </Modal>
+      )}
+
+      {/* Add Connection modal */}
+      {showConnModal && (
+        <Modal title="Add Connection" onClose={() => setShowConnModal(false)} onSave={saveConnection} saveLabel="Add Connection" saving={saving} isMobile={m}>
+          <div style={{ background: "#f8f9fb", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#374151", fontWeight: 500 }}>
+            {setupDevices.find(d => d.id === pendingConn?.from)?.label} → {setupDevices.find(d => d.id === pendingConn?.to)?.label}
+          </div>
+          <label style={labelStyle}>Connection Type</label>
+          <select value={connForm.connection_type} onChange={e => setConnForm(f => ({ ...f, connection_type: e.target.value }))} style={iStyle} autoFocus>
+            {Object.entries(CONN_TYPES).map(([t, cfg]) => <option key={t} value={t}>{cfg.label}</option>)}
+          </select>
+          <label style={labelStyle}>Label (optional)</label>
+          <input value={connForm.label} onChange={e => setConnForm(f => ({ ...f, label: e.target.value }))} style={iStyle} placeholder="e.g. Cat6, Port 3, Channel 6" />
+        </Modal>
       )}
     </div>
   );

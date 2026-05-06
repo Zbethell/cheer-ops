@@ -1997,10 +1997,14 @@ function TechSetups({ isMobile: m, events, showToast }) {
   const [saving, setSaving] = useState(false);
   const [uploadingFP, setUploadingFP] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
   const [iconScale, setIconScale] = useState(1);
+  const viewportRef = useRef();
   const canvasRef = useRef();
   const fpRef = useRef();
   const didDragRef = useRef(false);
+  const panRef = useRef({ active: false, startX: 0, startY: 0, startPanX: 0, startPanY: 0 });
   const iStyle = m ? inputStyleMobile : inputStyle;
 
   useEffect(() => {
@@ -2024,9 +2028,12 @@ function TechSetups({ isMobile: m, events, showToast }) {
   const handleCanvasClick = (e) => {
     if (didDragRef.current) { didDragRef.current = false; return; }
     if (!placingType || !selectedEventId) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x_pct = ((e.clientX - rect.left) / rect.width) * 100;
-    const y_pct = ((e.clientY - rect.top) / rect.height) * 100;
+    const rect = viewportRef.current.getBoundingClientRect();
+    const vx = e.clientX - rect.left;
+    const vy = e.clientY - rect.top;
+    const x_pct = ((vx - panX) / zoom / rect.width) * 100;
+    const y_pct = ((vy - panY) / zoom / rect.height) * 100;
+    if (x_pct < 0 || x_pct > 100 || y_pct < 0 || y_pct > 100) return;
     setPendingPos({ type: placingType, x_pct, y_pct });
     setDeviceForm({ label: DEVICE_TYPES[placingType].label, network: "main", notes: "" });
     setShowDeviceModal(true);
@@ -2107,17 +2114,17 @@ function TechSetups({ isMobile: m, events, showToast }) {
     if (placingType) return;
     e.stopPropagation();
     didDragRef.current = false;
-    const rect = canvasRef.current.getBoundingClientRect();
-    setDragging({ id: device.id, startX: e.clientX, startY: e.clientY, origX: device.x_pct, origY: device.y_pct, rectW: rect.width, rectH: rect.height });
+    const rect = viewportRef.current.getBoundingClientRect();
+    setDragging({ id: device.id, startX: e.clientX, startY: e.clientY, origX: device.x_pct, origY: device.y_pct, viewportW: rect.width, viewportH: rect.height });
   };
 
   const onMouseMove = (e) => {
     if (!dragging) return;
     const dx = e.clientX - dragging.startX;
     const dy = e.clientY - dragging.startY;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) didDragRef.current = true;
-    const newX = Math.max(2, Math.min(98, dragging.origX + (dx / dragging.rectW) * 100));
-    const newY = Math.max(2, Math.min(98, dragging.origY + (dy / dragging.rectH) * 100));
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDragRef.current = true;
+    const newX = Math.max(2, Math.min(98, dragging.origX + (dx / zoom / dragging.viewportW) * 100));
+    const newY = Math.max(2, Math.min(98, dragging.origY + (dy / zoom / dragging.viewportH) * 100));
     setDevices(prev => prev.map(d => d.id === dragging.id ? { ...d, x_pct: newX, y_pct: newY } : d));
   };
 
@@ -2129,6 +2136,40 @@ function TechSetups({ isMobile: m, events, showToast }) {
       catch { showToast("Error saving position"); }
     }
     setDragging(null);
+  };
+
+  const doZoom = (delta) => {
+    const newZoom = Math.min(4, Math.max(1, zoom + delta));
+    if (newZoom === zoom) return;
+    const W = viewportRef.current.offsetWidth;
+    const H = viewportRef.current.offsetHeight;
+    const newPanX = Math.min(0, Math.max(W * (1 - newZoom), W / 2 - (W / 2 - panX) * (newZoom / zoom)));
+    const newPanY = Math.min(0, Math.max(H * (1 - newZoom), H / 2 - (H / 2 - panY) * (newZoom / zoom)));
+    setZoom(newZoom);
+    setPanX(newPanX);
+    setPanY(newPanY);
+  };
+
+  const handleViewportMouseDown = (e) => {
+    if (e.button !== 0 || placingType || !selectedEventId) return;
+    panRef.current = { active: true, startX: e.clientX, startY: e.clientY, startPanX: panX, startPanY: panY };
+  };
+
+  const handleViewportMouseMove = (e) => {
+    if (dragging) { onMouseMove(e); return; }
+    if (!panRef.current.active) return;
+    const dx = e.clientX - panRef.current.startX;
+    const dy = e.clientY - panRef.current.startY;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragRef.current = true;
+    const W = viewportRef.current.offsetWidth;
+    const H = viewportRef.current.offsetHeight;
+    setPanX(Math.min(0, Math.max(W * (1 - zoom), panRef.current.startPanX + dx)));
+    setPanY(Math.min(0, Math.max(H * (1 - zoom), panRef.current.startPanY + dy)));
+  };
+
+  const handleViewportMouseUp = async () => {
+    panRef.current.active = false;
+    if (dragging) await onMouseUp();
   };
 
   const uploadFloorPlan = async (file) => {
@@ -2202,7 +2243,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
       {/* Event selector */}
       <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px" }}>
         <label style={{ ...labelStyle, display: "block", marginBottom: 8 }}>Select Event</label>
-        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setPlacingType(null); setConnectingFrom(null); }} style={iStyle}>
+        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setPlacingType(null); setConnectingFrom(null); setZoom(1); setPanX(0); setPanY(0); }} style={iStyle}>
           <option value="">— Choose an event —</option>
           {events.map(e => <option key={e.id} value={e.id}>{e.name}{e.date ? ` · ${e.date}` : ""}</option>)}
         </select>
@@ -2248,10 +2289,10 @@ function TechSetups({ isMobile: m, events, showToast }) {
               <input ref={fpRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) uploadFloorPlan(e.target.files[0]); e.target.value = ""; }} />
               <span style={{ fontSize: 12, color: "#d1d5db", margin: "0 2px" }}>|</span>
               <span style={{ fontSize: 12, color: "#9ca3af" }}>Zoom:</span>
-              <button onClick={() => setZoom(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))))} style={{ ...ghostBtn, fontSize: 13, padding: "3px 9px" }}>−</button>
+              <button onClick={() => doZoom(-0.5)} style={{ ...ghostBtn, fontSize: 13, padding: "3px 9px" }}>−</button>
               <span style={{ fontSize: 12, fontWeight: 500, minWidth: 38, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom(z => Math.min(3, parseFloat((z + 0.25).toFixed(2))))} style={{ ...ghostBtn, fontSize: 13, padding: "3px 9px" }}>+</button>
-              {zoom !== 1 && <button onClick={() => setZoom(1)} style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontFamily: "inherit" }}>reset</button>}
+              <button onClick={() => doZoom(0.5)} style={{ ...ghostBtn, fontSize: 13, padding: "3px 9px" }}>+</button>
+              {zoom !== 1 && <button onClick={() => { setZoom(1); setPanX(0); setPanY(0); }} style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontFamily: "inherit" }}>reset</button>}
               <span style={{ fontSize: 12, color: "#d1d5db", margin: "0 2px" }}>|</span>
               <span style={{ fontSize: 12, color: "#9ca3af" }}>Icons:</span>
               {[{ label: "S", val: 0.65 }, { label: "M", val: 1 }, { label: "L", val: 1.5 }].map(({ label, val }) => (
@@ -2264,23 +2305,35 @@ function TechSetups({ isMobile: m, events, showToast }) {
           </div>
 
           {/* Canvas */}
-          <div style={{ overflow: "auto", borderRadius: 12, border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`, aspectRatio: m ? "4/3" : "16/9" }}>
+          <div
+            ref={viewportRef}
+            style={{
+              position: "relative", width: "100%", aspectRatio: m ? "4/3" : "16/9",
+              overflow: "hidden", borderRadius: 12, userSelect: "none",
+              border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`,
+              cursor: placingType ? "crosshair" : connectingFrom ? "cell" : zoom > 1 ? "grab" : "default",
+              background: "#f1f5f9",
+            }}
+            onMouseDown={handleViewportMouseDown}
+            onMouseMove={handleViewportMouseMove}
+            onMouseUp={handleViewportMouseUp}
+            onMouseLeave={handleViewportMouseUp}
+            onClick={handleCanvasClick}>
           <div
             ref={canvasRef}
-            onClick={handleCanvasClick}
-            onMouseMove={onMouseMove}
-            onMouseUp={onMouseUp}
-            onMouseLeave={onMouseUp}
             style={{
-              position: "relative", width: `${zoom * 100}%`, paddingTop: `${(m ? 75 : 56.25)}%`,
-              background: "#f1f5f9",
-              backgroundImage: floorPlanUrl ? `url(${floorPlanUrl})` : "none",
-              backgroundSize: "cover", backgroundPosition: "center",
-              cursor: placingType ? "crosshair" : connectingFrom ? "cell" : "default",
-              overflow: "hidden", userSelect: "none",
+              position: "absolute", inset: 0,
+              transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+              transformOrigin: "0 0",
             }}>
 
-            {/* Grid */}
+            {/* Floor plan image */}
+            {floorPlanUrl && (
+              <img src={floorPlanUrl} alt="" draggable={false}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+            )}
+
+            {/* Grid (no floor plan) */}
             {!floorPlanUrl && (
               <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.25 }}>
                 <defs>
@@ -2291,9 +2344,6 @@ function TechSetups({ isMobile: m, events, showToast }) {
                 <rect width="100%" height="100%" fill="url(#tgrid)" />
               </svg>
             )}
-
-            {/* Floor plan overlay tint */}
-            {floorPlanUrl && <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.12)" }} />}
 
             {/* Connection lines */}
             <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
@@ -2399,7 +2449,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
               </div>
             </div>
             <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
-              Tip: Click a device to start connecting — then click another device to link them. Drag to reposition. Press Esc to cancel.
+              Tip: Click a device to start connecting, then click another to link. Drag a device to move it. Drag empty space to pan when zoomed. Esc to cancel.
             </div>
           </div>
 

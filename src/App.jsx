@@ -5,11 +5,13 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const ORG_LOGO_PATH = "org-logo.png";
 const ORG_LOGO_PUBLIC_URL = `${SUPABASE_URL}/storage/v1/object/public/logos/${ORG_LOGO_PATH}`;
 
+let authToken = null;
+
 const sb = async (path, options = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
       "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Authorization": `Bearer ${authToken || SUPABASE_KEY}`,
       "Content-Type": "application/json",
       "Prefer": options.prefer || "return=representation",
       ...options.headers,
@@ -75,6 +77,34 @@ const api = {
     });
     if (!res.ok) { const err = await res.text(); throw new Error(err); }
     return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
+  },
+};
+
+const auth = {
+  signIn: async (email, password) => {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) { const err = await res.json(); throw new Error(err.error_description || "Invalid credentials"); }
+    return res.json();
+  },
+  signOut: async () => {
+    if (!authToken) return;
+    await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken}` },
+    }).catch(() => {});
+  },
+  refresh: async (refreshToken) => {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return null;
+    return res.json();
   },
 };
 
@@ -427,6 +457,65 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
   );
 }
 
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setLoading(true);
+    setError("");
+    try {
+      const session = await auth.signIn(email.trim(), password);
+      onLogin(session);
+    } catch (err) {
+      setError(err.message || "Sign in failed. Check your email and password.");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", fontFamily: "'DM Sans', 'Segoe UI', sans-serif", padding: 24 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
+      <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "40px 36px", width: "100%", maxWidth: 380, boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <img src={ORG_LOGO_PUBLIC_URL} alt="" style={{ height: 52, marginBottom: 14, objectFit: "contain" }}
+            onError={e => { e.target.style.display = "none"; }} />
+          <div style={{ fontWeight: 700, fontSize: 22, color: "#1a1a2e", letterSpacing: "-0.5px" }}>Cheer Ops</div>
+          <div style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>Sign in to continue</div>
+        </div>
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 500, color: "#374151", display: "block", marginBottom: 6 }}>Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              style={{ width: "100%", padding: "11px 14px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit", outline: "none" }}
+              placeholder="you@example.com" autoFocus autoComplete="email" />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 500, color: "#374151", display: "block", marginBottom: 6 }}>Password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+              style={{ width: "100%", padding: "11px 14px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit", outline: "none" }}
+              placeholder="••••••••" autoComplete="current-password" />
+          </div>
+          {error && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#dc2626" }}>
+              {error}
+            </div>
+          )}
+          <button type="submit" disabled={loading}
+            style={{ background: "#1a1a2e", color: "#fff", border: "none", padding: "13px", borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginTop: 4 }}>
+            {loading ? "Signing in..." : "Sign In"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const isMobile = useIsMobile();
@@ -448,6 +537,52 @@ export default function App() {
   const [orgLogo, setOrgLogo] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [pendingLogo, setPendingLogo] = useState(null);
+
+  const [session, setSession] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("sb_session");
+    if (!stored) { setAuthChecked(true); return; }
+    try {
+      const s = JSON.parse(stored);
+      const expiresAt = s.expires_at || 0;
+      if (expiresAt > Math.floor(Date.now() / 1000) + 60) {
+        authToken = s.access_token;
+        setSession(s);
+        setAuthChecked(true);
+      } else {
+        auth.refresh(s.refresh_token).then(fresh => {
+          if (fresh) {
+            const newSession = { ...fresh, expires_at: Math.floor(Date.now() / 1000) + fresh.expires_in };
+            localStorage.setItem("sb_session", JSON.stringify(newSession));
+            authToken = fresh.access_token;
+            setSession(newSession);
+          } else {
+            localStorage.removeItem("sb_session");
+          }
+          setAuthChecked(true);
+        });
+      }
+    } catch {
+      localStorage.removeItem("sb_session");
+      setAuthChecked(true);
+    }
+  }, []);
+
+  const handleLogin = (s) => {
+    const newSession = { ...s, expires_at: Math.floor(Date.now() / 1000) + s.expires_in };
+    localStorage.setItem("sb_session", JSON.stringify(newSession));
+    authToken = s.access_token;
+    setSession(newSession);
+  };
+
+  const handleLogout = async () => {
+    await auth.signOut();
+    localStorage.removeItem("sb_session");
+    authToken = null;
+    setSession(null);
+  };
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
@@ -472,6 +607,9 @@ export default function App() {
 
   const saveSettings = () => { setOrgLogo(pendingLogo); showToast("Settings saved"); setShowSettings(false); };
   const categoryNames = categories.map(c => c.name);
+
+  if (!authChecked) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading...</div>;
+  if (!session) return <LoginScreen onLogin={handleLogin} />;
 
   if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading Cheer Ops...</div>;
   if (error) return (
@@ -527,6 +665,7 @@ export default function App() {
           <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>
         </>}
         <div style={{ flex: 1 }} />
+        {!m && <button style={{ background: "none", border: "none", fontSize: 13, padding: "6px 10px", color: "#9ca3af", cursor: "pointer", fontFamily: "inherit" }} onClick={handleLogout}>Sign out</button>}
         <button style={{ background: "none", border: "none", fontSize: 20, padding: "8px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>
       </div>
 

@@ -70,6 +70,11 @@ const api = {
   getTechConnections: () => sb("tech_connections?order=created_at"),
   addTechConnection: (c) => sb("tech_connections", { method: "POST", body: JSON.stringify(c) }),
   deleteTechConnection: (id) => sb(`tech_connections?id=eq.${id}`, { method: "DELETE" }),
+  getUserPerms: (email) => sb(`user_permissions?email=eq.${encodeURIComponent(email)}&limit=1`),
+  getAllUserPerms: () => sb("user_permissions?order=created_at"),
+  addUserPerm: (p) => sb("user_permissions", { method: "POST", body: JSON.stringify(p) }),
+  updateUserPerm: (id, patch) => sb(`user_permissions?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteUserPerm: (id) => sb(`user_permissions?id=eq.${id}`, { method: "DELETE" }),
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
@@ -541,6 +546,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [userPerms, setUserPerms] = useState({ can_view_tech: false });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -570,6 +576,13 @@ export default function App() {
       setAuthChecked(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!session || session.user.email === ADMIN_EMAIL) return;
+    api.getUserPerms(session.user.email)
+      .then(rows => { if (rows[0]) setUserPerms(rows[0]); })
+      .catch(() => {});
+  }, [session]);
 
   const handleLogin = (s) => {
     const newSession = { ...s, expires_at: Math.floor(Date.now() / 1000) + s.expires_in };
@@ -623,6 +636,7 @@ export default function App() {
   );
 
   const isAdmin = session?.user?.email === ADMIN_EMAIL;
+  const canViewTech = isAdmin || userPerms.can_view_tech;
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -664,7 +678,8 @@ export default function App() {
           <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>
           <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>
           <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>
-          {isAdmin && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
+          {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
+          {isAdmin && <button className={`nav-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}>Users</button>}
         </>}
         <div style={{ flex: 1 }} />
         {!m && <button style={{ background: "none", border: "none", fontSize: 13, padding: "6px 10px", color: "#9ca3af", cursor: "pointer", fontFamily: "inherit" }} onClick={handleLogout}>Sign out</button>}
@@ -677,7 +692,8 @@ export default function App() {
         {view === "events" && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
         {view === "event-detail" && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} showToast={showToast} />}
         {view === "reports" && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
-        {view === "tech" && isAdmin && <TechSetups isMobile={m} events={events} showToast={showToast} />}
+        {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
+        {view === "users" && isAdmin && <UserManagement isMobile={m} showToast={showToast} currentUserEmail={session.user.email} />}
       </div>
 
       {m && (
@@ -686,7 +702,8 @@ export default function App() {
           <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>
           <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>
           <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>
-          {isAdmin && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
+          {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
+          {isAdmin && <button className={`tab-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}><span className="tab-icon">👥</span>Users</button>}
         </nav>
       )}
 
@@ -2483,6 +2500,178 @@ function TechSetups({ isMobile: m, events, showToast }) {
           </select>
           <label style={labelStyle}>Label (optional)</label>
           <input value={connForm.label} onChange={e => setConnForm(f => ({ ...f, label: e.target.value }))} style={iStyle} placeholder="e.g. Cat6, Port 3, Channel 6" />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── User Management ──────────────────────────────────────────────────────────
+function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_tech: false });
+  const [saving, setSaving] = useState(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  useEffect(() => {
+    api.getAllUserPerms()
+      .then(rows => setUsers(rows))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const openAdd = () => {
+    setForm({ email: "", display_name: "", can_view_tech: false });
+    setEditUser(null);
+    setShowModal(true);
+  };
+
+  const openEdit = (user) => {
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_tech: !!user.can_view_tech });
+    setEditUser(user);
+    setShowModal(true);
+  };
+
+  const save = async () => {
+    if (!editUser && !form.email.trim()) return;
+    setSaving(true);
+    try {
+      if (editUser) {
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_tech: form.can_view_tech });
+        setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
+        showToast("User updated");
+      } else {
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_tech: form.can_view_tech });
+        setUsers(prev => [...prev, created]);
+        showToast("User added");
+      }
+      setShowModal(false);
+    } catch (err) {
+      showToast(err.message?.includes("unique") ? "That email is already added" : "Error saving — check the email is correct");
+    }
+    setSaving(false);
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Remove this user's permissions? Their Supabase login account will not be deleted.")) return;
+    try {
+      await api.deleteUserPerm(id);
+      setUsers(prev => prev.filter(u => u.id !== id));
+      showToast("User removed");
+    } catch { showToast("Error removing user"); }
+  };
+
+  const PERM_ROWS = [
+    { key: "dashboard",  label: "Dashboard",             sub: "Event overview and stats",         locked: true },
+    { key: "inventory",  label: "Inventory",             sub: "Master inventory list",             locked: true },
+    { key: "events",     label: "Events & Packing Lists",sub: "Event details and packing",         locked: true },
+    { key: "reports",    label: "Reports",               sub: "Area reports",                      locked: true },
+    { key: "can_view_tech", label: "Tech Setups",        sub: "Network diagrams (admin feature)",  locked: false },
+  ];
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Users</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>Manage who can access CheerOps and what they can see</p>
+        </div>
+        <button style={{ ...primaryBtn, padding: m ? "9px 14px" : "8px 16px" }} onClick={openAdd}>+ Add User</button>
+      </div>
+
+      {/* How-to notice */}
+      <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px", background: "#fffbeb", borderColor: "#fde68a" }}>
+        <div style={{ fontWeight: 600, fontSize: 13, color: "#92400e", marginBottom: 4 }}>Creating new login accounts</div>
+        <div style={{ fontSize: 13, color: "#b45309", lineHeight: 1.5 }}>
+          First create the account in <strong>Supabase Dashboard → Authentication → Users → Add User</strong>, then add their email here to assign permissions.
+        </div>
+      </div>
+
+      {/* Admin card */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div style={{ padding: "8px 16px", fontWeight: 600, fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>Admin</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px" }}>
+          <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 15, flexShrink: 0 }}>
+            {currentUserEmail[0].toUpperCase()}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>You</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{currentUserEmail}</div>
+          </div>
+          <span className="pill" style={{ background: "#1a1a2e", color: "#fff", fontSize: 11, flexShrink: 0 }}>Full Access</span>
+        </div>
+      </div>
+
+      {/* Other users */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div style={{ padding: "8px 16px", fontWeight: 600, fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
+          Users {users.length > 0 && `(${users.length})`}
+        </div>
+        {users.length === 0 ? (
+          <div style={{ padding: "32px 16px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+            No users added yet — click Add User to get started
+          </div>
+        ) : users.map((user, i) => (
+          <div key={user.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < users.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+            <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", color: "#374151", fontWeight: 700, fontSize: 15, flexShrink: 0 }}>
+              {(user.display_name || user.email)[0].toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>{user.display_name || user.email}</div>
+              {user.display_name && <div style={{ fontSize: 12, color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>}
+              <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+                <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Dashboard · Events · Reports</span>
+                {user.can_view_tech && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Tech Setups</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <button style={{ ...ghostBtn, fontSize: 12, padding: "5px 10px" }} onClick={() => openEdit(user)}>Edit</button>
+              <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(user.id)}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal */}
+      {showModal && (
+        <Modal
+          title={editUser ? "Edit User" : "Add User"}
+          onClose={() => setShowModal(false)}
+          onSave={save}
+          saveLabel={editUser ? "Save Changes" : "Add User"}
+          saving={saving}
+          isMobile={m}>
+          {!editUser && (
+            <>
+              <label style={labelStyle}>Email address</label>
+              <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} style={iStyle} type="email" placeholder="user@example.com" autoFocus />
+            </>
+          )}
+          <label style={labelStyle}>Display Name (optional)</label>
+          <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} style={iStyle} placeholder="e.g. Sarah" autoFocus={!!editUser} />
+          <label style={labelStyle}>Permissions</label>
+          <div className="card" style={{ overflow: "hidden" }}>
+            {PERM_ROWS.map((perm, i) => (
+              <div key={perm.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderBottom: i < PERM_ROWS.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>{perm.label}</div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>{perm.sub}</div>
+                </div>
+                {perm.locked ? (
+                  <span style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic", flexShrink: 0 }}>Always on</span>
+                ) : (
+                  <div onClick={() => setForm(f => ({ ...f, [perm.key]: !f[perm.key] }))}
+                    style={{ width: 42, height: 24, borderRadius: 99, cursor: "pointer", flexShrink: 0, background: form[perm.key] ? "#1a1a2e" : "#e5e7eb", position: "relative", transition: "background 0.2s" }}>
+                    <div style={{ position: "absolute", top: 3, left: form[perm.key] ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </Modal>
       )}
     </div>

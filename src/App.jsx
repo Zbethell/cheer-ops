@@ -2264,7 +2264,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
           </div>
 
           {/* Canvas */}
-          <div style={{ overflow: "auto", borderRadius: 12, border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}` }}>
+          <div style={{ overflow: "auto", borderRadius: 12, border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`, aspectRatio: m ? "4/3" : "16/9" }}>
           <div
             ref={canvasRef}
             onClick={handleCanvasClick}

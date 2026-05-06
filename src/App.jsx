@@ -1996,6 +1996,8 @@ function TechSetups({ isMobile: m, events, showToast }) {
   const [connForm, setConnForm] = useState({ connection_type: "ethernet", label: "" });
   const [saving, setSaving] = useState(false);
   const [uploadingFP, setUploadingFP] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [iconScale, setIconScale] = useState(1);
   const canvasRef = useRef();
   const fpRef = useRef();
   const didDragRef = useRef(false);
@@ -2244,10 +2246,25 @@ function TechSetups({ isMobile: m, events, showToast }) {
               {floorPlanUrl && <button style={{ ...dangerBtn, fontSize: 12, padding: "5px 10px" }} onClick={removeFloorPlan}>Remove</button>}
               {floorPlanUrl && <span style={{ fontSize: 12, color: "#059669" }}>✓ Floor plan loaded</span>}
               <input ref={fpRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) uploadFloorPlan(e.target.files[0]); e.target.value = ""; }} />
+              <span style={{ fontSize: 12, color: "#d1d5db", margin: "0 2px" }}>|</span>
+              <span style={{ fontSize: 12, color: "#9ca3af" }}>Zoom:</span>
+              <button onClick={() => setZoom(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))))} style={{ ...ghostBtn, fontSize: 13, padding: "3px 9px" }}>−</button>
+              <span style={{ fontSize: 12, fontWeight: 500, minWidth: 38, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(z => Math.min(3, parseFloat((z + 0.25).toFixed(2))))} style={{ ...ghostBtn, fontSize: 13, padding: "3px 9px" }}>+</button>
+              {zoom !== 1 && <button onClick={() => setZoom(1)} style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontFamily: "inherit" }}>reset</button>}
+              <span style={{ fontSize: 12, color: "#d1d5db", margin: "0 2px" }}>|</span>
+              <span style={{ fontSize: 12, color: "#9ca3af" }}>Icons:</span>
+              {[{ label: "S", val: 0.65 }, { label: "M", val: 1 }, { label: "L", val: 1.5 }].map(({ label, val }) => (
+                <button key={label} onClick={() => setIconScale(val)}
+                  style={{ ...ghostBtn, fontSize: 12, padding: "4px 9px", background: iconScale === val ? "#1a1a2e" : "#fff", color: iconScale === val ? "#fff" : "#374151", border: `1px solid ${iconScale === val ? "#1a1a2e" : "#e5e7eb"}` }}>
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Canvas */}
+          <div style={{ overflow: "auto", borderRadius: 12, border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}` }}>
           <div
             ref={canvasRef}
             onClick={handleCanvasClick}
@@ -2255,11 +2272,10 @@ function TechSetups({ isMobile: m, events, showToast }) {
             onMouseUp={onMouseUp}
             onMouseLeave={onMouseUp}
             style={{
-              position: "relative", width: "100%", paddingTop: m ? "75%" : "56.25%",
+              position: "relative", width: `${zoom * 100}%`, paddingTop: `${(m ? 75 : 56.25)}%`,
               background: "#f1f5f9",
               backgroundImage: floorPlanUrl ? `url(${floorPlanUrl})` : "none",
               backgroundSize: "cover", backgroundPosition: "center",
-              borderRadius: 12, border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`,
               cursor: placingType ? "crosshair" : connectingFrom ? "cell" : "default",
               overflow: "hidden", userSelect: "none",
             }}>
@@ -2309,6 +2325,8 @@ function TechSetups({ isMobile: m, events, showToast }) {
               const cfg = DEVICE_TYPES[device.type] || DEVICE_TYPES.ap;
               const netColor = device.network === "photo_video" ? "#ea580c" : "#2563eb";
               const isFrom = connectingFrom === device.id;
+              const iconPx = Math.round((m ? 40 : 48) * iconScale);
+              const iconFontPx = Math.round((m ? 20 : 24) * iconScale);
               return (
                 <div key={device.id}
                   style={{
@@ -2320,16 +2338,16 @@ function TechSetups({ isMobile: m, events, showToast }) {
                   onMouseDown={e => startDrag(e, device)}
                   onClick={e => handleDeviceClick(e, device.id)}>
                   <div style={{
-                    width: m ? 40 : 48, height: m ? 40 : 48, borderRadius: 10, background: "#fff",
+                    width: iconPx, height: iconPx, borderRadius: Math.round(10 * iconScale), background: "#fff",
                     border: `2.5px solid ${isFrom ? "#d97706" : netColor}`,
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: m ? 20 : 24,
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: iconFontPx,
                     boxShadow: isFrom ? "0 0 0 3px #d97706aa" : "0 2px 8px rgba(0,0,0,0.15)",
                   }}>
                     {cfg.icon}
                   </div>
                   <div style={{
                     background: "rgba(255,255,255,0.93)", borderRadius: 4, padding: "2px 6px",
-                    fontSize: 10, fontWeight: 600, color: "#1a1a2e", maxWidth: 80, textAlign: "center",
+                    fontSize: Math.round(10 * iconScale), fontWeight: 600, color: "#1a1a2e", maxWidth: Math.round(80 * iconScale), textAlign: "center",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                     boxShadow: "0 1px 3px rgba(0,0,0,0.1)", border: `1px solid ${netColor}30`,
                   }}>
@@ -2352,6 +2370,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
                 </div>
               </div>
             )}
+          </div>
           </div>
 
           {/* Legend */}

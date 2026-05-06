@@ -2144,7 +2144,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
       await api.updateTechSetup(setup.id, { floor_plan_url: url });
       setSetups(prev => prev.map(s => s.id === setup.id ? { ...s, floor_plan_url: url } : s));
       showToast("Floor plan uploaded");
-    } catch { showToast("Upload failed"); }
+    } catch (err) { showToast(err.message || "Upload failed"); }
     setUploadingFP(false);
   };
 

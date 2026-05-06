@@ -2295,12 +2295,10 @@ function TechSetups({ isMobile: m, events, showToast }) {
               {zoom !== 1 && <button onClick={() => { setZoom(1); setPanX(0); setPanY(0); }} style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontFamily: "inherit" }}>reset</button>}
               <span style={{ fontSize: 12, color: "#d1d5db", margin: "0 2px" }}>|</span>
               <span style={{ fontSize: 12, color: "#9ca3af" }}>Icons:</span>
-              {[{ label: "S", val: 0.65 }, { label: "M", val: 1 }, { label: "L", val: 1.5 }].map(({ label, val }) => (
-                <button key={label} onClick={() => setIconScale(val)}
-                  style={{ ...ghostBtn, fontSize: 12, padding: "4px 9px", background: iconScale === val ? "#1a1a2e" : "#fff", color: iconScale === val ? "#fff" : "#374151", border: `1px solid ${iconScale === val ? "#1a1a2e" : "#e5e7eb"}` }}>
-                  {label}
-                </button>
-              ))}
+              <input type="range" min="0.3" max="2" step="0.05" value={iconScale}
+                onChange={e => setIconScale(parseFloat(e.target.value))}
+                style={{ width: 80, accentColor: "#1a1a2e", cursor: "pointer" }} />
+              <span style={{ fontSize: 11, color: "#6b7280", minWidth: 28 }}>{Math.round(iconScale * 100)}%</span>
             </div>
           </div>
 

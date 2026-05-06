@@ -546,7 +546,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_tech: false });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_events: true, can_view_reports: true, can_view_tech: false });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -580,7 +580,23 @@ export default function App() {
   useEffect(() => {
     if (!session || session.user.email === ADMIN_EMAIL) return;
     api.getUserPerms(session.user.email)
-      .then(rows => { if (rows[0]) setUserPerms(rows[0]); })
+      .then(rows => {
+        if (!rows[0]) return;
+        const p = rows[0];
+        setUserPerms(p);
+        const ok = (v) => v !== false;
+        setView(cur => {
+          const accessible = [
+            ok(p.can_view_dashboard) && "dashboard",
+            ok(p.can_view_inventory) && "inventory",
+            ok(p.can_view_events) && "events",
+            ok(p.can_view_reports) && "reports",
+            p.can_view_tech && "tech",
+          ].filter(Boolean);
+          const curBase = cur === "event-detail" ? "events" : cur;
+          return accessible.includes(curBase) ? cur : (accessible[0] || cur);
+        });
+      })
       .catch(() => {});
   }, [session]);
 
@@ -636,7 +652,12 @@ export default function App() {
   );
 
   const isAdmin = session?.user?.email === ADMIN_EMAIL;
-  const canViewTech = isAdmin || userPerms.can_view_tech;
+  const ok = (v) => v !== false;
+  const canViewDashboard = isAdmin || ok(userPerms.can_view_dashboard);
+  const canViewInventory = isAdmin || ok(userPerms.can_view_inventory);
+  const canViewEvents    = isAdmin || ok(userPerms.can_view_events);
+  const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
+  const canViewTech      = isAdmin || !!userPerms.can_view_tech;
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -674,10 +695,10 @@ export default function App() {
           : <span style={{ fontWeight: 600, fontSize: m ? 15 : 16, marginRight: 4, letterSpacing: "-0.3px" }}>⭐ Cheer Ops</span>
         }
         {!m && <>
-          <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
-          <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>
-          <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>
-          <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>
+          {canViewDashboard && <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>}
+          {canViewInventory && <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>}
+          {canViewEvents && <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>}
+          {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
           {isAdmin && <button className={`nav-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}>Users</button>}
         </>}
@@ -687,21 +708,21 @@ export default function App() {
       </div>
 
       <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
-        {view === "dashboard" && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
-        {view === "inventory" && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
-        {view === "events" && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} showToast={showToast} />}
-        {view === "reports" && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
+        {view === "dashboard" && canViewDashboard && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
+        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
+        {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
+        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} showToast={showToast} />}
+        {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "users" && isAdmin && <UserManagement isMobile={m} showToast={showToast} currentUserEmail={session.user.email} />}
       </div>
 
       {m && (
         <nav className="tab-bar">
-          <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}><span className="tab-icon">🏠</span>Dashboard</button>
-          <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>
-          <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>
-          <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>
+          {canViewDashboard && <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}><span className="tab-icon">🏠</span>Dashboard</button>}
+          {canViewInventory && <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>}
+          {canViewEvents && <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>}
+          {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
           {isAdmin && <button className={`tab-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}><span className="tab-icon">👥</span>Users</button>}
         </nav>
@@ -2512,7 +2533,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_tech: false });
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_events: true, can_view_reports: true, can_view_tech: false });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -2523,13 +2544,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_tech: false });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_events: true, can_view_reports: true, can_view_tech: false });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_tech: !!user.can_view_tech });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech });
     setEditUser(user);
     setShowModal(true);
   };
@@ -2539,11 +2560,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_tech: form.can_view_tech });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_tech: form.can_view_tech });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -2564,11 +2585,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   };
 
   const PERM_ROWS = [
-    { key: "dashboard",  label: "Dashboard",             sub: "Event overview and stats",         locked: true },
-    { key: "inventory",  label: "Inventory",             sub: "Master inventory list",             locked: true },
-    { key: "events",     label: "Events & Packing Lists",sub: "Event details and packing",         locked: true },
-    { key: "reports",    label: "Reports",               sub: "Area reports",                      locked: true },
-    { key: "can_view_tech", label: "Tech Setups",        sub: "Network diagrams (admin feature)",  locked: false },
+    { key: "can_view_dashboard", label: "Dashboard",              sub: "Event overview and stats"         },
+    { key: "can_view_inventory", label: "Inventory",              sub: "Master inventory list"            },
+    { key: "can_view_events",    label: "Events & Packing Lists", sub: "Event details and packing"        },
+    { key: "can_view_reports",   label: "Reports",                sub: "Area reports"                     },
+    { key: "can_view_tech",      label: "Tech Setups",            sub: "Network diagrams (admin feature)" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
@@ -2624,7 +2645,10 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
               <div style={{ fontWeight: 500, fontSize: 14 }}>{user.display_name || user.email}</div>
               {user.display_name && <div style={{ fontSize: 12, color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>}
               <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
-                <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Dashboard · Events · Reports</span>
+                {user.can_view_dashboard !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Dashboard</span>}
+                {user.can_view_inventory !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Inventory</span>}
+                {user.can_view_events !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Events</span>}
+                {user.can_view_reports !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Reports</span>}
                 {user.can_view_tech && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Tech Setups</span>}
               </div>
             </div>
@@ -2661,14 +2685,10 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
                   <div style={{ fontWeight: 500, fontSize: 13 }}>{perm.label}</div>
                   <div style={{ fontSize: 12, color: "#9ca3af" }}>{perm.sub}</div>
                 </div>
-                {perm.locked ? (
-                  <span style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic", flexShrink: 0 }}>Always on</span>
-                ) : (
-                  <div onClick={() => setForm(f => ({ ...f, [perm.key]: !f[perm.key] }))}
-                    style={{ width: 42, height: 24, borderRadius: 99, cursor: "pointer", flexShrink: 0, background: form[perm.key] ? "#1a1a2e" : "#e5e7eb", position: "relative", transition: "background 0.2s" }}>
-                    <div style={{ position: "absolute", top: 3, left: form[perm.key] ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
-                  </div>
-                )}
+                <div onClick={() => setForm(f => ({ ...f, [perm.key]: !f[perm.key] }))}
+                  style={{ width: 42, height: 24, borderRadius: 99, cursor: "pointer", flexShrink: 0, background: form[perm.key] ? "#1a1a2e" : "#e5e7eb", position: "relative", transition: "background 0.2s" }}>
+                  <div style={{ position: "absolute", top: 3, left: form[perm.key] ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+                </div>
               </div>
             ))}
           </div>

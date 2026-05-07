@@ -158,99 +158,269 @@ function parseCSV(text, categories) {
   }).filter(r => r.name);
 }
 
-// ─── Trailer SVG Diagram ──────────────────────────────────────────────────────
-function TrailerDiagram({ trailer, packingEntries, items }) {
+// ─── Trailer Canvas ────────────────────────────────────────────────────────────
+function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
+  const length = trailer.length_ft || 53;
+  const width = trailer.width_ft || 8;
   const isBarn = trailer.door_type === "barn";
-  const zones = [
-    { id: "FL", label: "Front Left", x: 10, y: 10, w: 80, h: 100 },
-    { id: "FR", label: "Front Right", x: 110, y: 10, w: 80, h: 100 },
-    { id: "ML", label: "Mid Left", x: 10, y: 120, w: 80, h: 100 },
-    { id: "MR", label: "Mid Right", x: 110, y: 120, w: 80, h: 100 },
-    { id: "RL", label: "Rear Left", x: 10, y: 230, w: 80, h: 100 },
-    { id: "RR", label: "Rear Right", x: 110, y: 230, w: 80, h: 100 },
-  ];
+  const FRONT_W = 1;
+  const DOOR_W = 1;
+  const VW = FRONT_W + length + DOOR_W;
+  const VH = width;
 
-  const total = packingEntries.length;
-  const packed = packingEntries.filter(p => p.packed).length;
-  const pct = total > 0 ? Math.round((packed / total) * 100) : 0;
-  const fillColor = pct === 100 ? "#16a34a" : pct > 50 ? "#2563eb" : pct > 0 ? "#f59e0b" : "#e5e7eb";
+  const svgRef = useRef();
+  const [dragging, setDragging] = useState(null);
+  const [localPos, setLocalPos] = useState({});
+  const [selected, setSelected] = useState(null);
+
+  const snap = v => Math.round(v * 2) / 2;
+  const clampX = (x, iw) => Math.max(0, Math.min(length - iw, x));
+  const clampY = (y, ih) => Math.max(0, Math.min(width - ih, y));
+
+  const getItemDims = entry => {
+    const w = entry.item?.dim_w_ft || 2;
+    const d = entry.item?.dim_d_ft || 2;
+    return entry.diag_rotated ? [d, w] : [w, d];
+  };
+
+  const getSvgPt = e => {
+    const rect = svgRef.current.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (VW / rect.width),
+      y: (e.clientY - rect.top) * (VH / rect.height),
+    };
+  };
+
+  const getTouchPt = e => {
+    const t = e.touches[0] || e.changedTouches[0];
+    return getSvgPt({ clientX: t.clientX, clientY: t.clientY });
+  };
+
+  const startDrag = (e, entry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelected(entry.id);
+    const pt = e.touches ? getTouchPt(e) : getSvgPt(e);
+    const cx = localPos[entry.id]?.x ?? entry.diag_x ?? 0;
+    const cy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
+    setDragging({ id: entry.id, sx: pt.x, sy: pt.y, ox: cx, oy: cy });
+  };
+
+  const onMove = e => {
+    if (!dragging) return;
+    const pt = e.touches ? getTouchPt(e) : getSvgPt(e);
+    const entry = packingEntries.find(p => p.id === dragging.id);
+    if (!entry) return;
+    const [iw, ih] = getItemDims(entry);
+    const nx = clampX(snap(dragging.ox + (pt.x - dragging.sx)), iw);
+    const ny = clampY(snap(dragging.oy + (pt.y - dragging.sy)), ih);
+    setLocalPos(prev => ({ ...prev, [dragging.id]: { x: nx, y: ny } }));
+  };
+
+  const onUp = async () => {
+    if (!dragging) return;
+    const id = dragging.id;
+    const pos = localPos[id];
+    setDragging(null);
+    if (pos) {
+      try {
+        await api.updatePacking(id, { diag_x: pos.x, diag_y: pos.y });
+        setPacking(prev => prev.map(p => p.id === id ? { ...p, diag_x: pos.x, diag_y: pos.y } : p));
+      } catch { showToast("Error saving position"); }
+      setLocalPos(prev => { const n = { ...prev }; delete n[id]; return n; });
+    }
+  };
+
+  const placeItem = async entry => {
+    try {
+      await api.updatePacking(entry.id, { diag_x: 0, diag_y: 0 });
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_x: 0, diag_y: 0 } : p));
+      setSelected(entry.id);
+    } catch { showToast("Error placing item"); }
+  };
+
+  const unplaceItem = async entry => {
+    try {
+      await api.updatePacking(entry.id, { diag_x: null, diag_y: null, diag_rotated: false });
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_x: null, diag_y: null, diag_rotated: false } : p));
+      if (selected === entry.id) setSelected(null);
+    } catch { showToast("Error removing from diagram"); }
+  };
+
+  const rotateItem = async entry => {
+    const r = !entry.diag_rotated;
+    try {
+      await api.updatePacking(entry.id, { diag_rotated: r });
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_rotated: r } : p));
+    } catch { showToast("Error rotating"); }
+  };
+
+  const placed = packingEntries.filter(e => e.diag_x != null && e.diag_y != null);
+  const unplaced = packingEntries.filter(e => e.diag_x == null || e.diag_y == null);
+  const selectedEntry = placed.find(e => e.id === selected);
+
+  const gridLinesX = [];
+  for (let x = 0.5; x < length; x += 0.5) gridLinesX.push(parseFloat(x.toFixed(1)));
+  const gridLinesY = [];
+  for (let y = 0.5; y < width; y += 0.5) gridLinesY.push(parseFloat(y.toFixed(1)));
 
   return (
     <div style={{ background: "#f8f9fb", borderRadius: 10, padding: 16, border: "1px solid #e5e7eb" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>Trailer Layout — Top View</div>
-        <div style={{ fontSize: 13, color: pct === 100 ? "#16a34a" : "#6b7280", fontWeight: 500 }}>{packed}/{total} packed ({pct}%)</div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Trailer {trailer.number} — Layout</div>
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>{length}ft × {width}ft · 0.5ft grid · drag to position</div>
       </div>
-      <svg viewBox="0 0 200 360" style={{ width: "100%", maxWidth: 280, display: "block", margin: "0 auto" }}>
-        {/* Trailer outline */}
-        <rect x="5" y="5" width="190" height="350" rx="4" fill="#fff" stroke="#374151" strokeWidth="2.5" />
 
-        {/* Front cab indicator */}
-        <rect x="5" y="5" width="190" height="22" rx="4" fill="#1a1a2e" />
-        <text x="100" y="19" textAnchor="middle" fill="#fff" fontSize="9" fontWeight="600">FRONT</text>
+      <div style={{ position: "relative", userSelect: "none", touchAction: "none" }}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${VW} ${VH}`}
+          style={{ width: "100%", display: "block", cursor: dragging ? "grabbing" : "default", borderRadius: 4, border: "1.5px solid #374151" }}
+          onMouseMove={onMove}
+          onMouseUp={onUp}
+          onMouseLeave={onUp}
+          onTouchMove={e => { e.preventDefault(); onMove(e); }}
+          onTouchEnd={onUp}
+          onClick={e => { if (e.target === svgRef.current) setSelected(null); }}
+        >
+          {/* Interior background */}
+          <rect x={FRONT_W} y={0} width={length} height={VH} fill="#f9fafb" />
 
-        {/* Center divider */}
-        <line x1="100" y1="27" x2="100" y2="335" stroke="#d1d5db" strokeWidth="1" strokeDasharray="4,3" />
+          {/* Grid lines */}
+          {gridLinesX.map(x => (
+            <line key={`gx-${x}`}
+              x1={FRONT_W + x} y1={0} x2={FRONT_W + x} y2={VH}
+              stroke={Number.isInteger(x) ? "#e5e7eb" : "#f3f4f6"}
+              strokeWidth={Number.isInteger(x) ? 0.04 : 0.025} />
+          ))}
+          {gridLinesY.map(y => (
+            <line key={`gy-${y}`}
+              x1={FRONT_W} y1={y} x2={FRONT_W + length} y2={y}
+              stroke={Number.isInteger(y) ? "#e5e7eb" : "#f3f4f6"}
+              strokeWidth={Number.isInteger(y) ? 0.04 : 0.025} />
+          ))}
 
-        {/* Fill level indicator on left side */}
-        <rect x="5" y="27" width="8" height={Math.round(308 * pct / 100)} fill={fillColor} opacity="0.4" />
+          {/* Driver / passenger divider */}
+          <line x1={FRONT_W} y1={VH / 2} x2={FRONT_W + length} y2={VH / 2}
+            stroke="#d1d5db" strokeWidth={0.07} strokeDasharray="0.6 0.35" />
 
-        {/* Zones */}
-        {zones.map(z => {
-          const zoneEntries = packingEntries.filter((_, i) => {
-            const idx = Math.floor(i / Math.ceil(total / 6));
-            return zones[idx]?.id === z.id;
-          });
-          return (
-            <g key={z.id}>
-              <rect x={z.x} y={z.y + 20} width={z.w} height={z.h} rx="3"
-                fill="#f3f4f6" stroke="#d1d5db" strokeWidth="1" />
-              <text x={z.x + z.w / 2} y={z.y + 75} textAnchor="middle" fill="#9ca3af" fontSize="8">{z.label}</text>
-            </g>
-          );
-        })}
+          {/* Side labels */}
+          <text x={FRONT_W + 0.4} y={0.6} fill="#9ca3af" fontSize={0.5} fontFamily="sans-serif">Driver</text>
+          <text x={FRONT_W + 0.4} y={VH - 0.15} fill="#9ca3af" fontSize={0.5} fontFamily="sans-serif">Passenger</text>
 
-        {/* Door */}
-        {isBarn ? (
-          <g>
-            <rect x="5" y="330" width="85" height="22" rx="2" fill="#374151" />
-            <rect x="110" y="330" width="85" height="22" rx="2" fill="#374151" />
-            <text x="52" y="344" textAnchor="middle" fill="#fff" fontSize="8">BARN DOOR L</text>
-            <text x="152" y="344" textAnchor="middle" fill="#fff" fontSize="8">BARN DOOR R</text>
-          </g>
-        ) : (
-          <g>
-            <rect x="5" y="330" width="190" height="22" rx="2" fill="#374151" />
-            <text x="100" y="344" textAnchor="middle" fill="#fff" fontSize="9" fontWeight="600">ROLL-UP DOOR</text>
-          </g>
-        )}
+          {/* Placed items */}
+          {placed.map(entry => {
+            const [iw, ih] = getItemDims(entry);
+            const ix = FRONT_W + (localPos[entry.id]?.x ?? entry.diag_x ?? 0);
+            const iy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
+            const isSel = selected === entry.id;
+            const isDraggingThis = dragging?.id === entry.id;
+            const hasDims = entry.item?.dim_w_ft && entry.item?.dim_d_ft;
+            const name = entry.item?.name || "Item";
+            const qty = entry.qty_needed || 1;
+            const fontSize = Math.min(0.65, Math.max(0.25, Math.min(iw, ih) * 0.28));
+            const label = (name.length > 16 ? name.slice(0, 14) + "…" : name) + (qty > 1 ? ` \xd7${qty}` : "");
 
-        {/* Packed items as dots */}
-        {packingEntries.slice(0, 24).map((entry, i) => {
-          const col = i % 8;
-          const row = Math.floor(i / 8);
-          const x = 20 + col * 20;
-          const y = 50 + row * 80;
-          return (
-            <circle key={entry.id} cx={x} cy={y} r="6"
-              fill={entry.packed ? "#16a34a" : "#e5e7eb"}
-              stroke={entry.packed ? "#15803d" : "#d1d5db"}
-              strokeWidth="1">
-              <title>{entry.item?.name || ""}</title>
-            </circle>
-          );
-        })}
-      </svg>
+            return (
+              <g key={entry.id}
+                onMouseDown={e => startDrag(e, entry)}
+                onTouchStart={e => startDrag(e, entry)}
+                style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}>
+                {isSel && <rect x={ix + 0.1} y={iy + 0.1} width={iw} height={ih} rx={0.15} fill="rgba(0,0,0,0.1)" />}
+                <rect x={ix} y={iy} width={iw} height={ih} rx={0.12}
+                  fill={entry.packed ? "#f0fdf4" : "#ffffff"}
+                  stroke={isSel ? "#2563eb" : (hasDims ? "#374151" : "#f59e0b")}
+                  strokeWidth={isSel ? 0.13 : 0.07}
+                  opacity={isDraggingThis ? 0.85 : 1}
+                />
+                <text x={ix + iw / 2} y={iy + ih / 2}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fill="#374151" fontSize={fontSize} fontWeight="500" fontFamily="sans-serif"
+                  style={{ pointerEvents: "none" }}>
+                  {label}
+                </text>
+                {!hasDims && (
+                  <text x={ix + iw / 2} y={iy + ih / 2 + fontSize * 1.3}
+                    textAnchor="middle" fill="#f59e0b" fontSize={fontSize * 0.75} fontFamily="sans-serif"
+                    style={{ pointerEvents: "none" }}>est. size</text>
+                )}
+              </g>
+            );
+          })}
 
-      {/* Legend */}
-      <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontSize: 12, color: "#6b7280" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#16a34a" }} />Packed
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#e5e7eb", border: "1px solid #d1d5db" }} />Unpacked
-        </div>
+          {/* Front bar — drawn over items so they slide under it */}
+          <rect x={0} y={0} width={FRONT_W} height={VH} fill="#1a1a2e" />
+          <text x={FRONT_W / 2} y={VH / 2} textAnchor="middle" dominantBaseline="middle"
+            fill="#fff" fontSize={0.55} fontWeight="600" fontFamily="sans-serif"
+            transform={`rotate(-90, ${FRONT_W / 2}, ${VH / 2})`}>FRONT</text>
+
+          {/* Door bar */}
+          {isBarn ? (
+            <>
+              <rect x={FRONT_W + length} y={0} width={DOOR_W} height={VH / 2 - 0.07} fill="#374151" />
+              <rect x={FRONT_W + length} y={VH / 2 + 0.07} width={DOOR_W} height={VH / 2 - 0.07} fill="#374151" />
+              <text x={FRONT_W + length + DOOR_W / 2} y={VH / 4} textAnchor="middle" dominantBaseline="middle"
+                fill="#fff" fontSize={0.42} fontFamily="sans-serif"
+                transform={`rotate(-90, ${FRONT_W + length + DOOR_W / 2}, ${VH / 4})`}>DOOR L</text>
+              <text x={FRONT_W + length + DOOR_W / 2} y={3 * VH / 4} textAnchor="middle" dominantBaseline="middle"
+                fill="#fff" fontSize={0.42} fontFamily="sans-serif"
+                transform={`rotate(-90, ${FRONT_W + length + DOOR_W / 2}, ${3 * VH / 4})`}>DOOR R</text>
+            </>
+          ) : (
+            <>
+              <rect x={FRONT_W + length} y={0} width={DOOR_W} height={VH} fill="#374151" />
+              <text x={FRONT_W + length + DOOR_W / 2} y={VH / 2} textAnchor="middle" dominantBaseline="middle"
+                fill="#fff" fontSize={0.5} fontWeight="600" fontFamily="sans-serif"
+                transform={`rotate(-90, ${FRONT_W + length + DOOR_W / 2}, ${VH / 2})`}>DOOR</text>
+            </>
+          )}
+
+          {/* Outer border */}
+          <rect x={0} y={0} width={VW} height={VH} fill="none" stroke="#374151" strokeWidth={0.12} />
+        </svg>
       </div>
+
+      {/* Selected item controls */}
+      {selectedEntry && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", marginTop: 10, fontSize: 13 }}>
+          <span style={{ flex: 1, fontWeight: 500, color: "#1d4ed8" }}>
+            {selectedEntry.item?.name}{(selectedEntry.qty_needed || 1) > 1 ? ` \xd7${selectedEntry.qty_needed}` : ""}
+          </span>
+          <button style={{ ...ghostBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => rotateItem(selectedEntry)}>↻ Rotate</button>
+          <button style={{ ...dangerBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => unplaceItem(selectedEntry)}>Remove</button>
+          <button style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 16, lineHeight: 1, padding: "2px 6px" }} onClick={() => setSelected(null)}>✕</button>
+        </div>
+      )}
+
+      {/* Unplaced items panel */}
+      {unplaced.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            Unplaced Items ({unplaced.length})
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {unplaced.map(entry => {
+              const item = entry.item;
+              const hasDims = item?.dim_w_ft && item?.dim_d_ft;
+              const qty = entry.qty_needed || 1;
+              return (
+                <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13 }}>
+                  <span style={{ fontWeight: 500 }}>{item?.name || "Item"}{qty > 1 ? ` \xd7${qty}` : ""}</span>
+                  {hasDims
+                    ? <span style={{ color: "#9ca3af", fontSize: 11 }}>{item.dim_w_ft}\xd7{item.dim_d_ft}ft</span>
+                    : <span style={{ color: "#f59e0b", fontSize: 11 }}>⚠ no size</span>
+                  }
+                  <button style={{ ...primaryBtn, padding: "3px 10px", fontSize: 12 }} onClick={() => placeItem(entry)}>Place</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {packingEntries.length === 0 && (
+        <div style={{ textAlign: "center", color: "#9ca3af", fontSize: 13, padding: "20px 0" }}>No items in this trailer's packing list</div>
+      )}
     </div>
   );
 }
@@ -400,8 +570,8 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
-  const openAdd = () => { setForm({ number: "", door_type: "rollup", notes: "" }); setEditTrailer(null); setShowModal(true); };
-  const openEdit = (t) => { setForm({ number: t.number, door_type: t.door_type, notes: t.notes || "" }); setEditTrailer(t); setShowModal(true); };
+  const openAdd = () => { setForm({ number: "", door_type: "rollup", notes: "", length_ft: 53, width_ft: 8 }); setEditTrailer(null); setShowModal(true); };
+  const openEdit = (t) => { setForm({ number: t.number, door_type: t.door_type, notes: t.notes || "", length_ft: t.length_ft || 53, width_ft: t.width_ft || 8 }); setEditTrailer(t); setShowModal(true); };
 
   const save = async () => {
     if (!form.number.trim()) return;
@@ -437,7 +607,7 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
           <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: i < trailers.length - 1 ? "1px solid #f3f4f6" : "none" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 500, fontSize: 14 }}>🚛 Trailer {t.number}</div>
-              <div style={{ fontSize: 12, color: "#9ca3af" }}>{t.door_type === "barn" ? "Barn doors" : "Roll-up door"}{t.notes ? ` · ${t.notes}` : ""}</div>
+              <div style={{ fontSize: 12, color: "#9ca3af" }}>{t.door_type === "barn" ? "Barn doors" : "Roll-up door"} · {t.length_ft || 53}ft × {t.width_ft || 8}ft{t.notes ? ` · ${t.notes}` : ""}</div>
             </div>
             <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => openEdit(t)}>Edit</button>
             <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(t.id)}>Remove</button>
@@ -455,6 +625,12 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
             <option value="rollup">Roll-up Door</option>
             <option value="barn">Barn Doors</option>
           </select>
+          <label style={labelStyle}>Trailer Dimensions</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="number" value={form.length_ft} onChange={e => setForm(f => ({ ...f, length_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Length (ft)" min="1" step="1" />
+            <span style={{ color: "#9ca3af", fontSize: 13 }}>×</span>
+            <input type="number" value={form.width_ft} onChange={e => setForm(f => ({ ...f, width_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Width (ft)" min="1" step="0.5" />
+          </div>
           <label style={labelStyle}>Notes (optional)</label>
           <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Any details..." />
         </Modal>
@@ -885,19 +1061,24 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
   });
 
   const filtered = itemsWithAvailable.filter(i => (filterCat === "All" || i.category === filterCat) && i.name.toLowerCase().includes(search.toLowerCase()));
-  const openAdd = () => { setForm({ name: "", category: categories[0] || "", qty: 1, notes: "" }); setEditItem(null); setShowModal(true); };
-  const openEdit = (item) => { setForm({ name: item.name, category: item.category, qty: item.qty, notes: item.notes || "" }); setEditItem(item); setShowModal(true); };
+  const openAdd = () => { setForm({ name: "", category: categories[0] || "", qty: 1, notes: "", dim_w_ft: "", dim_d_ft: "" }); setEditItem(null); setShowModal(true); };
+  const openEdit = (item) => { setForm({ name: item.name, category: item.category, qty: item.qty, notes: item.notes || "", dim_w_ft: item.dim_w_ft ?? "", dim_d_ft: item.dim_d_ft ?? "" }); setEditItem(item); setShowModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        dim_w_ft: form.dim_w_ft !== "" ? parseFloat(form.dim_w_ft) : null,
+        dim_d_ft: form.dim_d_ft !== "" ? parseFloat(form.dim_d_ft) : null,
+      };
       if (editItem) {
-        await api.updateItem(editItem.id, form);
-        setItems(prev => prev.map(i => i.id === editItem.id ? { ...i, ...form } : i));
+        await api.updateItem(editItem.id, payload);
+        setItems(prev => prev.map(i => i.id === editItem.id ? { ...i, ...payload } : i));
         showToast("Item updated");
       } else {
-        const created = await api.addItem(form);
+        const created = await api.addItem(payload);
         setItems(prev => [...prev, created[0]]);
         showToast("Item added");
       }
@@ -1049,6 +1230,13 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
           <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: Number(e.target.value) }))} style={iStyle} min={1} />
           <label style={labelStyle}>Notes (optional)</label>
           <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={{ ...iStyle, height: 72, resize: "none" }} placeholder="Any details to remember..." />
+          <label style={labelStyle}>Trailer Diagram Size (optional)</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="number" value={form.dim_w_ft} onChange={e => setForm(f => ({ ...f, dim_w_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Width (ft)" min="0.5" step="0.5" />
+            <span style={{ color: "#9ca3af", fontSize: 13 }}>×</span>
+            <input type="number" value={form.dim_d_ft} onChange={e => setForm(f => ({ ...f, dim_d_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Depth (ft)" min="0.5" step="0.5" />
+          </div>
+          <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Floor footprint on the trailer diagram. Width = along trailer length, Depth = driver to passenger.</p>
           {editItem && <button style={{ ...dangerBtn, padding: "10px", width: "100%", textAlign: "center" }} onClick={async () => { await api.deleteItem(editItem.id); setItems(prev => prev.filter(i => i.id !== editItem.id)); setShowModal(false); showToast("Item removed"); }}>Remove Item</button>}
         </Modal>
       )}
@@ -1409,12 +1597,13 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         </div>
       )}
 
-      {/* Trailer diagram */}
+      {/* Trailer canvas */}
       {activeTrailer && showDiagram && (
-        <TrailerDiagram
+        <TrailerCanvas
           trailer={activeTrailer}
           packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id) }))}
-          items={items}
+          setPacking={setPacking}
+          showToast={showToast}
         />
       )}
 

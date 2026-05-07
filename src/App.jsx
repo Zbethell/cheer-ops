@@ -1940,7 +1940,7 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
   // Low stock: consumables whose remaining stock (master qty − total reported usage) is at or below threshold
   const lowStockItems = items
     .filter(i => i.is_consumable && i.low_threshold > 0)
-    .map(i => ({ ...i, remaining: i.qty - (usedByItem[i.id] || 0) }))
+    .map(i => ({ ...i, used: usedByItem[i.id] || 0, remaining: i.qty - (usedByItem[i.id] || 0) }))
     .filter(i => i.remaining <= i.low_threshold);
 
   return (
@@ -1994,14 +1994,28 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
                 <div style={{ fontSize: 13, color: "#ef4444", marginTop: 2 }}>These consumables need restocking before the next event</div>
               </div>
               {lowStockItems.map((item, i) => (
-                <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: i < lowStockItems.length - 1 ? "1px solid #f3f4f6" : "none" }}>
-                  <div style={{ flex: 1 }}>
+                <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 16px", borderBottom: i < lowStockItems.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 500, fontSize: 14 }}>{item.name}</div>
                     <div style={{ fontSize: 12, color: "#9ca3af" }}>{item.category}</div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>{item.remaining} <span style={{ fontSize: 12, fontWeight: 400, color: "#9ca3af" }}>/ {item.qty}</span></div>
-                    <div style={{ fontSize: 12, color: "#9ca3af" }}>threshold: {item.low_threshold}</div>
+                  <div style={{ display: "flex", gap: m ? 10 : 20, alignItems: "center", flexShrink: 0 }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Started</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{item.qty.toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Used</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: "#d97706" }}>{item.used.toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Remaining</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: item.remaining < 0 ? "#dc2626" : "#b45309" }}>{item.remaining.toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: "center", paddingLeft: m ? 8 : 12, borderLeft: "1px solid #f3f4f6" }}>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Alert below</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: "#6b7280" }}>{item.low_threshold.toLocaleString()}</div>
+                    </div>
                   </div>
                 </div>
               ))}

@@ -178,7 +178,7 @@ function wrapSvgText(text, maxChars, maxLines = 4) {
 }
 
 // ─── Trailer Canvas ────────────────────────────────────────────────────────────
-function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
+function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventName }) {
   const length = trailer.length_ft || 53;
   const width = trailer.width_ft || 8;
   const isBarn = trailer.door_type === "barn";
@@ -191,6 +191,9 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
   const [dragging, setDragging] = useState(null);
   const [localPos, setLocalPos] = useState({});
   const [selected, setSelected] = useState(null);
+  const [zOrder, setZOrder] = useState([]);
+
+  const bringToFront = id => setZOrder(prev => [...prev.filter(z => z !== id), id]);
 
   const snap = v => Math.round(v * 2) / 2;
   const clampX = (x, iw) => Math.max(0, Math.min(length - iw, x));
@@ -219,6 +222,7 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
     e.preventDefault();
     e.stopPropagation();
     setSelected(entry.id);
+    bringToFront(entry.id);
     const pt = e.touches ? getTouchPt(e) : getSvgPt(e);
     const cx = localPos[entry.id]?.x ?? entry.diag_x ?? 0;
     const cy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
@@ -255,6 +259,7 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
       await api.updatePacking(entry.id, { diag_x: 0, diag_y: 0 });
       setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_x: 0, diag_y: 0 } : p));
       setSelected(entry.id);
+      bringToFront(entry.id);
     } catch { showToast("Error placing item"); }
   };
 
@@ -278,6 +283,57 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
   const unplaced = packingEntries.filter(e => e.diag_x == null || e.diag_y == null);
   const selectedEntry = placed.find(e => e.id === selected);
 
+  // Render placed items with z-order: recently interacted items draw on top
+  const sortedPlaced = [
+    ...placed.filter(e => !zOrder.includes(e.id)),
+    ...zOrder.map(id => placed.find(e => e.id === id)).filter(Boolean),
+  ];
+
+  const downloadPNG = () => {
+    const svg = svgRef.current;
+    const rect = svg.getBoundingClientRect();
+    const SCALE = Math.max(2, Math.ceil(1800 / rect.width));
+    const HEADER = 70;
+    const canvasW = Math.round(rect.width * SCALE);
+    const canvasH = Math.round(rect.height * SCALE) + HEADER;
+
+    svg.setAttribute("width", canvasW);
+    svg.setAttribute("height", Math.round(rect.height * SCALE));
+    const svgData = new XMLSerializer().serializeToString(svg);
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvasW, canvasH);
+    ctx.fillStyle = "#111827";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText(eventName || "Event", 20, 26);
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "13px sans-serif";
+    ctx.fillText(`Trailer ${trailer.number} · ${length}ft × ${width}ft`, 20, 48);
+
+    const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, HEADER, canvasW, canvasH - HEADER);
+      URL.revokeObjectURL(url);
+      const a = document.createElement("a");
+      a.download = `Trailer-${trailer.number}-${(eventName || "Event").replace(/[^a-z0-9]/gi, "-")}.png`;
+      a.href = canvas.toDataURL("image/png");
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); showToast("Error generating image"); };
+    img.src = url;
+  };
+
   const gridLinesX = [];
   for (let x = 0.5; x < length; x += 0.5) gridLinesX.push(parseFloat(x.toFixed(1)));
   const gridLinesY = [];
@@ -287,7 +343,10 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
     <div style={{ background: "#f8f9fb", borderRadius: 10, padding: 16, border: "1px solid #e5e7eb" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>Trailer {trailer.number} — Layout</div>
-        <div style={{ fontSize: 12, color: "#9ca3af" }}>{length}ft × {width}ft · 0.5ft grid · drag to position</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#9ca3af" }}>{length}ft × {width}ft · 0.5ft grid</div>
+          <button style={{ ...ghostBtn, padding: "4px 10px", fontSize: 12 }} onClick={downloadPNG}>↓ PNG</button>
+        </div>
       </div>
 
       <div style={{ position: "relative", userSelect: "none", touchAction: "none" }}>
@@ -327,8 +386,8 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
           <text x={FRONT_W + 0.4} y={0.6} fill="#9ca3af" fontSize={0.5} fontFamily="sans-serif">Driver</text>
           <text x={FRONT_W + 0.4} y={VH - 0.15} fill="#9ca3af" fontSize={0.5} fontFamily="sans-serif">Passenger</text>
 
-          {/* Placed items */}
-          {placed.map(entry => {
+          {/* Placed items — rendered in z-order so recently touched items draw on top */}
+          {sortedPlaced.map(entry => {
             const [iw, ih] = getItemDims(entry);
             const ix = FRONT_W + (localPos[entry.id]?.x ?? entry.diag_x ?? 0);
             const iy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
@@ -1660,6 +1719,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id) }))}
           setPacking={setPacking}
           showToast={showToast}
+          eventName={event.name}
         />
       )}
 

@@ -1930,8 +1930,18 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
   const [activeSection, setActiveSection] = useState("submitted"); // submitted | areas | low-stock
   const iStyle = m ? inputStyleMobile : inputStyle;
 
-  // Low stock items
-  const lowStockItems = items.filter(i => i.is_consumable && i.low_threshold > 0 && i.qty <= i.low_threshold);
+  // Total qty_used per item across all submitted reports
+  const usedByItem = {};
+  reportItems.forEach(ri => {
+    if (ri.item_id && ri.qty_used > 0)
+      usedByItem[ri.item_id] = (usedByItem[ri.item_id] || 0) + ri.qty_used;
+  });
+
+  // Low stock: consumables whose remaining stock (master qty − total reported usage) is at or below threshold
+  const lowStockItems = items
+    .filter(i => i.is_consumable && i.low_threshold > 0)
+    .map(i => ({ ...i, remaining: i.qty - (usedByItem[i.id] || 0) }))
+    .filter(i => i.remaining <= i.low_threshold);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
@@ -1990,7 +2000,7 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
                     <div style={{ fontSize: 12, color: "#9ca3af" }}>{item.category}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>{item.qty}</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>{item.remaining} <span style={{ fontSize: 12, fontWeight: 400, color: "#9ca3af" }}>/ {item.qty}</span></div>
                     <div style={{ fontSize: 12, color: "#9ca3af" }}>threshold: {item.low_threshold}</div>
                   </div>
                 </div>

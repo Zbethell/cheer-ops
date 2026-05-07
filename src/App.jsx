@@ -2001,7 +2001,7 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
                   </div>
                   <div style={{ display: "flex", gap: m ? 10 : 20, alignItems: "center", flexShrink: 0 }}>
                     <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Started</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Stock Qty</div>
                       <div style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{item.qty.toLocaleString()}</div>
                     </div>
                     <div style={{ textAlign: "center" }}>
@@ -2299,7 +2299,7 @@ function AreaManager({ areas, setAreas, areaItems, setAreaItems, items, setItems
         <div className="card" style={{ overflow: "hidden" }}>
           <div style={{ padding: "10px 16px", background: "#fafafa", borderBottom: "1px solid #f3f4f6", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Add Items to Area</div>
           {itemsNotInArea.map((item, i) => (
-            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: i < itemsNotInArea.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: i < itemsNotInArea.length - 1 ? "1px solid #f3f4f6" : "none", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 500, fontSize: 14 }}>{item.name}</div>
                 <div style={{ fontSize: 12, color: "#9ca3af" }}>{item.category}</div>

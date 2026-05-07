@@ -158,6 +158,25 @@ function parseCSV(text, categories) {
   }).filter(r => r.name);
 }
 
+function wrapSvgText(text, maxChars, maxLines = 4) {
+  const words = text.split(" ");
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    const test = current ? `${current} ${word}` : word;
+    if (test.length <= maxChars) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      if (lines.length < maxLines)
+        current = word.length > maxChars ? word.slice(0, maxChars - 1) + "…" : word;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines.length ? lines : [text.slice(0, maxChars - 1) + "…"];
+}
+
 // ─── Trailer Canvas ────────────────────────────────────────────────────────────
 function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
   const length = trailer.length_ft || 53;
@@ -319,7 +338,12 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
             const name = entry.item?.name || "Item";
             const qty = entry.qty_needed || 1;
             const fontSize = Math.min(0.65, Math.max(0.25, Math.min(iw, ih) * 0.28));
-            const label = (name.length > 16 ? name.slice(0, 14) + "…" : name) + (qty > 1 ? ` \xd7${qty}` : "");
+            const fullLabel = name + (qty > 1 ? ` \xd7${qty}` : "");
+            const charsPerLine = Math.max(3, Math.floor(iw / (fontSize * 0.52)));
+            const lines = wrapSvgText(fullLabel, charsPerLine);
+            const lineH = fontSize * 1.25;
+            const textBlockH = lines.length * lineH;
+            const textStartY = iy + ih / 2 - (textBlockH - lineH) / 2;
 
             return (
               <g key={entry.id}
@@ -333,15 +357,19 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
                   strokeWidth={isSel ? 0.13 : 0.07}
                   opacity={isDraggingThis ? 0.85 : 1}
                 />
-                <text x={ix + iw / 2} y={iy + ih / 2}
-                  textAnchor="middle" dominantBaseline="middle"
-                  fill="#374151" fontSize={fontSize} fontWeight="500" fontFamily="sans-serif"
-                  style={{ pointerEvents: "none" }}>
-                  {label}
-                </text>
+                {lines.map((line, li) => (
+                  <text key={li}
+                    x={ix + iw / 2} y={textStartY + li * lineH}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fill="#374151" fontSize={fontSize} fontWeight="500" fontFamily="sans-serif"
+                    style={{ pointerEvents: "none" }}>
+                    {line}
+                  </text>
+                ))}
                 {!hasDims && (
-                  <text x={ix + iw / 2} y={iy + ih / 2 + fontSize * 1.3}
-                    textAnchor="middle" fill="#f59e0b" fontSize={fontSize * 0.75} fontFamily="sans-serif"
+                  <text x={ix + iw / 2} y={textStartY + lines.length * lineH}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fill="#f59e0b" fontSize={fontSize * 0.75} fontFamily="sans-serif"
                     style={{ pointerEvents: "none" }}>est. size</text>
                 )}
               </g>

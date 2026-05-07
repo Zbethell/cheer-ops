@@ -197,8 +197,8 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
   const clampY = (y, ih) => Math.max(0, Math.min(width - ih, y));
 
   const getItemDims = entry => {
-    const w = entry.item?.dim_w_ft || 2;
-    const d = entry.item?.dim_d_ft || 2;
+    const w = entry.item?.dim_w_ft || entry.ad_hoc_dim_w_ft || 2;
+    const d = entry.item?.dim_d_ft || entry.ad_hoc_dim_d_ft || 2;
     return entry.diag_rotated ? [d, w] : [w, d];
   };
 
@@ -334,8 +334,9 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
             const iy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
             const isSel = selected === entry.id;
             const isDraggingThis = dragging?.id === entry.id;
-            const hasDims = entry.item?.dim_w_ft && entry.item?.dim_d_ft;
-            const name = entry.item?.name || "Item";
+            const isTemp = !entry.item_id && !!entry.ad_hoc_name;
+            const hasDims = (entry.item?.dim_w_ft && entry.item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
+            const name = entry.item?.name || entry.ad_hoc_name || "Item";
             const qty = entry.qty_needed || 1;
             const fontSize = Math.min(0.65, Math.max(0.25, Math.min(iw, ih) * 0.28));
             const fullLabel = name + (qty > 1 ? ` \xd7${qty}` : "");
@@ -352,9 +353,10 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
                 style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}>
                 {isSel && <rect x={ix + 0.1} y={iy + 0.1} width={iw} height={ih} rx={0.15} fill="rgba(0,0,0,0.1)" />}
                 <rect x={ix} y={iy} width={iw} height={ih} rx={0.12}
-                  fill={entry.packed ? "#f0fdf4" : "#ffffff"}
-                  stroke={isSel ? "#2563eb" : (hasDims ? "#374151" : "#f59e0b")}
+                  fill={entry.packed ? "#f0fdf4" : isTemp ? "#faf5ff" : "#ffffff"}
+                  stroke={isSel ? "#2563eb" : isTemp ? "#7c3aed" : hasDims ? "#374151" : "#f59e0b"}
                   strokeWidth={isSel ? 0.13 : 0.07}
+                  strokeDasharray={isTemp && !isSel ? "0.25 0.15" : undefined}
                   opacity={isDraggingThis ? 0.85 : 1}
                 />
                 {lines.map((line, li) => (
@@ -412,7 +414,8 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
       {selectedEntry && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", marginTop: 10, fontSize: 13 }}>
           <span style={{ flex: 1, fontWeight: 500, color: "#1d4ed8" }}>
-            {selectedEntry.item?.name}{(selectedEntry.qty_needed || 1) > 1 ? ` \xd7${selectedEntry.qty_needed}` : ""}
+            {selectedEntry.item?.name || selectedEntry.ad_hoc_name}{(selectedEntry.qty_needed || 1) > 1 ? ` \xd7${selectedEntry.qty_needed}` : ""}
+            {!selectedEntry.item_id && selectedEntry.ad_hoc_name && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>TEMP</span>}
           </span>
           <button style={{ ...ghostBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => rotateItem(selectedEntry)}>↻ Rotate</button>
           <button style={{ ...dangerBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => unplaceItem(selectedEntry)}>Remove</button>
@@ -429,13 +432,17 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast }) {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {unplaced.map(entry => {
               const item = entry.item;
-              const hasDims = item?.dim_w_ft && item?.dim_d_ft;
+              const isTemp = !entry.item_id && !!entry.ad_hoc_name;
+              const hasDims = (item?.dim_w_ft && item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
+              const dimW = item?.dim_w_ft || entry.ad_hoc_dim_w_ft;
+              const dimD = item?.dim_d_ft || entry.ad_hoc_dim_d_ft;
               const qty = entry.qty_needed || 1;
               return (
-                <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13 }}>
-                  <span style={{ fontWeight: 500 }}>{item?.name || "Item"}{qty > 1 ? ` \xd7${qty}` : ""}</span>
+                <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: isTemp ? "#faf5ff" : "#fff", border: `1px solid ${isTemp ? "#e9d5ff" : "#e5e7eb"}`, borderRadius: 8, fontSize: 13 }}>
+                  <span style={{ fontWeight: 500 }}>{item?.name || entry.ad_hoc_name || "Item"}{qty > 1 ? ` \xd7${qty}` : ""}</span>
+                  {isTemp && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 5px", borderRadius: 4, fontWeight: 600 }}>TEMP</span>}
                   {hasDims
-                    ? <span style={{ color: "#9ca3af", fontSize: 11 }}>{item.dim_w_ft}\xd7{item.dim_d_ft}ft</span>
+                    ? <span style={{ color: "#9ca3af", fontSize: 11 }}>{dimW}\xd7{dimD}ft</span>
                     : <span style={{ color: "#f59e0b", fontSize: 11 }}>⚠ no size</span>
                   }
                   <button style={{ ...primaryBtn, padding: "3px 10px", fontSize: 12 }} onClick={() => placeItem(entry)}>Place</button>
@@ -1435,6 +1442,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [addItemId, setAddItemId] = useState("");
   const [addQty, setAddQty] = useState(1);
   const [addTrailerId, setAddTrailerId] = useState("");
+  const [addMode, setAddMode] = useState("inventory");
+  const [adHocName, setAdHocName] = useState("");
+  const [adHocDimW, setAdHocDimW] = useState("");
+  const [adHocDimD, setAdHocDimD] = useState("");
   const [saving, setSaving] = useState(false);
   const [showCopy, setShowCopy] = useState(false);
   const [copyEventId, setCopyEventId] = useState("");
@@ -1509,15 +1520,31 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   };
 
   const addToList = async () => {
-    if (!addItemId) return;
-    if (eventPacking.find(p => p.item_id === addItemId)) { showToast("Already in list"); return; }
     setSaving(true);
     try {
-      const entry = { event_id: event.id, item_id: addItemId, qty_needed: addQty, packed: false, returned: false };
-      if (addTrailerId) entry.trailer_id = addTrailerId;
-      const created = await api.addPacking(entry);
-      setPacking(prev => [...prev, created[0]]);
-      showToast("Item added"); setShowAddItem(false);
+      if (addMode === "temp") {
+        if (!adHocName.trim()) { setSaving(false); return; }
+        const entry = {
+          event_id: event.id, item_id: null,
+          ad_hoc_name: adHocName.trim(),
+          ad_hoc_dim_w_ft: adHocDimW !== "" ? parseFloat(adHocDimW) : null,
+          ad_hoc_dim_d_ft: adHocDimD !== "" ? parseFloat(adHocDimD) : null,
+          qty_needed: addQty, packed: false, returned: false,
+        };
+        if (addTrailerId) entry.trailer_id = addTrailerId;
+        const created = await api.addPacking(entry);
+        setPacking(prev => [...prev, created[0]]);
+        showToast("Temp item added");
+      } else {
+        if (!addItemId) { setSaving(false); return; }
+        if (eventPacking.find(p => p.item_id === addItemId)) { showToast("Already in list"); setSaving(false); return; }
+        const entry = { event_id: event.id, item_id: addItemId, qty_needed: addQty, packed: false, returned: false };
+        if (addTrailerId) entry.trailer_id = addTrailerId;
+        const created = await api.addPacking(entry);
+        setPacking(prev => [...prev, created[0]]);
+        showToast("Item added");
+      }
+      setShowAddItem(false);
     } catch { showToast("Error adding item"); }
     setSaving(false);
   };
@@ -1561,13 +1588,14 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
 
   const activeTrailer = assignedTrailers.find(t => t.id === activeTab);
 
-  // Group by category
+  // Group by category (temp items go under "Temporary")
   const grouped = {};
   visiblePacking.forEach(p => {
     const item = items.find(i => i.id === p.item_id);
-    if (!item) return;
-    if (!grouped[item.category]) grouped[item.category] = [];
-    grouped[item.category].push({ ...p, item });
+    if (!item && !p.ad_hoc_name) return;
+    const cat = item?.category || "Temporary";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push({ ...p, item: item || null });
   });
 
   return (
@@ -1642,7 +1670,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {otherEvents.length > 0 && <button style={{ ...ghostBtn, fontSize: m ? 13 : 12, padding: m ? "8px 12px" : "7px 14px" }} onClick={() => { setCopyEventId(otherEvents[0].id); setShowCopy(true); }}>Copy</button>}
-          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setAddTrailerId(activeTab !== "all" && activeTab !== "unassigned" ? activeTab : ""); setShowAddItem(true); }}>+ Add Item</button>
+          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setAddTrailerId(activeTab !== "all" && activeTab !== "unassigned" ? activeTab : ""); setAddMode("inventory"); setAdHocName(""); setAdHocDimW(""); setAdHocDimD(""); setShowAddItem(true); }}>+ Add Item</button>
         </div>
       </div>
 
@@ -1658,13 +1686,18 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           <div className="card" style={{ overflow: "hidden" }}>
             {entries.map((entry, i) => {
               const entryTrailer = trailers.find(t => t.id === entry.trailer_id);
+              const isTemp = !entry.item_id && !!entry.ad_hoc_name;
+              const displayName = entry.item?.name || entry.ad_hoc_name || "Item";
               return (
                 <div key={entry.id} style={{ padding: m ? "14px 16px" : "12px 16px", borderBottom: i < entries.length - 1 ? "1px solid #f3f4f6" : "none" }}>
                   {m ? (
                     <>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontWeight: 500, fontSize: 15, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: 500, fontSize: 15, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{displayName}</span>
+                            {isTemp && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, letterSpacing: "0.03em" }}>TEMP</span>}
+                          </div>
                           {assignedTrailers.length > 0 && (
                             <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                               {assignedTrailers.map(t => (
@@ -1675,7 +1708,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                               ))}
                             </div>
                           )}
-                          {entry.item.notes && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
+                          {entry.item?.notes && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
                           {/* Qty editor mobile */}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
                             <button style={{ ...ghostBtn, padding: "2px 10px", fontSize: 16, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed - 1)}>−</button>
@@ -1708,7 +1741,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                         <span style={{ fontSize: 11, color: "#9ca3af" }}>Packed</span>
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 14, fontWeight: 500, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{entry.item.name}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 14, fontWeight: 500, textDecoration: entry.returned ? "line-through" : "none", color: entry.returned ? "#9ca3af" : "#111" }}>{displayName}</span>
+                          {isTemp && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, letterSpacing: "0.03em" }}>TEMP</span>}
+                        </div>
                         {assignedTrailers.length > 0 && (
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                             {assignedTrailers.map(t => (
@@ -1719,7 +1755,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             ))}
                           </div>
                         )}
-                        {entry.item.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
+                        {entry.item?.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{entry.item.notes}</div>}
                       </div>
                       {/* Qty editor desktop */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1778,10 +1814,30 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
 
       {showAddItem && (
         <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel="Add to List" saving={saving} isMobile={m}>
-          <label style={labelStyle}>Select Item</label>
-          <select value={addItemId} onChange={e => setAddItemId(e.target.value)} style={iStyle}>
-            {availableToAdd.length === 0 ? <option value="">All items already added</option> : availableToAdd.map(i => <option key={i.id} value={i.id}>{i.name} ({i.category})</option>)}
-          </select>
+          <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 8, padding: 4 }}>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "inventory" ? "#fff" : "transparent", color: addMode === "inventory" ? "#111" : "#6b7280", boxShadow: addMode === "inventory" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("inventory")}>From Inventory</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "temp" ? "#fff" : "transparent", color: addMode === "temp" ? "#7c3aed" : "#6b7280", boxShadow: addMode === "temp" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("temp")}>Temp Item</button>
+          </div>
+          {addMode === "inventory" ? (
+            <>
+              <label style={labelStyle}>Select Item</label>
+              <select value={addItemId} onChange={e => setAddItemId(e.target.value)} style={iStyle}>
+                {availableToAdd.length === 0 ? <option value="">All items already added</option> : availableToAdd.map(i => <option key={i.id} value={i.id}>{i.name} ({i.category})</option>)}
+              </select>
+            </>
+          ) : (
+            <>
+              <label style={labelStyle}>Item Name</label>
+              <input value={adHocName} onChange={e => setAdHocName(e.target.value)} style={iStyle} placeholder="e.g. Production Co. Speakers" autoFocus />
+              <label style={labelStyle}>Diagram Size (optional)</label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="number" value={adHocDimW} onChange={e => setAdHocDimW(e.target.value)} style={{ ...iStyle, flex: 1 }} placeholder="Width (ft)" min="0.5" step="0.5" />
+                <span style={{ color: "#9ca3af", fontSize: 13 }}>×</span>
+                <input type="number" value={adHocDimD} onChange={e => setAdHocDimD(e.target.value)} style={{ ...iStyle, flex: 1 }} placeholder="Depth (ft)" min="0.5" step="0.5" />
+              </div>
+              <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Event-specific — won't affect master inventory.</p>
+            </>
+          )}
           <label style={labelStyle}>Qty Needed</label>
           <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={iStyle} min={1} />
           {assignedTrailers.length > 0 && (

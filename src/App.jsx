@@ -2179,9 +2179,12 @@ function AreaManager({ areas, setAreas, areaItems, setAreaItems, items, setItems
   };
 
   const toggleConsumable = async (areaItem) => {
+    const newValue = !areaItem.is_consumable;
     try {
-      await api.updateAreaItem(areaItem.id, { is_consumable: !areaItem.is_consumable });
-      setAreaItems(prev => prev.map(ai => ai.id === areaItem.id ? { ...ai, is_consumable: !ai.is_consumable } : ai));
+      await api.updateAreaItem(areaItem.id, { is_consumable: newValue });
+      setAreaItems(prev => prev.map(ai => ai.id === areaItem.id ? { ...ai, is_consumable: newValue } : ai));
+      await api.updateItem(areaItem.item_id, { is_consumable: newValue });
+      setItems(prev => prev.map(i => i.id === areaItem.item_id ? { ...i, is_consumable: newValue } : i));
     } catch { showToast("Error updating"); }
   };
 

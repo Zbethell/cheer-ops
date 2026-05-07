@@ -1937,11 +1937,12 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
       usedByItem[ri.item_id] = (usedByItem[ri.item_id] || 0) + ri.qty_used;
   });
 
-  // Low stock: consumables whose remaining stock (master qty − total reported usage) is at or below threshold
+  // Low stock: item.qty is already decremented by report submission, so remaining = item.qty.
+  // Reconstruct pre-event qty as item.qty + total_used.
   const lowStockItems = items
     .filter(i => i.is_consumable && i.low_threshold > 0)
-    .map(i => ({ ...i, used: usedByItem[i.id] || 0, remaining: i.qty - (usedByItem[i.id] || 0) }))
-    .filter(i => i.remaining <= i.low_threshold);
+    .map(i => ({ ...i, used: usedByItem[i.id] || 0, preEventQty: i.qty + (usedByItem[i.id] || 0), remaining: i.qty }))
+    .filter(i => i.qty <= i.low_threshold);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
@@ -2001,8 +2002,8 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
                   </div>
                   <div style={{ display: "flex", gap: m ? 10 : 20, alignItems: "center", flexShrink: 0 }}>
                     <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Stock Qty</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{item.qty.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Before Event</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{item.preEventQty.toLocaleString()}</div>
                     </div>
                     <div style={{ textAlign: "center" }}>
                       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Used</div>
@@ -2010,7 +2011,7 @@ function Reports({ isMobile: m, reports, setReports, reportItems, events, areas,
                     </div>
                     <div style={{ textAlign: "center" }}>
                       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Remaining</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: item.remaining < 0 ? "#dc2626" : "#b45309" }}>{item.remaining.toLocaleString()}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: item.remaining === 0 ? "#dc2626" : "#b45309" }}>{item.remaining.toLocaleString()}</div>
                     </div>
                     <div style={{ textAlign: "center", paddingLeft: m ? 8 : 12, borderLeft: "1px solid #f3f4f6" }}>
                       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 2 }}>Alert below</div>

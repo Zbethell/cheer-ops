@@ -84,6 +84,19 @@ const api = {
     if (!res.ok) { const err = await res.text(); throw new Error(err); }
     return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
   },
+  getContainers: () => sb("containers?order=name"),
+  addContainer: (c) => sb("containers", { method: "POST", body: JSON.stringify(c) }),
+  updateContainer: (id, patch) => sb(`containers?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteContainer: (id) => sb(`containers?id=eq.${id}`, { method: "DELETE" }),
+  getContainerItems: () => sb("container_items"),
+  addContainerItem: (ci) => sb("container_items", { method: "POST", body: JSON.stringify(ci) }),
+  updateContainerItem: (id, patch) => sb(`container_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteContainerItem: (id) => sb(`container_items?id=eq.${id}`, { method: "DELETE" }),
+  getEventContainerItems: () => sb("event_container_items"),
+  addEventContainerItem: (eci) => sb("event_container_items", { method: "POST", body: JSON.stringify(eci) }),
+  updateEventContainerItem: (id, patch) => sb(`event_container_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteEventContainerItem: (id) => sb(`event_container_items?id=eq.${id}`, { method: "DELETE" }),
+  deleteEventContainerItemsByEvent: (eventId) => sb(`event_container_items?event_id=eq.${eventId}`, { method: "DELETE" }),
 };
 
 const auth = {
@@ -200,8 +213,8 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
   const clampY = (y, ih) => Math.max(0, Math.min(width - ih, y));
 
   const getItemDims = entry => {
-    const w = entry.item?.dim_w_ft || entry.ad_hoc_dim_w_ft || 2;
-    const d = entry.item?.dim_d_ft || entry.ad_hoc_dim_d_ft || 2;
+    const w = entry.container?.dim_w_ft || entry.item?.dim_w_ft || entry.ad_hoc_dim_w_ft || 2;
+    const d = entry.container?.dim_d_ft || entry.item?.dim_d_ft || entry.ad_hoc_dim_d_ft || 2;
     return entry.diag_rotated ? [d, w] : [w, d];
   };
 
@@ -393,9 +406,10 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
             const iy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
             const isSel = selected === entry.id;
             const isDraggingThis = dragging?.id === entry.id;
-            const isTemp = !entry.item_id && !!entry.ad_hoc_name;
-            const hasDims = (entry.item?.dim_w_ft && entry.item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
-            const name = entry.item?.name || entry.ad_hoc_name || "Item";
+            const isTemp = !entry.item_id && !entry.container_id && !!entry.ad_hoc_name;
+            const isContainer = !!entry.container_id;
+            const hasDims = (entry.container?.dim_w_ft && entry.container?.dim_d_ft) || (entry.item?.dim_w_ft && entry.item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
+            const name = entry.container?.name || entry.item?.name || entry.ad_hoc_name || "Item";
             const qty = entry.qty_needed || 1;
             const fontSize = Math.min(0.65, Math.max(0.25, Math.min(iw, ih) * 0.28));
             const fullLabel = name + (qty > 1 ? ` \xd7${qty}` : "");
@@ -412,8 +426,8 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
                 style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}>
                 {isSel && <rect x={ix + 0.1} y={iy + 0.1} width={iw} height={ih} rx={0.15} fill="rgba(0,0,0,0.1)" />}
                 <rect x={ix} y={iy} width={iw} height={ih} rx={0.12}
-                  fill={entry.packed ? "#f0fdf4" : isTemp ? "#faf5ff" : "#ffffff"}
-                  stroke={isSel ? "#2563eb" : isTemp ? "#7c3aed" : hasDims ? "#374151" : "#f59e0b"}
+                  fill={entry.packed ? "#f0fdf4" : isContainer ? (entry.container?.color ? entry.container.color + "22" : "#eff6ff") : isTemp ? "#faf5ff" : "#ffffff"}
+                  stroke={isSel ? "#2563eb" : isContainer ? (entry.container?.color || "#2563eb") : isTemp ? "#7c3aed" : hasDims ? "#374151" : "#f59e0b"}
                   strokeWidth={isSel ? 0.13 : 0.07}
                   strokeDasharray={isTemp && !isSel ? "0.25 0.15" : undefined}
                   opacity={isDraggingThis ? 0.85 : 1}
@@ -473,8 +487,9 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
       {selectedEntry && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", marginTop: 10, fontSize: 13 }}>
           <span style={{ flex: 1, fontWeight: 500, color: "#1d4ed8" }}>
-            {selectedEntry.item?.name || selectedEntry.ad_hoc_name}{(selectedEntry.qty_needed || 1) > 1 ? ` \xd7${selectedEntry.qty_needed}` : ""}
-            {!selectedEntry.item_id && selectedEntry.ad_hoc_name && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>TEMP</span>}
+            {selectedEntry.container?.name || selectedEntry.item?.name || selectedEntry.ad_hoc_name}{(selectedEntry.qty_needed || 1) > 1 ? ` \xd7${selectedEntry.qty_needed}` : ""}
+            {selectedEntry.container_id && <span style={{ background: "#eff6ff", color: "#2563eb", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>{ctLabel(selectedEntry.container?.type)}</span>}
+            {!selectedEntry.item_id && !selectedEntry.container_id && selectedEntry.ad_hoc_name && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>TEMP</span>}
           </span>
           <button style={{ ...ghostBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => rotateItem(selectedEntry)}>↻ Rotate</button>
           <button style={{ ...dangerBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => unplaceItem(selectedEntry)}>Remove</button>
@@ -733,6 +748,192 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
   );
 }
 
+// ─── Container Manager ────────────────────────────────────────────────────────
+const CONTAINER_TYPES = [
+  { value: "tote", label: "Tote", icon: "📦" },
+  { value: "travel_case", label: "Travel Case", icon: "🧳" },
+  { value: "rolling_bin", label: "Rolling Bin", icon: "🗂️" },
+  { value: "misc", label: "Misc / Event-Specific", icon: "📫" },
+  { value: "other", label: "Other", icon: "📋" },
+];
+const CONTAINER_COLORS = ["#1a1a2e", "#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#374151"];
+const ctIcon = (type) => CONTAINER_TYPES.find(t => t.value === type)?.icon || "📦";
+const ctLabel = (type) => CONTAINER_TYPES.find(t => t.value === type)?.label || "Container";
+
+function ContainerManager({ containers, setContainers, containerItems, setContainerItems, items, areas, showToast, isMobile: m }) {
+  const [showModal, setShowModal] = useState(false);
+  const [editContainer, setEditContainer] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [form, setForm] = useState({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "" });
+  const [saving, setSaving] = useState(false);
+  const [addItemForm, setAddItemForm] = useState({ item_id: "", qty: 1 });
+  const [addingItem, setAddingItem] = useState(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  const openAdd = () => { setForm({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "" }); setEditContainer(null); setShowModal(true); };
+  const openEdit = (c) => { setForm({ name: c.name, type: c.type, color: c.color || "", notes: c.notes || "", area_id: c.area_id || "", dim_w_ft: c.dim_w_ft || "", dim_d_ft: c.dim_d_ft || "" }); setEditContainer(c); setShowModal(true); };
+
+  const save = async () => {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      const payload = { ...form, area_id: form.area_id || null, dim_w_ft: form.dim_w_ft !== "" ? parseFloat(form.dim_w_ft) : null, dim_d_ft: form.dim_d_ft !== "" ? parseFloat(form.dim_d_ft) : null };
+      if (editContainer) {
+        await api.updateContainer(editContainer.id, payload);
+        setContainers(prev => prev.map(c => c.id === editContainer.id ? { ...c, ...payload } : c));
+        showToast("Container updated");
+      } else {
+        const created = await api.addContainer(payload);
+        setContainers(prev => [...prev, created[0]]);
+        showToast("Container added");
+      }
+      setShowModal(false);
+    } catch { showToast("Error saving container"); }
+    setSaving(false);
+  };
+
+  const remove = async (id) => {
+    try {
+      await api.deleteContainer(id);
+      setContainers(prev => prev.filter(c => c.id !== id));
+      setContainerItems(prev => prev.filter(ci => ci.container_id !== id));
+      if (expandedId === id) setExpandedId(null);
+      showToast("Container removed");
+    } catch { showToast("Error removing container"); }
+  };
+
+  const addItemToContainer = async (containerId) => {
+    if (!addItemForm.item_id) return;
+    setAddingItem(true);
+    try {
+      const created = await api.addContainerItem({ container_id: containerId, item_id: addItemForm.item_id, qty: addItemForm.qty || 1 });
+      setContainerItems(prev => [...prev, created[0]]);
+      setAddItemForm({ item_id: "", qty: 1 });
+      showToast("Item added");
+    } catch { showToast("Error adding item"); }
+    setAddingItem(false);
+  };
+
+  const removeContainerItem = async (id) => {
+    try { await api.deleteContainerItem(id); setContainerItems(prev => prev.filter(ci => ci.id !== id)); }
+    catch { showToast("Error removing item"); }
+  };
+
+  const updateContainerItemQty = async (id, qty) => {
+    if (qty < 1) return;
+    try { await api.updateContainerItem(id, { qty }); setContainerItems(prev => prev.map(ci => ci.id === id ? { ...ci, qty } : ci)); }
+    catch { showToast("Error updating qty"); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Manage Containers</div>
+        <button style={{ ...primaryBtn, fontSize: 12, padding: "6px 12px" }} onClick={openAdd}>+ Add Container</button>
+      </div>
+      <div className="card" style={{ overflow: "hidden" }}>
+        {containers.map((c, i) => {
+          const ciList = containerItems.filter(ci => ci.container_id === c.id);
+          const area = areas.find(a => a.id === c.area_id);
+          const isExpanded = expandedId === c.id;
+          const isMisc = c.type === "misc";
+          const availableItems = items.filter(it => !ciList.find(ci => ci.item_id === it.id));
+          return (
+            <div key={c.id} style={{ borderBottom: i < containers.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px" }}>
+                <span style={{ fontSize: 18 }}>{ctIcon(c.type)}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 500, fontSize: 14 }}>{c.name}</span>
+                    <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
+                    {c.color && <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>
+                    {isMisc ? "Event-specific items" : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
+                    {area ? ` · ${area.name}` : ""}
+                    {c.dim_w_ft && c.dim_d_ft ? ` · ${c.dim_w_ft}×${c.dim_d_ft}ft` : ""}
+                    {c.notes ? ` · ${c.notes}` : ""}
+                  </div>
+                </div>
+                {!isMisc && (
+                  <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => setExpandedId(isExpanded ? null : c.id)}>
+                    {isExpanded ? "▲ Items" : "▼ Items"}
+                  </button>
+                )}
+                <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => openEdit(c)}>Edit</button>
+                <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(c.id)}>Remove</button>
+              </div>
+              {isExpanded && !isMisc && (
+                <div style={{ padding: "0 14px 14px 42px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {ciList.map(ci => {
+                    const item = items.find(it => it.id === ci.item_id);
+                    if (!item) return null;
+                    return (
+                      <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{item.name}</span>
+                        <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContainerItemQty(ci.id, ci.qty - 1)}>−</button>
+                        <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
+                        <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContainerItemQty(ci.id, ci.qty + 1)}>+</button>
+                        <button style={{ ...dangerBtn, padding: "3px 8px" }} onClick={() => removeContainerItem(ci.id)}>✕</button>
+                      </div>
+                    );
+                  })}
+                  {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items yet</div>}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
+                    <select value={addItemForm.item_id} onChange={e => setAddItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyle, flex: 1, fontSize: 13, padding: "6px 10px" }}>
+                      <option value="">Select item...</option>
+                      {availableItems.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                    </select>
+                    <input type="number" value={addItemForm.qty} onChange={e => setAddItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
+                    <button style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }} onClick={() => addItemToContainer(c.id)} disabled={addingItem || !addItemForm.item_id}>Add</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {containers.length === 0 && <div style={{ padding: 16, fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No containers yet</div>}
+      </div>
+
+      {showModal && (
+        <Modal title={editContainer ? "Edit Container" : "Add Container"} onClose={() => setShowModal(false)} onSave={save} saveLabel={editContainer ? "Save" : "Add Container"} saving={saving} isMobile={m}>
+          <label style={labelStyle}>Name</label>
+          <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="e.g. Medical Tote, Water Tote" autoFocus />
+          <label style={labelStyle}>Type</label>
+          <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} style={iStyle}>
+            {CONTAINER_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+          </select>
+          {form.type === "travel_case" && (
+            <>
+              <label style={labelStyle}>Linked Area (optional)</label>
+              <select value={form.area_id} onChange={e => setForm(f => ({ ...f, area_id: e.target.value }))} style={iStyle}>
+                <option value="">No area linked</option>
+                {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </>
+          )}
+          <label style={labelStyle}>Trailer Diagram Size (optional)</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="number" value={form.dim_w_ft} onChange={e => setForm(f => ({ ...f, dim_w_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Width (ft)" min="0.5" step="0.5" />
+            <span style={{ color: "#9ca3af", fontSize: 13 }}>×</span>
+            <input type="number" value={form.dim_d_ft} onChange={e => setForm(f => ({ ...f, dim_d_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Depth (ft)" min="0.5" step="0.5" />
+          </div>
+          <label style={labelStyle}>Color (optional)</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setForm(f => ({ ...f, color: "" }))} style={{ width: 28, height: 28, borderRadius: "50%", background: "#fff", border: form.color === "" ? "3px solid #111" : "2px solid #e5e7eb", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
+            {CONTAINER_COLORS.map(col => (
+              <button key={col} onClick={() => setForm(f => ({ ...f, color: col }))}
+                style={{ width: 28, height: 28, borderRadius: "50%", background: col, border: form.color === col ? "3px solid #111" : "2px solid transparent", cursor: "pointer", outline: "none", padding: 0 }} />
+            ))}
+          </div>
+          <label style={labelStyle}>Notes (optional)</label>
+          <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Any details..." />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -805,6 +1006,9 @@ export default function App() {
   const [reports, setReports] = useState([]);
   const [reportItems, setReportItems] = useState([]);
   const [eventTrailers, setEventTrailers] = useState([]);
+  const [containers, setContainers] = useState([]);
+  const [containerItems, setContainerItems] = useState([]);
+  const [eventContainerItems, setEventContainerItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [view, setView] = useState("dashboard");
@@ -889,15 +1093,17 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [i, e, p, cats, tr, et, ar, ai, rp, ri, logoUrl] = await Promise.all([
+      const [i, e, p, cats, tr, et, ar, ai, rp, ri, co, ci, eci, logoUrl] = await Promise.all([
         api.getItems(), api.getEvents(), api.getAllPacking(),
         api.getCategories(), api.getTrailers(), api.getEventTrailers(),
         api.getAreas(), api.getAreaItems(), api.getReports(), api.getReportItems(),
+        api.getContainers(), api.getContainerItems(), api.getEventContainerItems(),
         checkOrgLogoExists()
       ]);
       setItems(i); setEvents(e); setPacking(p);
       setCategories(cats); setTrailers(tr); setEventTrailers(et);
       setAreas(ar); setAreaItems(ai); setReports(rp); setReportItems(ri);
+      setContainers(co); setContainerItems(ci); setEventContainerItems(eci);
       setOrgLogo(logoUrl); setError(null);
     } catch { setError("Could not connect to database."); }
     finally { setLoading(false); }
@@ -981,7 +1187,7 @@ export default function App() {
         {view === "dashboard" && canViewDashboard && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
         {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} showToast={showToast} />}
+        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "users" && isAdmin && <UserManagement isMobile={m} showToast={showToast} currentUserEmail={session.user.email} />}
@@ -1007,6 +1213,9 @@ export default function App() {
           </div>
           <div className="settings-section">
             <TrailerManager trailers={trailers} setTrailers={setTrailers} showToast={showToast} isMobile={m} />
+          </div>
+          <div className="settings-section">
+            <ContainerManager containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} isMobile={m} />
           </div>
         </Modal>
       )}
@@ -1494,7 +1703,7 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 }
 
 // ─── Event Detail ─────────────────────────────────────────────────────────────
-function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, eventTrailers, setEventTrailers, setView, showToast }) {
+function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, eventTrailers, setEventTrailers, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
   const [showDiagram, setShowDiagram] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
@@ -1510,6 +1719,13 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [copyEventId, setCopyEventId] = useState("");
   const [showEdit, setShowEdit] = useState(false);
   const [showTrailerManager, setShowTrailerManager] = useState(false);
+  const [addContainerId, setAddContainerId] = useState("");
+  const [expandedContainerId, setExpandedContainerId] = useState(null);
+  const [miscEditEntry, setMiscEditEntry] = useState(null);
+  const [miscItemForm, setMiscItemForm] = useState({ item_id: "", qty: 1 });
+  const [miscSaving, setMiscSaving] = useState(false);
+  const [showPackingLists, setShowPackingLists] = useState(false);
+  const [packingListTab, setPackingListTab] = useState("trailer");
   const [editForm, setEditForm] = useState({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
 
   useEffect(() => {
@@ -1581,7 +1797,15 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const addToList = async () => {
     setSaving(true);
     try {
-      if (addMode === "temp") {
+      if (addMode === "container") {
+        if (!addContainerId) { setSaving(false); return; }
+        if (eventPacking.find(p => p.container_id === addContainerId)) { showToast("Container already in list"); setSaving(false); return; }
+        const entry = { event_id: event.id, container_id: addContainerId, item_id: null, qty_needed: 1, packed: false, returned: false };
+        if (addTrailerId) entry.trailer_id = addTrailerId;
+        const created = await api.addPacking(entry);
+        setPacking(prev => [...prev, created[0]]);
+        showToast("Container added");
+      } else if (addMode === "temp") {
         if (!adHocName.trim()) { setSaving(false); return; }
         const entry = {
           event_id: event.id, item_id: null,
@@ -1606,6 +1830,29 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
       setShowAddItem(false);
     } catch { showToast("Error adding item"); }
     setSaving(false);
+  };
+
+  const addMiscItem = async (entry) => {
+    if (!miscItemForm.item_id) return;
+    setMiscSaving(true);
+    try {
+      const created = await api.addEventContainerItem({ event_id: event.id, container_id: entry.container_id, item_id: miscItemForm.item_id, qty: miscItemForm.qty || 1 });
+      setEventContainerItems(prev => [...prev, created[0]]);
+      setMiscItemForm({ item_id: "", qty: 1 });
+      showToast("Item added");
+    } catch { showToast("Error adding item"); }
+    setMiscSaving(false);
+  };
+
+  const removeMiscItem = async (id) => {
+    try { await api.deleteEventContainerItem(id); setEventContainerItems(prev => prev.filter(e => e.id !== id)); }
+    catch { showToast("Error removing item"); }
+  };
+
+  const updateMiscItemQty = async (id, qty) => {
+    if (qty < 1) return;
+    try { await api.updateEventContainerItem(id, { qty }); setEventContainerItems(prev => prev.map(e => e.id === id ? { ...e, qty } : e)); }
+    catch { showToast("Error updating qty"); }
   };
 
   const copyFromEvent = async () => {
@@ -1635,6 +1882,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const total = eventPacking.length;
   const progress = total > 0 ? Math.round((totalPacked / total) * 100) : 0;
   const availableToAdd = items.filter(i => !eventPacking.find(p => p.item_id === i.id));
+  const availableContainers = containers.filter(c => !eventPacking.find(p => p.container_id === c.id));
   const otherEvents = events.filter(e => e.id !== event.id && packing.some(p => p.event_id === e.id));
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -1647,9 +1895,15 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
 
   const activeTrailer = assignedTrailers.find(t => t.id === activeTab);
 
-  // Group by category (temp items go under "Temporary")
+  // Split container entries from loose items
+  const containerPacking = visiblePacking.filter(p => p.container_id).map(p => ({
+    ...p, container: containers.find(c => c.id === p.container_id),
+  }));
+  const loosePacking = visiblePacking.filter(p => !p.container_id);
+
+  // Group loose items by category (temp items go under "Temporary")
   const grouped = {};
-  visiblePacking.forEach(p => {
+  loosePacking.forEach(p => {
     const item = items.find(i => i.id === p.item_id);
     if (!item && !p.ad_hoc_name) return;
     const cat = item?.category || "Temporary";
@@ -1716,7 +1970,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
       {activeTrailer && showDiagram && (
         <TrailerCanvas
           trailer={activeTrailer}
-          packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id) }))}
+          packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id), container: containers.find(c => c.id === p.container_id) }))}
           setPacking={setPacking}
           showToast={showToast}
           eventName={event.name}
@@ -1730,13 +1984,171 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {otherEvents.length > 0 && <button style={{ ...ghostBtn, fontSize: m ? 13 : 12, padding: m ? "8px 12px" : "7px 14px" }} onClick={() => { setCopyEventId(otherEvents[0].id); setShowCopy(true); }}>Copy</button>}
-          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setAddTrailerId(activeTab !== "all" && activeTab !== "unassigned" ? activeTab : ""); setAddMode("inventory"); setAdHocName(""); setAdHocDimW(""); setAdHocDimD(""); setShowAddItem(true); }}>+ Add Item</button>
+          <button style={{ ...ghostBtn, padding: m ? "8px 12px" : "7px 14px", fontSize: m ? 13 : 12 }} onClick={() => { setPackingListTab("trailer"); setShowPackingLists(true); }}>📋 Lists</button>
+          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddContainerId(availableContainers[0]?.id || ""); setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setAddTrailerId(activeTab !== "all" && activeTab !== "unassigned" ? activeTab : ""); setAddMode("container"); setAdHocName(""); setAdHocDimW(""); setAdHocDimD(""); setShowAddItem(true); }}>+ Add</button>
         </div>
       </div>
 
-      {Object.keys(grouped).length === 0 && (
+      {containerPacking.length === 0 && Object.keys(grouped).length === 0 && (
         <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
-          {activeTab === "unassigned" ? "No unassigned items" : "No items yet — add from inventory or copy from another event"}
+          {activeTab === "unassigned" ? "No unassigned items" : "No items yet — add containers or large items"}
+        </div>
+      )}
+
+      {/* Container accordion entries */}
+      {containerPacking.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>Containers</div>
+          <div className="card" style={{ overflow: "hidden" }}>
+            {containerPacking.map((entry, i) => {
+              const c = entry.container;
+              if (!c) return null;
+              const isMisc = c.type === "misc";
+              const ciList = isMisc
+                ? eventContainerItems.filter(e => e.event_id === event.id && e.container_id === c.id)
+                : containerItems.filter(ci => ci.container_id === c.id);
+              const isExpanded = expandedContainerId === entry.id;
+              const area = c.area_id ? containers.find(() => false) : null; // area lookup handled in display
+              return (
+                <div key={entry.id} style={{ borderBottom: i < containerPacking.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  {m ? (
+                    <div style={{ padding: "14px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 16 }}>{ctIcon(c.type)}</span>
+                            <span style={{ fontWeight: 500, fontSize: 15 }}>{c.name}</span>
+                            <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
+                            {c.color && <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+                            {isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
+                          </div>
+                          {assignedTrailers.length > 0 && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                              {assignedTrailers.map(t => (
+                                <button key={t.id} onClick={() => assignTrailerToItem(entry, t.id)}
+                                  style={{ padding: "4px 10px", borderRadius: 99, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${entry.trailer_id === t.id ? "#1a1a2e" : "#e5e7eb"}`, background: entry.trailer_id === t.id ? "#1a1a2e" : "#fff", color: entry.trailer_id === t.id ? "#fff" : "#6b7280" }}>
+                                  🚛 {t.number}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <button style={{ ...dangerBtn, padding: "6px 10px", marginLeft: 8 }} onClick={() => removeFromList(entry.id)}>✕</button>
+                      </div>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, background: entry.packed ? "#f0fdf4" : "#f8f9fb", borderRadius: 8, padding: "10px 14px", cursor: "pointer", border: `1px solid ${entry.packed ? "#bbf7d0" : "#e5e7eb"}` }}
+                          onClick={() => toggleField(entry, "packed")}>
+                          <div className={`check-box-mobile ${entry.packed ? "checked" : ""}`}>{entry.packed && <Checkmark />}</div>
+                          <span style={{ fontSize: 14, fontWeight: 500, color: entry.packed ? "#15803d" : "#374151" }}>Packed</span>
+                        </div>
+                        <button style={{ ...ghostBtn, flex: 1, fontSize: 13, padding: "10px" }} onClick={() => { setExpandedContainerId(isExpanded ? null : entry.id); if (isMisc) setMiscEditEntry(entry); }}>
+                          {isExpanded ? "▲ Items" : "▼ Items"}
+                        </button>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                          {ciList.map(ci => {
+                            const it = items.find(x => x.id === ci.item_id);
+                            if (!it) return null;
+                            return (
+                              <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
+                                <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{it.name}</span>
+                                {isMisc ? (
+                                  <>
+                                    <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty - 1)}>−</button>
+                                    <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
+                                    <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty + 1)}>+</button>
+                                    <button style={{ ...dangerBtn, padding: "3px 8px" }} onClick={() => removeMiscItem(ci.id)}>✕</button>
+                                  </>
+                                ) : (
+                                  <span style={{ fontSize: 13, color: "#9ca3af" }}>×{ci.qty}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? "No items added yet" : "No items in loadout"}</div>}
+                          {isMisc && (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, paddingTop: 8, borderTop: "1px solid #f3f4f6" }}>
+                              <select value={miscItemForm.item_id} onChange={e => setMiscItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyleMobile, flex: 1, fontSize: 14 }}>
+                                <option value="">Select item...</option>
+                                {items.filter(it => !ciList.find(ci => ci.item_id === it.id)).map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                              </select>
+                              <input type="number" value={miscItemForm.qty} onChange={e => setMiscItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyleMobile, width: 64, fontSize: 14 }} min={1} />
+                              <button style={{ ...primaryBtn, padding: "11px 14px" }} onClick={() => addMiscItem(entry)} disabled={miscSaving || !miscItemForm.item_id}>Add</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ padding: "12px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div className={`check-box-desktop ${entry.packed ? "checked" : ""}`} onClick={() => toggleField(entry, "packed")}>{entry.packed && <Checkmark />}</div>
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>Packed</span>
+                        <span style={{ fontSize: 18 }}>{ctIcon(c.type)}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 14, fontWeight: 500 }}>{c.name}</span>
+                            <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
+                            {c.color && <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                          </div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}</span>
+                            {assignedTrailers.length > 0 && assignedTrailers.map(t => (
+                              <button key={t.id} onClick={() => assignTrailerToItem(entry, t.id)}
+                                style={{ padding: "2px 8px", borderRadius: 99, fontSize: 11, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${entry.trailer_id === t.id ? "#1a1a2e" : "#e5e7eb"}`, background: entry.trailer_id === t.id ? "#1a1a2e" : "#fff", color: entry.trailer_id === t.id ? "#fff" : "#6b7280" }}>
+                                🚛 {t.number}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => setExpandedContainerId(isExpanded ? null : entry.id)}>
+                          {isExpanded ? "▲ Items" : "▼ Items"}
+                        </button>
+                        <button style={{ ...dangerBtn, padding: "4px 8px", fontSize: 11 }} onClick={() => removeFromList(entry.id)}>✕</button>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ marginTop: 10, paddingLeft: 56, display: "flex", flexDirection: "column", gap: 4 }}>
+                          {ciList.map(ci => {
+                            const it = items.find(x => x.id === ci.item_id);
+                            if (!it) return null;
+                            return (
+                              <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{it.name}</span>
+                                {isMisc ? (
+                                  <>
+                                    <button style={{ ...ghostBtn, padding: "1px 6px", fontSize: 12, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty - 1)}>−</button>
+                                    <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
+                                    <button style={{ ...ghostBtn, padding: "1px 6px", fontSize: 12, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty + 1)}>+</button>
+                                    <button style={{ ...dangerBtn, padding: "2px 7px", fontSize: 11 }} onClick={() => removeMiscItem(ci.id)}>✕</button>
+                                  </>
+                                ) : (
+                                  <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ci.qty}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? "No items added yet" : "No items in loadout"}</div>}
+                          {isMisc && (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: "1px solid #f3f4f6" }}>
+                              <select value={miscItemForm.item_id} onChange={e => setMiscItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyle, flex: 1, fontSize: 13, padding: "6px 10px" }}>
+                                <option value="">Select item...</option>
+                                {items.filter(it => !ciList.find(ci => ci.item_id === it.id)).map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                              </select>
+                              <input type="number" value={miscItemForm.qty} onChange={e => setMiscItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
+                              <button style={{ ...primaryBtn, padding: "7px 12px", fontSize: 12 }} onClick={() => addMiscItem(entry)} disabled={miscSaving || !miscItemForm.item_id}>Add</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -1875,10 +2287,27 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
       {showAddItem && (
         <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel="Add to List" saving={saving} isMobile={m}>
           <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 8, padding: 4 }}>
-            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "inventory" ? "#fff" : "transparent", color: addMode === "inventory" ? "#111" : "#6b7280", boxShadow: addMode === "inventory" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("inventory")}>From Inventory</button>
-            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "temp" ? "#fff" : "transparent", color: addMode === "temp" ? "#7c3aed" : "#6b7280", boxShadow: addMode === "temp" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("temp")}>Temp Item</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "container" ? "#fff" : "transparent", color: addMode === "container" ? "#2563eb" : "#6b7280", boxShadow: addMode === "container" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("container")}>📦 Container</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "inventory" ? "#fff" : "transparent", color: addMode === "inventory" ? "#111" : "#6b7280", boxShadow: addMode === "inventory" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("inventory")}>Item</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "temp" ? "#fff" : "transparent", color: addMode === "temp" ? "#7c3aed" : "#6b7280", boxShadow: addMode === "temp" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("temp")}>Temp</button>
           </div>
-          {addMode === "inventory" ? (
+          {addMode === "container" ? (
+            <>
+              <label style={labelStyle}>Select Container</label>
+              <select value={addContainerId} onChange={e => setAddContainerId(e.target.value)} style={iStyle}>
+                {availableContainers.length === 0 ? <option value="">All containers already added</option> : availableContainers.map(c => <option key={c.id} value={c.id}>{ctIcon(c.type)} {c.name} ({ctLabel(c.type)})</option>)}
+              </select>
+              {assignedTrailers.length > 0 && (
+                <>
+                  <label style={labelStyle}>Assign to Trailer (optional)</label>
+                  <select value={addTrailerId} onChange={e => setAddTrailerId(e.target.value)} style={iStyle}>
+                    <option value="">No trailer assigned</option>
+                    {assignedTrailers.map(t => <option key={t.id} value={t.id}>Trailer {t.number}</option>)}
+                  </select>
+                </>
+              )}
+            </>
+          ) : addMode === "inventory" ? (
             <>
               <label style={labelStyle}>Select Item</label>
               <select value={addItemId} onChange={e => setAddItemId(e.target.value)} style={iStyle}>
@@ -1898,9 +2327,13 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
               <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Event-specific — won't affect master inventory.</p>
             </>
           )}
-          <label style={labelStyle}>Qty Needed</label>
-          <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={iStyle} min={1} />
-          {assignedTrailers.length > 0 && (
+          {addMode !== "container" && (
+            <>
+              <label style={labelStyle}>Qty Needed</label>
+              <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={iStyle} min={1} />
+            </>
+          )}
+          {addMode !== "container" && assignedTrailers.length > 0 && (
             <>
               <label style={labelStyle}>Assign to Trailer (optional)</label>
               <select value={addTrailerId} onChange={e => setAddTrailerId(e.target.value)} style={iStyle}>
@@ -1908,6 +2341,111 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                 {assignedTrailers.map(t => <option key={t.id} value={t.id}>Trailer {t.number}</option>)}
               </select>
             </>
+          )}
+        </Modal>
+      )}
+
+      {showPackingLists && (
+        <Modal title="Packing Lists" onClose={() => setShowPackingLists(false)} onSave={() => setShowPackingLists(false)} saveLabel="Done" saving={false} isMobile={m} wide>
+          <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 8, padding: 4, marginBottom: 4 }}>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: packingListTab === "trailer" ? "#fff" : "transparent", color: packingListTab === "trailer" ? "#111" : "#6b7280", boxShadow: packingListTab === "trailer" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setPackingListTab("trailer")}>By Trailer</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: packingListTab === "container" ? "#fff" : "transparent", color: packingListTab === "container" ? "#111" : "#6b7280", boxShadow: packingListTab === "container" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setPackingListTab("container")}>By Container</button>
+          </div>
+
+          {packingListTab === "trailer" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {assignedTrailers.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 20 }}>No trailers assigned to this event</div>}
+              {assignedTrailers.map(t => {
+                const tContainers = eventPacking.filter(p => p.container_id && p.trailer_id === t.id).map(p => ({ ...p, container: containers.find(c => c.id === p.container_id) }));
+                const tLoose = eventPacking.filter(p => !p.container_id && p.trailer_id === t.id);
+                return (
+                  <div key={t.id}>
+                    <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, paddingBottom: 6, borderBottom: "2px solid #1a1a2e" }}>🚛 Trailer {t.number}</div>
+                    {tContainers.length === 0 && tLoose.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>Nothing assigned to this trailer</div>}
+                    {tContainers.map(entry => {
+                      const c = entry.container;
+                      if (!c) return null;
+                      const isMisc = c.type === "misc";
+                      const ciList = isMisc
+                        ? eventContainerItems.filter(e => e.event_id === event.id && e.container_id === c.id)
+                        : containerItems.filter(ci => ci.container_id === c.id);
+                      return (
+                        <div key={entry.id} style={{ marginBottom: 10 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                            <span>{ctIcon(c.type)}</span>
+                            <span style={{ fontWeight: 500, fontSize: 13 }}>{c.name}</span>
+                            <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 6px", borderRadius: 99, fontSize: 11 }}>{ctLabel(c.type)}</span>
+                          </div>
+                          {ciList.map(ci => {
+                            const it = items.find(x => x.id === ci.item_id);
+                            return it ? <div key={ci.id} style={{ fontSize: 12, color: "#374151", paddingLeft: 22, paddingBottom: 2 }}>• {it.name} ×{ci.qty}</div> : null;
+                          })}
+                          {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 22 }}>No items</div>}
+                        </div>
+                      );
+                    })}
+                    {tLoose.length > 0 && (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Loose Items</div>
+                        {tLoose.map(p => {
+                          const it = items.find(x => x.id === p.item_id);
+                          const name = it?.name || p.ad_hoc_name || "Item";
+                          return <div key={p.id} style={{ fontSize: 12, color: "#374151", paddingBottom: 2 }}>• {name} ×{p.qty_needed || 1}</div>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {eventPacking.some(p => !p.trailer_id) && (
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, paddingBottom: 6, borderBottom: "2px solid #9ca3af", color: "#6b7280" }}>Unassigned</div>
+                  {eventPacking.filter(p => !p.trailer_id).map(p => {
+                    const c = containers.find(x => x.id === p.container_id);
+                    const it = items.find(x => x.id === p.item_id);
+                    const name = c?.name || it?.name || p.ad_hoc_name || "Item";
+                    return <div key={p.id} style={{ fontSize: 12, color: "#374151", paddingBottom: 2 }}>• {c ? ctIcon(c.type) + " " : ""}{name}</div>;
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {packingListTab === "container" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {eventPacking.filter(p => p.container_id).length === 0 && <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 20 }}>No containers on this event's packing list</div>}
+              {eventPacking.filter(p => p.container_id).map(entry => {
+                const c = containers.find(x => x.id === entry.container_id);
+                if (!c) return null;
+                const isMisc = c.type === "misc";
+                const ciList = isMisc
+                  ? eventContainerItems.filter(e => e.event_id === event.id && e.container_id === c.id)
+                  : containerItems.filter(ci => ci.container_id === c.id);
+                const trailer = trailers.find(t => t.id === entry.trailer_id);
+                return (
+                  <div key={entry.id} style={{ borderBottom: "1px solid #f3f4f6", paddingBottom: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                      <span style={{ fontSize: 18 }}>{ctIcon(c.type)}</span>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</span>
+                      <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 6px", borderRadius: 99, fontSize: 11 }}>{ctLabel(c.type)}</span>
+                      {c.color && <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                      {trailer && <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>🚛 Trailer {trailer.number}</span>}
+                    </div>
+                    {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 4 }}>No items {isMisc ? "added for this event" : "in loadout"}</div>}
+                    {ciList.map(ci => {
+                      const it = items.find(x => x.id === ci.item_id);
+                      return it ? (
+                        <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 4, paddingBottom: 4 }}>
+                          <div style={{ width: 14, height: 14, border: "1.5px solid #d1d5db", borderRadius: 3, flexShrink: 0 }} />
+                          <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>{it.name}</span>
+                          <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ci.qty}</span>
+                        </div>
+                      ) : null;
+                    })}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </Modal>
       )}

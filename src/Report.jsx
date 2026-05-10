@@ -247,11 +247,7 @@ export default function Report() {
             {itemsForArea.length === 0 && (
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 20 }}>
                 <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 8 }}>No items assigned to this area yet</div>
-                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 14 }}>You can still submit a general report with any notes or issues from your area.</div>
-                <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 8 }}>General Notes</label>
-                <textarea value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
-                  style={{ width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit", resize: "none", height: 100, outline: "none" }}
-                  placeholder="Any issues, observations, or notes from your area..." />
+                <div style={{ fontSize: 13, color: "#6b7280" }}>Use the notes section below to record anything from your area.</div>
               </div>
             )}
 
@@ -304,6 +300,14 @@ export default function Report() {
                 </div>
               );
             })}
+
+            <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 18 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Additional Notes</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>Anything else from your area not related to specific items — incidents, observations, feedback, etc.</div>
+              <textarea value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
+                style={{ width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit", resize: "none", height: 100, outline: "none" }}
+                placeholder="Optional..." />
+            </div>
 
             {error && <div style={{ color: "#dc2626", fontSize: 14, padding: "10px 14px", background: "#fef2f2", borderRadius: 8 }}>{error}</div>}
 
@@ -358,6 +362,13 @@ export default function Report() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {generalNotes.trim() && (
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 8, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Additional Notes</div>
+                <div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>{generalNotes}</div>
               </div>
             )}
 

@@ -77,14 +77,19 @@ const api = {
   updateUserPerm: (id, patch) => sb(`user_permissions?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUserPerm: (id) => sb(`user_permissions?id=eq.${id}`, { method: "DELETE" }),
   uploadDiagram: async (file, eventId, trailerId) => {
-    const path = `diagrams/${eventId}-${trailerId}`;
+    const path = `diagram-${eventId}-${trailerId}`;
+    const token = authToken || SUPABASE_KEY;
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Content-Type": file.type, "x-upsert": "true" },
       body: file,
     });
-    if (!res.ok) { const err = await res.text(); throw new Error(err); }
-    return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("Diagram upload failed:", res.status, err);
+      throw new Error(err);
+    }
+    return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}?t=${Date.now()}`;
   },
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {

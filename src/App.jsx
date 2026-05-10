@@ -1721,7 +1721,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [showTrailerManager, setShowTrailerManager] = useState(false);
   const [addContainerId, setAddContainerId] = useState("");
   const [expandedContainerId, setExpandedContainerId] = useState(null);
-  const [miscEditEntry, setMiscEditEntry] = useState(null);
   const [miscItemForm, setMiscItemForm] = useState({ item_id: "", qty: 1 });
   const [miscSaving, setMiscSaving] = useState(false);
   const [showPackingLists, setShowPackingLists] = useState(false);
@@ -2008,7 +2007,6 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                 ? eventContainerItems.filter(e => e.event_id === event.id && e.container_id === c.id)
                 : containerItems.filter(ci => ci.container_id === c.id);
               const isExpanded = expandedContainerId === entry.id;
-              const area = c.area_id ? containers.find(() => false) : null; // area lookup handled in display
               return (
                 <div key={entry.id} style={{ borderBottom: i < containerPacking.length - 1 ? "1px solid #f3f4f6" : "none" }}>
                   {m ? (
@@ -2043,7 +2041,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                           <div className={`check-box-mobile ${entry.packed ? "checked" : ""}`}>{entry.packed && <Checkmark />}</div>
                           <span style={{ fontSize: 14, fontWeight: 500, color: entry.packed ? "#15803d" : "#374151" }}>Packed</span>
                         </div>
-                        <button style={{ ...ghostBtn, flex: 1, fontSize: 13, padding: "10px" }} onClick={() => { setExpandedContainerId(isExpanded ? null : entry.id); if (isMisc) setMiscEditEntry(entry); }}>
+                        <button style={{ ...ghostBtn, flex: 1, fontSize: 13, padding: "10px" }} onClick={() => setExpandedContainerId(isExpanded ? null : entry.id)}>
                           {isExpanded ? "▲ Items" : "▼ Items"}
                         </button>
                       </div>

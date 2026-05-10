@@ -48,6 +48,7 @@ const api = {
   deleteTrailer: (id) => sb(`trailers?id=eq.${id}`, { method: "DELETE" }),
   getEventTrailers: () => sb("event_trailers"),
   addEventTrailer: (et) => sb("event_trailers", { method: "POST", body: JSON.stringify(et) }),
+  updateEventTrailer: (id, patch) => sb(`event_trailers?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteEventTrailer: (id) => sb(`event_trailers?id=eq.${id}`, { method: "DELETE" }),
   deleteEventTrailersByEvent: (eventId) => sb(`event_trailers?event_id=eq.${eventId}`, { method: "DELETE" }),
   getAreas: () => sb("areas?order=sort_order"),
@@ -75,6 +76,16 @@ const api = {
   addUserPerm: (p) => sb("user_permissions", { method: "POST", body: JSON.stringify(p) }),
   updateUserPerm: (id, patch) => sb(`user_permissions?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUserPerm: (id) => sb(`user_permissions?id=eq.${id}`, { method: "DELETE" }),
+  uploadDiagram: async (file, eventId, trailerId) => {
+    const path = `diagrams/${eventId}-${trailerId}`;
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+      body: file,
+    });
+    if (!res.ok) { const err = await res.text(); throw new Error(err); }
+    return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
+  },
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
@@ -1729,6 +1740,9 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, eventTrailers, setEventTrailers, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
   const [showDiagram, setShowDiagram] = useState(false);
+  const [diagramView, setDiagramView] = useState("web"); // "web" | "imported"
+  const [uploadingDiagram, setUploadingDiagram] = useState(false);
+  const diagramInputRef = useRef();
   const [showAddItem, setShowAddItem] = useState(false);
   const [addItemId, setAddItemId] = useState("");
   const [addQty, setAddQty] = useState(1);
@@ -1916,6 +1930,31 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
     : eventPacking.filter(p => p.trailer_id === activeTab);
 
   const activeTrailer = assignedTrailers.find(t => t.id === activeTab);
+  const activeEventTrailer = assignedEventTrailers.find(et => et.trailer_id === activeTab);
+
+  const uploadTrailerDiagram = async (file) => {
+    if (!file || !activeEventTrailer) return;
+    setUploadingDiagram(true);
+    try {
+      const url = await api.uploadDiagram(file, event.id, activeTrailer.id);
+      await api.updateEventTrailer(activeEventTrailer.id, { diagram_url: url });
+      setEventTrailers(prev => prev.map(et => et.id === activeEventTrailer.id ? { ...et, diagram_url: url } : et));
+      setDiagramView("imported");
+      setShowDiagram(true);
+      showToast("Diagram uploaded");
+    } catch { showToast("Error uploading diagram"); }
+    setUploadingDiagram(false);
+  };
+
+  const removeTrailerDiagram = async () => {
+    if (!activeEventTrailer) return;
+    try {
+      await api.updateEventTrailer(activeEventTrailer.id, { diagram_url: null });
+      setEventTrailers(prev => prev.map(et => et.id === activeEventTrailer.id ? { ...et, diagram_url: null } : et));
+      setDiagramView("web");
+      showToast("Diagram removed");
+    } catch { showToast("Error removing diagram"); }
+  };
 
   // Split container entries from loose items
   const containerPacking = visiblePacking.filter(p => p.container_id).map(p => ({
@@ -1980,23 +2019,56 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           ))}
           <button className={`trailer-tab ${activeTab === "unassigned" ? "active" : ""}`} onClick={() => setActiveTab("unassigned")}>Unassigned</button>
           {activeTrailer && (
-            <button onClick={() => setShowDiagram(d => !d)}
-              style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: showDiagram ? "#1a1a2e" : "#fff", color: showDiagram ? "#fff" : "#374151", whiteSpace: "nowrap", flexShrink: 0 }}>
-              {showDiagram ? "Hide Diagram" : "Show Diagram"}
-            </button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
+              <input ref={diagramInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }}
+                onChange={e => { if (e.target.files[0]) uploadTrailerDiagram(e.target.files[0]); e.target.value = ""; }} />
+              <button onClick={() => diagramInputRef.current.click()} disabled={uploadingDiagram}
+                style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: "#fff", color: "#374151", whiteSpace: "nowrap", opacity: uploadingDiagram ? 0.5 : 1 }}>
+                {uploadingDiagram ? "Uploading..." : "⬆ Import PNG"}
+              </button>
+              <button onClick={() => setShowDiagram(d => !d)}
+                style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: showDiagram ? "#1a1a2e" : "#fff", color: showDiagram ? "#fff" : "#374151", whiteSpace: "nowrap" }}>
+                {showDiagram ? "Hide Diagram" : "Show Diagram"}
+              </button>
+            </div>
           )}
         </div>
       )}
 
-      {/* Trailer canvas */}
+      {/* Trailer diagram */}
       {activeTrailer && showDiagram && (
-        <TrailerCanvas
-          trailer={activeTrailer}
-          packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id), container: containers.find(c => c.id === p.container_id) }))}
-          setPacking={setPacking}
-          showToast={showToast}
-          eventName={event.name}
-        />
+        <div>
+          {activeEventTrailer?.diagram_url && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <button onClick={() => setDiagramView("web")}
+                style={{ padding: "5px 12px", borderRadius: 7, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: diagramView === "web" ? "#1a1a2e" : "#fff", color: diagramView === "web" ? "#fff" : "#374151" }}>
+                Web Diagram
+              </button>
+              <button onClick={() => setDiagramView("imported")}
+                style={{ padding: "5px 12px", borderRadius: 7, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: diagramView === "imported" ? "#1a1a2e" : "#fff", color: diagramView === "imported" ? "#fff" : "#374151" }}>
+                Imported Image
+              </button>
+              <button onClick={removeTrailerDiagram}
+                style={{ padding: "5px 10px", borderRadius: 7, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #fca5a5", background: "none", color: "#dc2626", marginLeft: "auto" }}>
+                Remove Image
+              </button>
+            </div>
+          )}
+          {diagramView === "imported" && activeEventTrailer?.diagram_url ? (
+            <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+              <img src={activeEventTrailer.diagram_url} alt={`Trailer ${activeTrailer.number} diagram`}
+                style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: 520 }} />
+            </div>
+          ) : (
+            <TrailerCanvas
+              trailer={activeTrailer}
+              packingEntries={visiblePacking.map(p => ({ ...p, item: items.find(i => i.id === p.item_id), container: containers.find(c => c.id === p.container_id) }))}
+              setPacking={setPacking}
+              showToast={showToast}
+              eventName={event.name}
+            />
+          )}
+        </div>
       )}
 
       {/* Packing list header */}

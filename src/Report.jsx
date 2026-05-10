@@ -303,7 +303,7 @@ export default function Report() {
 
             <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 18 }}>
               <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Additional Notes</div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>Anything else from your area not related to specific items — incidents, observations, feedback, etc.</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>Anything else from your area not related to specific items</div>
               <textarea value={generalNotes} onChange={e => setGeneralNotes(e.target.value)}
                 style={{ width: "100%", padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit", resize: "none", height: 100, outline: "none" }}
                 placeholder="Optional..." />

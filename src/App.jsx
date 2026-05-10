@@ -1134,6 +1134,7 @@ export default function App() {
   const canViewEvents    = isAdmin || ok(userPerms.can_view_events);
   const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
+  const canViewContainers = isAdmin || ok(userPerms.can_view_inventory);
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -1173,6 +1174,7 @@ export default function App() {
         {!m && <>
           {canViewDashboard && <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>}
           {canViewInventory && <button className={`nav-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}>Inventory</button>}
+          {canViewContainers && <button className={`nav-btn ${view === "containers" ? "active" : ""}`} onClick={() => setView("containers")}>Containers</button>}
           {canViewEvents && <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>}
           {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
@@ -1186,6 +1188,7 @@ export default function App() {
       <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
         {view === "dashboard" && canViewDashboard && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
         {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
+        {view === "containers" && canViewContainers && <ContainersPage isMobile={m} containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} />}
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
         {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
@@ -1197,6 +1200,7 @@ export default function App() {
         <nav className="tab-bar">
           {canViewDashboard && <button className={`tab-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}><span className="tab-icon">🏠</span>Dashboard</button>}
           {canViewInventory && <button className={`tab-btn ${view === "inventory" ? "active" : ""}`} onClick={() => setView("inventory")}><span className="tab-icon">📦</span>Inventory</button>}
+          {canViewContainers && <button className={`tab-btn ${view === "containers" ? "active" : ""}`} onClick={() => setView("containers")}><span className="tab-icon">🗃️</span>Containers</button>}
           {canViewEvents && <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>}
           {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
@@ -1213,9 +1217,6 @@ export default function App() {
           </div>
           <div className="settings-section">
             <TrailerManager trailers={trailers} setTrailers={setTrailers} showToast={showToast} isMobile={m} />
-          </div>
-          <div className="settings-section">
-            <ContainerManager containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} isMobile={m} />
           </div>
         </Modal>
       )}
@@ -1335,6 +1336,28 @@ function Dashboard({ isMobile: m, items, events, packing, trailers, setView, set
       )}
 
       {events.length === 0 && <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet — go to Events to add your season schedule</div>}
+    </div>
+  );
+}
+
+// ─── Containers Page ──────────────────────────────────────────────────────────
+function ContainersPage({ isMobile: m, containers, setContainers, containerItems, setContainerItems, items, areas, showToast }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
+      <div>
+        <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Containers</h1>
+        <p style={{ color: "#6b7280", fontSize: 14 }}>Manage totes, travel cases, and rolling bins — and what goes inside each one.</p>
+      </div>
+      <ContainerManager
+        containers={containers}
+        setContainers={setContainers}
+        containerItems={containerItems}
+        setContainerItems={setContainerItems}
+        items={items}
+        areas={areas}
+        showToast={showToast}
+        isMobile={m}
+      />
     </div>
   );
 }

@@ -2660,12 +2660,30 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             <span>{ctIcon(c.type)}</span>
                             <span style={{ fontWeight: 500, fontSize: 13 }}>{c.name}</span>
                             <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 6px", borderRadius: 99, fontSize: 11 }}>{ctLabel(c.type)}</span>
+                            {(() => { const sc = containers.filter(ch => ch.parent_container_id === c.id).length; return sc > 0 ? <span style={{ fontSize: 11, color: "#9ca3af" }}>· {sc} sub-container{sc !== 1 ? "s" : ""}</span> : null; })()}
                           </div>
                           {ciList.map(ci => {
                             const it = items.find(x => x.id === ci.item_id);
                             return it ? <div key={ci.id} style={{ fontSize: 12, color: "#374151", paddingLeft: 22, paddingBottom: 2 }}>• {it.name} ×{ci.qty}</div> : null;
                           })}
-                          {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 22 }}>No items</div>}
+                          {ciList.length === 0 && !isMisc && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 22 }}>No items</div>}
+                          {!isMisc && containers.filter(ch => ch.parent_container_id === c.id).map(child => {
+                            const childItems = containerItems.filter(ci => ci.container_id === child.id);
+                            return (
+                              <div key={child.id} style={{ paddingLeft: 22, marginTop: 6 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                                  <span style={{ fontSize: 12 }}>{ctIcon(child.type)}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{child.name}</span>
+                                  <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "0px 5px", borderRadius: 99, fontSize: 10 }}>{ctLabel(child.type)}</span>
+                                </div>
+                                {childItems.map(ci => {
+                                  const it = items.find(x => x.id === ci.item_id);
+                                  return it ? <div key={ci.id} style={{ fontSize: 12, color: "#374151", paddingLeft: 14, paddingBottom: 2 }}>• {it.name} ×{ci.qty}</div> : null;
+                                })}
+                                {childItems.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 14 }}>No items</div>}
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })}
@@ -2714,9 +2732,11 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</span>
                       <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 6px", borderRadius: 99, fontSize: 11 }}>{ctLabel(c.type)}</span>
                       {c.color && <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                      {(() => { const sc = containers.filter(ch => ch.parent_container_id === c.id).length; return sc > 0 ? <span style={{ fontSize: 11, color: "#9ca3af" }}>· {sc} sub-container{sc !== 1 ? "s" : ""}</span> : null; })()}
                       {trailer && <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>🚛 Trailer {trailer.number}</span>}
                     </div>
-                    {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 4 }}>No items {isMisc ? "added for this event" : "in loadout"}</div>}
+                    {ciList.length === 0 && !isMisc && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 4 }}>No items in loadout</div>}
+                    {isMisc && ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 4 }}>No items added for this event</div>}
                     {ciList.map(ci => {
                       const it = items.find(x => x.id === ci.item_id);
                       return it ? (
@@ -2726,6 +2746,30 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                           <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ci.qty}</span>
                         </div>
                       ) : null;
+                    })}
+                    {!isMisc && containers.filter(ch => ch.parent_container_id === c.id).map(child => {
+                      const childItems = containerItems.filter(ci => ci.container_id === child.id);
+                      return (
+                        <div key={child.id} style={{ paddingLeft: 4, marginTop: 8, paddingTop: 6, borderTop: "1px dashed #e5e7eb" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
+                            <span style={{ fontSize: 13 }}>{ctIcon(child.type)}</span>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{child.name}</span>
+                            <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "0px 5px", borderRadius: 99, fontSize: 10 }}>{ctLabel(child.type)}</span>
+                            {child.color && <span style={{ width: 8, height: 8, borderRadius: "50%", background: child.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                          </div>
+                          {childItems.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 18 }}>No items in loadout</div>}
+                          {childItems.map(ci => {
+                            const it = items.find(x => x.id === ci.item_id);
+                            return it ? (
+                              <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 18, paddingBottom: 4 }}>
+                                <div style={{ width: 14, height: 14, border: "1.5px solid #d1d5db", borderRadius: 3, flexShrink: 0 }} />
+                                <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>{it.name}</span>
+                                <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ci.qty}</span>
+                              </div>
+                            ) : null;
+                          })}
+                        </div>
+                      );
                     })}
                   </div>
                 );

@@ -1426,6 +1426,25 @@ function EmployeeHours({ isMobile: m, showToast }) {
       {tab === "entries" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {(() => {
+              const t = new Date();
+              const y = t.getFullYear(), mo = t.getMonth();
+              const pad = (n) => String(n).padStart(2, "0");
+              const lastDay = new Date(y, mo + 1, 0).getDate();
+              const monthName = t.toLocaleString("default", { month: "short" });
+              const p1From = `${y}-${pad(mo + 1)}-01`, p1To = `${y}-${pad(mo + 1)}-15`;
+              const p2From = `${y}-${pad(mo + 1)}-16`, p2To = `${y}-${pad(mo + 1)}-${lastDay}`;
+              const p1Active = filterFrom === p1From && filterTo === p1To;
+              const p2Active = filterFrom === p2From && filterTo === p2To;
+              const presetBtn = (label, from, to, active) => (
+                <button onClick={() => { setFilterFrom(from); setFilterTo(to); }} style={{ ...ghostBtn, background: active ? "#1a1a2e" : "none", color: active ? "#fff" : "#374151", borderColor: active ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>{label}</button>
+              );
+              return <>
+                {presetBtn(`1–15 ${monthName}`, p1From, p1To, p1Active)}
+                {presetBtn(`16–${lastDay} ${monthName}`, p2From, p2To, p2Active)}
+              </>;
+            })()}
+            <div style={{ width: 1, height: 24, background: "#e5e7eb", flexShrink: 0 }} />
             <select value={filterCompany} onChange={e => setFilterCompany(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }}>
               <option value="">All Companies</option>
               {COMPANIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
@@ -1434,8 +1453,8 @@ function EmployeeHours({ isMobile: m, showToast }) {
               <option value="">All Employees</option>
               {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
-            <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} placeholder="From" />
-            <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} placeholder="To" />
+            <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} />
+            <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} />
             <button onClick={() => setFilterReview(f => !f)} style={{ ...ghostBtn, background: filterReview ? "#1a1a2e" : "none", color: filterReview ? "#fff" : "#374151", borderColor: filterReview ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>Needs Review</button>
             {(filterCompany || filterEmployee || filterReview || filterFrom || filterTo) && <button onClick={() => { setFilterCompany(""); setFilterEmployee(""); setFilterReview(false); setFilterFrom(""); setFilterTo(""); }} style={{ ...ghostBtn }}>Clear</button>}
           </div>

@@ -1680,7 +1680,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_events: true, can_view_reports: true, can_view_tech: false });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -1796,8 +1796,8 @@ export default function App() {
   const canViewEvents    = isAdmin || ok(userPerms.can_view_events);
   const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
-  const canViewContainers = isAdmin || ok(userPerms.can_view_inventory);
-  const canViewEmployeeHours = isAdmin;
+  const canViewContainers = isAdmin || ok(userPerms.can_view_containers);
+  const canViewEmployeeHours = isAdmin || !!userPerms.can_view_employee_hours;
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -4350,7 +4350,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_events: true, can_view_reports: true, can_view_tech: false });
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -4361,13 +4361,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_events: true, can_view_reports: true, can_view_tech: false });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours });
     setEditUser(user);
     setShowModal(true);
   };
@@ -4377,11 +4377,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -4402,11 +4402,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   };
 
   const PERM_ROWS = [
-    { key: "can_view_dashboard", label: "Dashboard",              sub: "Event overview and stats"         },
-    { key: "can_view_inventory", label: "Inventory",              sub: "Master inventory list"            },
-    { key: "can_view_events",    label: "Events & Packing Lists", sub: "Event details and packing"        },
-    { key: "can_view_reports",   label: "Reports",                sub: "Area reports"                     },
-    { key: "can_view_tech",      label: "Tech Setups",            sub: "Network diagrams (admin feature)" },
+    { key: "can_view_dashboard",      label: "Dashboard",              sub: "Event overview and stats"         },
+    { key: "can_view_inventory",      label: "Inventory",              sub: "Master inventory list"            },
+    { key: "can_view_containers",     label: "Containers",             sub: "Container management"             },
+    { key: "can_view_events",         label: "Events & Packing Lists", sub: "Event details and packing"        },
+    { key: "can_view_reports",        label: "Reports",                sub: "Area reports"                     },
+    { key: "can_view_tech",           label: "Tech Setups",            sub: "Network diagrams (admin feature)" },
+    { key: "can_view_employee_hours", label: "Employee Hours",         sub: "Time tracking and employee hours" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
@@ -4464,9 +4466,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
               <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
                 {user.can_view_dashboard !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Dashboard</span>}
                 {user.can_view_inventory !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Inventory</span>}
+                {user.can_view_containers !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Containers</span>}
                 {user.can_view_events !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Events</span>}
                 {user.can_view_reports !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Reports</span>}
                 {user.can_view_tech && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Tech Setups</span>}
+                {user.can_view_employee_hours && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Employee Hours</span>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

@@ -1293,6 +1293,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
   const [filterCompany, setFilterCompany] = useState("");
   const [filterEmployee, setFilterEmployee] = useState("");
   const [filterReview, setFilterReview] = useState(false);
+  const [entriesView, setEntriesView] = useState("detail"); // detail | summary
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [showAddEmp, setShowAddEmp] = useState(false);
@@ -1457,32 +1458,75 @@ function EmployeeHours({ isMobile: m, showToast }) {
             <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} />
             <button onClick={() => setFilterReview(f => !f)} style={{ ...ghostBtn, background: filterReview ? "#1a1a2e" : "none", color: filterReview ? "#fff" : "#374151", borderColor: filterReview ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>Needs Review</button>
             {(filterCompany || filterEmployee || filterReview || filterFrom || filterTo) && <button onClick={() => { setFilterCompany(""); setFilterEmployee(""); setFilterReview(false); setFilterFrom(""); setFilterTo(""); }} style={{ ...ghostBtn }}>Clear</button>}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 6, padding: 3 }}>
+              {["detail", "summary"].map(v => (
+                <button key={v} onClick={() => setEntriesView(v)} style={{ padding: "4px 12px", border: "none", borderRadius: 5, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: entriesView === v ? "#fff" : "transparent", color: entriesView === v ? "#111" : "#6b7280", boxShadow: entriesView === v ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>{v === "detail" ? "Detail" : "Summary"}</button>
+              ))}
+            </div>
           </div>
-          <div className="card" style={{ overflow: "hidden" }}>
-            {filteredEntries.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No entries match your filters</div>}
-            {filteredEntries.map((entry, i) => {
-              const emp = employees.find(x => x.id === entry.employee_id);
-              return (
-                <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: i < filteredEntries.length - 1 ? "1px solid #f3f4f6" : "none", flexWrap: m ? "wrap" : "nowrap" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{emp?.name || "Unknown"}</span>
-                      <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(emp?.company)}</span>
-                      {entry.is_manual && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
-                      {entry.is_auto_clocked_out && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Auto Clock-Out</span>}
-                      {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
+
+          {entriesView === "summary" ? (() => {
+            const byEmployee = {};
+            filteredEntries.forEach(e => {
+              if (!e.clock_out) return;
+              if (!byEmployee[e.employee_id]) byEmployee[e.employee_id] = { totalMs: 0, shifts: 0, flagged: 0 };
+              byEmployee[e.employee_id].totalMs += new Date(e.clock_out) - new Date(e.clock_in);
+              byEmployee[e.employee_id].shifts += 1;
+              if (e.needs_review) byEmployee[e.employee_id].flagged += 1;
+            });
+            const rows = Object.entries(byEmployee).map(([empId, data]) => ({ empId, ...data, employee: employees.find(x => x.id === empId) }))
+              .sort((a, b) => (a.employee?.company || "").localeCompare(b.employee?.company || "") || (a.employee?.name || "").localeCompare(b.employee?.name || ""));
+            if (rows.length === 0) return <div className="card" style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No completed entries match your filters</div>;
+            const fmtHours = (ms) => { const h = Math.floor(ms / 3600000); const mins = Math.floor((ms % 3600000) / 60000); return `${h}h ${mins}m`; };
+            const totalMs = rows.reduce((sum, r) => sum + r.totalMs, 0);
+            return (
+              <div className="card" style={{ overflow: "hidden" }}>
+                {rows.map((row, i) => (
+                  <div key={row.empId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < rows.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{row.employee?.name || "Unknown"}</span>
+                        <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 7px", borderRadius: 99 }}>{companyLabel(row.employee?.company)}</span>
+                        {row.flagged > 0 && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>{row.flagged} need{row.flagged === 1 ? "s" : ""} review</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>{row.shifts} shift{row.shifts !== 1 ? "s" : ""}</div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
-                      {fmtDate(entry.clock_in)} · {fmtTime(entry.clock_in)} → {entry.clock_out ? fmtTime(entry.clock_out) : <span style={{ color: "#059669", fontWeight: 600 }}>Active</span>}
-                      {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
-                    </div>
-                    {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}
+                    <div style={{ fontWeight: 700, fontSize: 18, color: "#1a1a2e" }}>{fmtHours(row.totalMs)}</div>
                   </div>
-                  <button onClick={() => openEditEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}>Edit</button>
+                ))}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "#f9fafb", borderTop: "2px solid #e5e7eb" }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: "#374151" }}>Total — {rows.length} employee{rows.length !== 1 ? "s" : ""}</span>
+                  <span style={{ fontWeight: 700, fontSize: 18, color: "#1a1a2e" }}>{fmtHours(totalMs)}</span>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })() : (
+            <div className="card" style={{ overflow: "hidden" }}>
+              {filteredEntries.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No entries match your filters</div>}
+              {filteredEntries.map((entry, i) => {
+                const emp = employees.find(x => x.id === entry.employee_id);
+                return (
+                  <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: i < filteredEntries.length - 1 ? "1px solid #f3f4f6" : "none", flexWrap: m ? "wrap" : "nowrap" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{emp?.name || "Unknown"}</span>
+                        <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(emp?.company)}</span>
+                        {entry.is_manual && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
+                        {entry.is_auto_clocked_out && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Auto Clock-Out</span>}
+                        {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
+                        {fmtDate(entry.clock_in)} · {fmtTime(entry.clock_in)} → {entry.clock_out ? fmtTime(entry.clock_out) : <span style={{ color: "#059669", fontWeight: 600 }}>Active</span>}
+                        {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
+                      </div>
+                      {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}
+                    </div>
+                    <button onClick={() => openEditEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}>Edit</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

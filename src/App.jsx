@@ -844,10 +844,18 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
   const [showModal, setShowModal] = useState(false);
   const [editContainer, setEditContainer] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [expandedParentIds, setExpandedParentIds] = useState(new Set());
+  const [childFilter, setChildFilter] = useState(false);
   const [form, setForm] = useState({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "" });
   const [saving, setSaving] = useState(false);
   const [addItemForm, setAddItemForm] = useState({ item_id: "", qty: 1 });
   const [addingItem, setAddingItem] = useState(false);
+
+  const toggleParentExpand = (id) => setExpandedParentIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const iStyle = m ? inputStyleMobile : inputStyle;
 
   const openAdd = () => { setForm({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "" }); setEditContainer(null); setShowModal(true); };
@@ -909,19 +917,27 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Manage Containers</div>
-        <button style={{ ...primaryBtn, fontSize: 12, padding: "6px 12px" }} onClick={openAdd}>+ Add Container</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px", background: childFilter ? "#1a1a2e" : "none", color: childFilter ? "#fff" : "#374151", borderColor: childFilter ? "#1a1a2e" : "#e5e7eb" }}
+            onClick={() => setChildFilter(f => !f)}
+          >Sub-containers only</button>
+          <button style={{ ...primaryBtn, fontSize: 12, padding: "6px 12px" }} onClick={openAdd}>+ Add Container</button>
+        </div>
       </div>
       <div className="card" style={{ overflow: "hidden" }}>
         {(() => {
-          const topLevel = containers.filter(c => !c.parent_container_id);
           const childrenOf = (parentId) => containers.filter(c => c.parent_container_id === parentId);
-          const renderContainer = (c, isChild = false) => {
+
+          const renderRow = (c, isChild = false) => {
             const ciList = containerItems.filter(ci => ci.container_id === c.id);
             const area = areas.find(a => a.id === c.area_id);
             const isExpanded = expandedId === c.id;
             const isMisc = c.type === "misc";
             const availableItems = items.filter(it => !ciList.find(ci => ci.item_id === it.id));
             const children = childrenOf(c.id);
+            const childrenOpen = expandedParentIds.has(c.id);
+            const parentName = isChild ? containers.find(p => p.id === c.parent_container_id)?.name : null;
             return (
               <div key={c.id}>
                 <div style={{ borderBottom: "1px solid #f3f4f6", background: isChild ? "#f9fafb" : "#fff" }}>
@@ -933,15 +949,20 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
                         <span style={{ fontWeight: 500, fontSize: 14 }}>{c.name}</span>
                         <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
                         {c.color && <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />}
+                        {parentName && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>inside {parentName}</span>}
                       </div>
                       <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>
                         {isMisc ? "Event-specific items" : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
-                        {!isChild && children.length > 0 ? ` · ${children.length} sub-container${children.length !== 1 ? "s" : ""}` : ""}
                         {area ? ` · ${area.name}` : ""}
                         {c.dim_w_ft && c.dim_d_ft ? ` · ${c.dim_w_ft}×${c.dim_d_ft}ft` : ""}
                         {c.notes ? ` · ${c.notes}` : ""}
                       </div>
                     </div>
+                    {!isChild && children.length > 0 && (
+                      <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => toggleParentExpand(c.id)}>
+                        {childrenOpen ? `▼ ${children.length} sub` : `▶ ${children.length} sub`}
+                      </button>
+                    )}
                     {!isMisc && (
                       <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => setExpandedId(isExpanded ? null : c.id)}>
                         {isExpanded ? "▲ Items" : "▼ Items"}
@@ -974,12 +995,20 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
                     </div>
                   )}
                 </div>
-                {children.map(child => renderContainer(child, true))}
+                {!isChild && childrenOpen && children.map(child => renderRow(child, true))}
               </div>
             );
           };
+
+          if (childFilter) {
+            const childContainers = containers.filter(c => c.parent_container_id);
+            if (childContainers.length === 0) return <div style={{ padding: 16, fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No sub-containers yet</div>;
+            return childContainers.map(c => renderRow(c, true));
+          }
+
+          const topLevel = containers.filter(c => !c.parent_container_id);
           if (topLevel.length === 0) return <div style={{ padding: 16, fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No containers yet</div>;
-          return topLevel.map(c => renderContainer(c));
+          return topLevel.map(c => renderRow(c));
         })()}
       </div>
 

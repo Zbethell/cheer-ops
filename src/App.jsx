@@ -113,6 +113,14 @@ const api = {
   updateEventContainerItem: (id, patch) => sb(`event_container_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteEventContainerItem: (id) => sb(`event_container_items?id=eq.${id}`, { method: "DELETE" }),
   deleteEventContainerItemsByEvent: (eventId) => sb(`event_container_items?event_id=eq.${eventId}`, { method: "DELETE" }),
+  getEmployees: () => sb("employees?order=name"),
+  addEmployee: (e) => sb("employees", { method: "POST", body: JSON.stringify(e) }),
+  updateEmployee: (id, patch) => sb(`employees?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  getEmployeeByCode: (code) => sb(`employees?code=eq.${encodeURIComponent(code)}&active=eq.true&limit=1`),
+  getTimeEntries: () => sb("time_entries?order=clock_in.desc"),
+  addTimeEntry: (e) => sb("time_entries", { method: "POST", body: JSON.stringify(e) }),
+  updateTimeEntry: (id, patch) => sb(`time_entries?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  getOpenEntries: (employeeId) => sb(`time_entries?employee_id=eq.${employeeId}&clock_out=is.null&order=clock_in.desc`),
 };
 
 const auth = {
@@ -776,6 +784,21 @@ const CONTAINER_COLORS = ["#1a1a2e", "#2563eb", "#059669", "#d97706", "#dc2626",
 const ctIcon = (type) => CONTAINER_TYPES.find(t => t.value === type)?.icon || "📦";
 const ctLabel = (type) => CONTAINER_TYPES.find(t => t.value === type)?.label || "Container";
 
+const COMPANIES = [
+  { value: "pro", label: "Pro" },
+  { value: "progymservices", label: "Pro Gym Services" },
+];
+const companyLabel = (v) => COMPANIES.find(c => c.value === v)?.label || v;
+const AUTO_CLOCKOUT_HOURS = 16;
+const formatDuration = (start, end = new Date()) => {
+  const diff = Math.max(0, new Date(end) - new Date(start));
+  const h = Math.floor(diff / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  return h > 0 ? `${h}h ${mins}m` : `${mins}m`;
+};
+const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "—";
+
 function ItemSearchInput({ items, value, onChange, placeholder = "Search items...", style = {} }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -1078,6 +1101,436 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
   );
 }
 
+// ─── Clock Page (kiosk) ───────────────────────────────────────────────────────
+function ClockPage() {
+  const [digits, setDigits] = useState([]);
+  const [screen, setScreen] = useState("code"); // code | dashboard | manual | success
+  const [employee, setEmployee] = useState(null);
+  const [openEntry, setOpenEntry] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+  const [now, setNow] = useState(new Date());
+  const [manualForm, setManualForm] = useState({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" });
+
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
+
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
+
+  const pressDigit = (d) => {
+    if (digits.length >= 4 || loading) return;
+    const next = [...digits, String(d)];
+    setDigits(next);
+    if (next.length === 4) submitCode(next.join(""));
+  };
+
+  const submitCode = async (code) => {
+    setLoading(true); setError("");
+    try {
+      const rows = await api.getEmployeeByCode(code);
+      if (!rows || rows.length === 0) { setError("Invalid code. Please try again."); setDigits([]); setLoading(false); return; }
+      const emp = rows[0];
+      const opens = await api.getOpenEntries(emp.id);
+      let open = opens[0] || null;
+      if (open) {
+        const ageH = (new Date() - new Date(open.clock_in)) / 3600000;
+        if (ageH >= AUTO_CLOCKOUT_HOURS) {
+          await api.updateTimeEntry(open.id, { clock_out: new Date().toISOString(), is_auto_clocked_out: true, needs_review: true });
+          open = null;
+        }
+      }
+      setEmployee(emp); setOpenEntry(open); setScreen("dashboard");
+    } catch { setError("Connection error. Please try again."); setDigits([]); }
+    setLoading(false);
+  };
+
+  const clockIn = async () => {
+    setLoading(true);
+    try {
+      const rows = await api.addTimeEntry({ employee_id: employee.id, clock_in: new Date().toISOString() });
+      setOpenEntry(rows[0]);
+      setSuccessMsg("Clocked in! Have a great shift.");
+      setScreen("success");
+      setTimeout(reset, 3500);
+    } catch { setError("Error clocking in. Please try again."); }
+    setLoading(false);
+  };
+
+  const clockOut = async () => {
+    setLoading(true);
+    try {
+      const out = new Date().toISOString();
+      await api.updateTimeEntry(openEntry.id, { clock_out: out });
+      const dur = formatDuration(openEntry.clock_in, out);
+      setSuccessMsg(`Clocked out. You worked ${dur}. See you next time!`);
+      setScreen("success");
+      setTimeout(reset, 3500);
+    } catch { setError("Error clocking out. Please try again."); }
+    setLoading(false);
+  };
+
+  const submitManual = async () => {
+    if (!manualForm.date || !manualForm.clock_in || !manualForm.clock_out) { setError("Please fill in all fields."); return; }
+    setLoading(true); setError("");
+    try {
+      const ci = new Date(`${manualForm.date}T${manualForm.clock_in}`).toISOString();
+      const co = new Date(`${manualForm.date}T${manualForm.clock_out}`).toISOString();
+      await api.addTimeEntry({ employee_id: employee.id, clock_in: ci, clock_out: co, is_manual: true, needs_review: true, notes: manualForm.notes || null });
+      setSuccessMsg("Manual entry submitted for admin review.");
+      setScreen("success");
+      setTimeout(reset, 3500);
+    } catch { setError("Error submitting entry."); }
+    setLoading(false);
+  };
+
+  const numPad = [1,2,3,4,5,6,7,8,9,"←",0,"✓"];
+  const companyColor = employee?.company === "progymservices" ? "#059669" : "#2563eb";
+
+  const base = { fontFamily: "DM Sans, sans-serif", minHeight: "100vh", background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 };
+  const card = { background: "#fff", borderRadius: 20, padding: "40px 36px", width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" };
+
+  if (screen === "success") return (
+    <div style={base}>
+      <div style={{ ...card, textAlign: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: "#111", marginBottom: 8 }}>{employee?.name}</div>
+        <div style={{ fontSize: 15, color: "#374151" }}>{successMsg}</div>
+      </div>
+    </div>
+  );
+
+  if (screen === "manual") return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          <button onClick={() => setScreen("dashboard")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 0, color: "#6b7280" }}>←</button>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 17 }}>Manual Time Entry</div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name} · <span style={{ color: companyColor, fontWeight: 600 }}>{companyLabel(employee?.company)}</span></div>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Date</div><input type="date" value={manualForm.date} onChange={e => setManualForm(f => ({ ...f, date: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Clock In</div><input type="time" value={manualForm.clock_in} onChange={e => setManualForm(f => ({ ...f, clock_in: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Clock Out</div><input type="time" value={manualForm.clock_out} onChange={e => setManualForm(f => ({ ...f, clock_out: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
+          </div>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Notes (optional)</div><input value={manualForm.notes} onChange={e => setManualForm(f => ({ ...f, notes: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} placeholder="Reason for manual entry..." /></div>
+          {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
+          <button onClick={submitManual} disabled={loading} style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1 }}>{loading ? "Submitting..." : "Submit for Approval"}</button>
+          <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: 0 }}>This entry will be flagged for admin review.</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (screen === "dashboard") return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111", marginBottom: 4 }}>Hi, {employee?.name}!</div>
+          <span style={{ background: companyColor, color: "#fff", padding: "3px 12px", borderRadius: 99, fontSize: 13, fontWeight: 600 }}>{companyLabel(employee?.company)}</span>
+        </div>
+        {openEntry ? (
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 4 }}>Clocked in since</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: "#1a1a2e" }}>{fmtTime(openEntry.clock_in)}</div>
+            <div style={{ fontSize: 16, color: "#374151", marginTop: 2 }}>{formatDuration(openEntry.clock_in, now)} on the clock</div>
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", marginBottom: 24, color: "#6b7280", fontSize: 15 }}>You are not currently clocked in.</div>
+        )}
+        {error && <div style={{ color: "#dc2626", fontSize: 13, textAlign: "center", marginBottom: 12 }}>{error}</div>}
+        {openEntry ? (
+          <button onClick={clockOut} disabled={loading} style={{ width: "100%", background: "#dc2626", color: "#fff", border: "none", borderRadius: 14, padding: "18px", fontSize: 20, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>{loading ? "..." : "Clock Out"}</button>
+        ) : (
+          <button onClick={clockIn} disabled={loading} style={{ width: "100%", background: "#059669", color: "#fff", border: "none", borderRadius: 14, padding: "18px", fontSize: 20, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>{loading ? "..." : "Clock In"}</button>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <button onClick={() => setScreen("manual")} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Manual entry</button>
+          <button onClick={reset} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Not you?</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 4 }}>Employee Clock</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>Enter your 4-digit code</div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 32 }}>
+          {[0,1,2,3].map(i => (
+            <div key={i} style={{ width: 52, height: 60, border: `2px solid ${digits[i] !== undefined ? "#1a1a2e" : "#e5e7eb"}`, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 700, color: "#1a1a2e", background: digits[i] !== undefined ? "#f0f4ff" : "#fafafa", transition: "all 0.1s" }}>
+              {digits[i] !== undefined ? digits[i] : ""}
+            </div>
+          ))}
+        </div>
+        {error && <div style={{ color: "#dc2626", fontSize: 14, textAlign: "center", marginBottom: 16 }}>{error}</div>}
+        {loading && <div style={{ color: "#6b7280", fontSize: 14, textAlign: "center", marginBottom: 16 }}>Verifying...</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          {numPad.map((k, i) => (
+            <button key={i} onClick={() => { if (k === "←") { setDigits(d => d.slice(0, -1)); setError(""); } else if (k !== "✓") pressDigit(k); }} disabled={loading}
+              style={{ height: 64, borderRadius: 12, border: "1px solid #e5e7eb", background: k === "←" ? "#f3f4f6" : k === "✓" ? "transparent" : "#fff", fontSize: k === "←" ? 20 : 24, fontWeight: 600, cursor: k === "✓" ? "default" : "pointer", fontFamily: "inherit", color: "#1a1a2e", opacity: loading ? 0.5 : 1, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+              {k}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Employee Hours Admin Tab ─────────────────────────────────────────────────
+function EmployeeHours({ isMobile: m, showToast }) {
+  const [tab, setTab] = useState("live");
+  const [employees, setEmployees] = useState([]);
+  const [timeEntries, setTimeEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(new Date());
+  const [filterCompany, setFilterCompany] = useState("");
+  const [filterEmployee, setFilterEmployee] = useState("");
+  const [filterReview, setFilterReview] = useState(false);
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [showAddEmp, setShowAddEmp] = useState(false);
+  const [empForm, setEmpForm] = useState({ name: "", company: "pro", code: "" });
+  const [savingEmp, setSavingEmp] = useState(false);
+  const [editEntry, setEditEntry] = useState(null);
+  const [editForm, setEditForm] = useState({ clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
+  const [savingEntry, setSavingEntry] = useState(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  useEffect(() => {
+    loadData();
+    const t = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [emps, entries] = await Promise.all([api.getEmployees(), api.getTimeEntries()]);
+      setEmployees(emps); setTimeEntries(entries);
+    } catch { showToast("Error loading employee data"); }
+    setLoading(false);
+  };
+
+  const genCode = () => {
+    const existing = new Set(employees.map(e => e.code));
+    let code;
+    do { code = String(Math.floor(1000 + Math.random() * 9000)); } while (existing.has(code));
+    setEmpForm(f => ({ ...f, code }));
+  };
+
+  const saveEmployee = async () => {
+    if (!empForm.name.trim() || empForm.code.length !== 4) { showToast("Name and 4-digit code required"); return; }
+    setSavingEmp(true);
+    try {
+      const created = await api.addEmployee({ name: empForm.name.trim(), company: empForm.company, code: empForm.code, active: true });
+      setEmployees(prev => [...prev, created[0]].sort((a, b) => a.name.localeCompare(b.name)));
+      setEmpForm({ name: "", company: "pro", code: "" });
+      setShowAddEmp(false);
+      showToast("Employee added");
+    } catch (e) { showToast(e.message?.includes("unique") ? "That code is already in use" : "Error adding employee"); }
+    setSavingEmp(false);
+  };
+
+  const toggleActive = async (emp) => {
+    try {
+      await api.updateEmployee(emp.id, { active: !emp.active });
+      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, active: !e.active } : e));
+    } catch { showToast("Error updating employee"); }
+  };
+
+  const openEditEntry = (entry) => {
+    const ci = new Date(entry.clock_in);
+    const co = entry.clock_out ? new Date(entry.clock_out) : null;
+    const toDate = (d) => d.toISOString().split("T")[0];
+    const toTime = (d) => d.toTimeString().slice(0, 5);
+    setEditForm({ clock_in_date: toDate(ci), clock_in_time: toTime(ci), clock_out_date: co ? toDate(co) : toDate(ci), clock_out_time: co ? toTime(co) : "", notes: entry.notes || "" });
+    setEditEntry(entry);
+  };
+
+  const saveEntry = async () => {
+    setSavingEntry(true);
+    try {
+      const ci = new Date(`${editForm.clock_in_date}T${editForm.clock_in_time}`).toISOString();
+      const co = editForm.clock_out_time ? new Date(`${editForm.clock_out_date}T${editForm.clock_out_time}`).toISOString() : null;
+      const patch = { clock_in: ci, clock_out: co, notes: editForm.notes || null, needs_review: false, is_auto_clocked_out: false };
+      await api.updateTimeEntry(editEntry.id, patch);
+      setTimeEntries(prev => prev.map(e => e.id === editEntry.id ? { ...e, ...patch } : e));
+      setEditEntry(null);
+      showToast("Entry updated");
+    } catch { showToast("Error updating entry"); }
+    setSavingEntry(false);
+  };
+
+  const filteredEntries = timeEntries.filter(e => {
+    const emp = employees.find(x => x.id === e.employee_id);
+    if (filterCompany && emp?.company !== filterCompany) return false;
+    if (filterEmployee && e.employee_id !== filterEmployee) return false;
+    if (filterReview && !e.needs_review) return false;
+    if (filterFrom && new Date(e.clock_in) < new Date(filterFrom)) return false;
+    if (filterTo && new Date(e.clock_in) > new Date(filterTo + "T23:59:59")) return false;
+    return true;
+  });
+
+  const liveEntries = timeEntries.filter(e => !e.clock_out).map(e => ({ ...e, employee: employees.find(x => x.id === e.employee_id) })).filter(e => e.employee);
+
+  const tabBtn = (key, label) => (
+    <button onClick={() => setTab(key)} style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: tab === key ? "#fff" : "transparent", color: tab === key ? "#111" : "#6b7280", boxShadow: tab === key ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>{label}</button>
+  );
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading...</div>;
+
+  return (
+    <div style={{ maxWidth: 960, margin: "0 auto", padding: m ? "16px 12px" : "24px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 8, padding: 4 }}>
+        {tabBtn("live", `Live (${liveEntries.length})`)}
+        {tabBtn("entries", "Time Entries")}
+        {tabBtn("employees", "Employees")}
+      </div>
+
+      {tab === "live" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {liveEntries.length === 0 && <div className="card" style={{ padding: 32, textAlign: "center", color: "#9ca3af" }}>No one is currently clocked in.</div>}
+          {COMPANIES.map(co => {
+            const group = liveEntries.filter(e => e.employee.company === co.value);
+            if (group.length === 0) return null;
+            return (
+              <div key={co.value}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>{co.label}</div>
+                <div className="card" style={{ overflow: "hidden" }}>
+                  {group.map((e, i) => (
+                    <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: i < group.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{e.employee.name}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>Since {fmtTime(e.clock_in)} · {fmtDate(e.clock_in)}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontWeight: 700, fontSize: 16, color: "#059669" }}>{formatDuration(e.clock_in, now)}</div>
+                        {e.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "entries" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select value={filterCompany} onChange={e => setFilterCompany(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }}>
+              <option value="">All Companies</option>
+              {COMPANIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }}>
+              <option value="">All Employees</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} placeholder="From" />
+            <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} placeholder="To" />
+            <button onClick={() => setFilterReview(f => !f)} style={{ ...ghostBtn, background: filterReview ? "#1a1a2e" : "none", color: filterReview ? "#fff" : "#374151", borderColor: filterReview ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>Needs Review</button>
+            {(filterCompany || filterEmployee || filterReview || filterFrom || filterTo) && <button onClick={() => { setFilterCompany(""); setFilterEmployee(""); setFilterReview(false); setFilterFrom(""); setFilterTo(""); }} style={{ ...ghostBtn }}>Clear</button>}
+          </div>
+          <div className="card" style={{ overflow: "hidden" }}>
+            {filteredEntries.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No entries match your filters</div>}
+            {filteredEntries.map((entry, i) => {
+              const emp = employees.find(x => x.id === entry.employee_id);
+              return (
+                <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: i < filteredEntries.length - 1 ? "1px solid #f3f4f6" : "none", flexWrap: m ? "wrap" : "nowrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{emp?.name || "Unknown"}</span>
+                      <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(emp?.company)}</span>
+                      {entry.is_manual && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
+                      {entry.is_auto_clocked_out && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Auto Clock-Out</span>}
+                      {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
+                      {fmtDate(entry.clock_in)} · {fmtTime(entry.clock_in)} → {entry.clock_out ? fmtTime(entry.clock_out) : <span style={{ color: "#059669", fontWeight: 600 }}>Active</span>}
+                      {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
+                    </div>
+                    {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}
+                  </div>
+                  <button onClick={() => openEditEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}>Edit</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "employees" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={() => setShowAddEmp(true)} style={{ ...primaryBtn, fontSize: 13 }}>+ Add Employee</button>
+          </div>
+          <div className="card" style={{ overflow: "hidden" }}>
+            {employees.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No employees yet</div>}
+            {employees.map((emp, i) => (
+              <div key={emp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: i < employees.length - 1 ? "1px solid #f3f4f6" : "none", opacity: emp.active ? 1 : 0.5 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{emp.name}</span>
+                    <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 7px", borderRadius: 99 }}>{companyLabel(emp.company)}</span>
+                    {!emp.active && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Inactive</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>Code: <span style={{ fontWeight: 700, color: "#374151", fontFamily: "monospace", letterSpacing: 2 }}>{emp.code}</span></div>
+                </div>
+                <button onClick={() => toggleActive(emp)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px" }}>{emp.active ? "Deactivate" : "Activate"}</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showAddEmp && (
+        <Modal title="Add Employee" onClose={() => { setShowAddEmp(false); setEmpForm({ name: "", company: "pro", code: "" }); }} onSave={saveEmployee} saveLabel="Add Employee" saving={savingEmp} isMobile={m}>
+          <label style={labelStyle}>Name</label>
+          <input value={empForm.name} onChange={e => setEmpForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="Full name" autoFocus />
+          <label style={labelStyle}>Company</label>
+          <select value={empForm.company} onChange={e => setEmpForm(f => ({ ...f, company: e.target.value }))} style={iStyle}>
+            {COMPANIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          <label style={labelStyle}>4-Digit Code</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={empForm.code} onChange={e => setEmpForm(f => ({ ...f, code: e.target.value.replace(/\D/g, "").slice(0, 4) }))} style={{ ...iStyle, flex: 1, fontFamily: "monospace", fontSize: 22, letterSpacing: 4 }} placeholder="0000" maxLength={4} />
+            <button type="button" onClick={genCode} style={{ ...ghostBtn, whiteSpace: "nowrap" }}>Generate</button>
+          </div>
+          <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Give this code to the employee so they can clock in at the kiosk.</p>
+        </Modal>
+      )}
+
+      {editEntry && (
+        <Modal title="Edit Time Entry" onClose={() => setEditEntry(null)} onSave={saveEntry} saveLabel="Save & Approve" saving={savingEntry} isMobile={m}>
+          {(() => { const emp = employees.find(x => x.id === editEntry.employee_id); return <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 4 }}>{emp?.name} · {companyLabel(emp?.company)}</div>; })()}
+          {editEntry.needs_review && <div style={{ background: "#fef3c7", color: "#b45309", fontSize: 12, padding: "8px 12px", borderRadius: 8, marginBottom: 4 }}>{editEntry.is_auto_clocked_out ? "Auto clocked out after 16 hours — please verify the correct clock-out time." : "Manual entry — please verify before approving."}</div>}
+          <label style={labelStyle}>Clock In</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={editForm.clock_in_date} onChange={e => setEditForm(f => ({ ...f, clock_in_date: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+            <input type="time" value={editForm.clock_in_time} onChange={e => setEditForm(f => ({ ...f, clock_in_time: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+          </div>
+          <label style={labelStyle}>Clock Out</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={editForm.clock_out_date} onChange={e => setEditForm(f => ({ ...f, clock_out_date: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+            <input type="time" value={editForm.clock_out_time} onChange={e => setEditForm(f => ({ ...f, clock_out_time: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+          </div>
+          <label style={labelStyle}>Notes</label>
+          <input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Admin notes..." />
+          <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Saving will clear the review flag and mark this entry as approved.</p>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -1258,6 +1711,8 @@ export default function App() {
   const saveSettings = () => { setOrgLogo(pendingLogo); showToast("Settings saved"); setShowSettings(false); };
   const categoryNames = categories.map(c => c.name);
 
+  if (window.location.pathname === "/clock") return <ClockPage />;
+
   if (!authChecked) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading...</div>;
   if (!session) return <LoginScreen onLogin={handleLogin} />;
 
@@ -1279,6 +1734,7 @@ export default function App() {
   const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
   const canViewContainers = isAdmin || ok(userPerms.can_view_inventory);
+  const canViewEmployeeHours = isAdmin;
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -1321,6 +1777,7 @@ export default function App() {
           {canViewContainers && <button className={`nav-btn ${view === "containers" ? "active" : ""}`} onClick={() => setView("containers")}>Containers</button>}
           {canViewEvents && <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>}
           {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
+          {canViewEmployeeHours && <button className={`nav-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}>Employee Hours</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
           {isAdmin && <button className={`nav-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}>Users</button>}
         </>}
@@ -1337,6 +1794,7 @@ export default function App() {
         {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
+        {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
         {view === "users" && isAdmin && <UserManagement isMobile={m} showToast={showToast} currentUserEmail={session.user.email} />}
       </div>
 
@@ -1347,6 +1805,7 @@ export default function App() {
           {canViewContainers && <button className={`tab-btn ${view === "containers" ? "active" : ""}`} onClick={() => setView("containers")}><span className="tab-icon">🗃️</span>Containers</button>}
           {canViewEvents && <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>}
           {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
+          {canViewEmployeeHours && <button className={`tab-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}><span className="tab-icon">⏱️</span>Hours</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
           {isAdmin && <button className={`tab-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}><span className="tab-icon">👥</span>Users</button>}
         </nav>

@@ -776,6 +776,70 @@ const CONTAINER_COLORS = ["#1a1a2e", "#2563eb", "#059669", "#d97706", "#dc2626",
 const ctIcon = (type) => CONTAINER_TYPES.find(t => t.value === type)?.icon || "📦";
 const ctLabel = (type) => CONTAINER_TYPES.find(t => t.value === type)?.label || "Container";
 
+function ItemSearchInput({ items, value, onChange, placeholder = "Search items...", style = {} }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+
+  const selected = items.find(i => i.id === value);
+  const filtered = query.trim()
+    ? items.filter(i => `${i.name} ${i.category || ""}`.toLowerCase().includes(query.toLowerCase()))
+    : items;
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const select = (item) => { onChange(item.id); setQuery(""); setOpen(false); };
+  const clear = () => { onChange(""); setQuery(""); };
+
+  return (
+    <div ref={ref} style={{ position: "relative", flex: 1, ...style }}>
+      <div style={{ display: "flex", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 7, background: "#fff", overflow: "hidden" }}>
+        {selected && !open ? (
+          <div style={{ flex: 1, padding: "7px 10px", fontSize: 13, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {selected.name}{selected.category ? <span style={{ color: "#9ca3af", marginLeft: 6 }}>({selected.category})</span> : null}
+          </div>
+        ) : (
+          <input
+            value={query}
+            onChange={e => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            placeholder={selected ? selected.name : placeholder}
+            style={{ flex: 1, border: "none", outline: "none", padding: "7px 10px", fontSize: 13, fontFamily: "inherit", background: "transparent", minWidth: 0 }}
+          />
+        )}
+        {(value || query) && (
+          <button onClick={clear} style={{ border: "none", background: "none", cursor: "pointer", padding: "4px 8px", color: "#9ca3af", fontSize: 16, lineHeight: 1 }}>✕</button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 7, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, maxHeight: 220, overflowY: "auto", marginTop: 2 }}>
+          {filtered.map(item => (
+            <div
+              key={item.id}
+              onMouseDown={() => select(item)}
+              style={{ padding: "8px 12px", fontSize: 13, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", background: item.id === value ? "#eff6ff" : "#fff", borderBottom: "1px solid #f3f4f6" }}
+              onMouseEnter={e => { if (item.id !== value) e.currentTarget.style.background = "#f9fafb"; }}
+              onMouseLeave={e => { if (item.id !== value) e.currentTarget.style.background = "#fff"; }}
+            >
+              <span style={{ fontWeight: item.id === value ? 600 : 400 }}>{item.name}</span>
+              {item.category && <span style={{ fontSize: 11, color: "#9ca3af" }}>{item.category}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {open && filtered.length === 0 && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 7, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, padding: "10px 12px", fontSize: 13, color: "#9ca3af", marginTop: 2 }}>
+          No items match "{query}"
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContainerManager({ containers, setContainers, containerItems, setContainerItems, items, areas, showToast, isMobile: m }) {
   const [showModal, setShowModal] = useState(false);
   const [editContainer, setEditContainer] = useState(null);
@@ -896,10 +960,7 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
                   })}
                   {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items yet</div>}
                   <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
-                    <select value={addItemForm.item_id} onChange={e => setAddItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyle, flex: 1, fontSize: 13, padding: "6px 10px" }}>
-                      <option value="">Select item...</option>
-                      {availableItems.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
-                    </select>
+                    <ItemSearchInput items={availableItems} value={addItemForm.item_id} onChange={id => setAddItemForm(f => ({ ...f, item_id: id }))} placeholder="Search items..." />
                     <input type="number" value={addItemForm.qty} onChange={e => setAddItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
                     <button style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }} onClick={() => addItemToContainer(c.id)} disabled={addingItem || !addItemForm.item_id}>Add</button>
                   </div>
@@ -2408,9 +2469,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           ) : addMode === "inventory" ? (
             <>
               <label style={labelStyle}>Select Item</label>
-              <select value={addItemId} onChange={e => setAddItemId(e.target.value)} style={iStyle}>
-                {availableToAdd.length === 0 ? <option value="">All items already added</option> : availableToAdd.map(i => <option key={i.id} value={i.id}>{i.name} ({i.category})</option>)}
-              </select>
+              {availableToAdd.length === 0
+                ? <div style={{ fontSize: 13, color: "#9ca3af", padding: "8px 0" }}>All items already added</div>
+                : <ItemSearchInput items={availableToAdd} value={addItemId} onChange={setAddItemId} placeholder="Search items..." style={{ flex: "none", width: "100%" }} />
+              }
             </>
           ) : (
             <>

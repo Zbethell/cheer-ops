@@ -844,20 +844,20 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
   const [showModal, setShowModal] = useState(false);
   const [editContainer, setEditContainer] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
-  const [form, setForm] = useState({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "" });
+  const [form, setForm] = useState({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "" });
   const [saving, setSaving] = useState(false);
   const [addItemForm, setAddItemForm] = useState({ item_id: "", qty: 1 });
   const [addingItem, setAddingItem] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
-  const openAdd = () => { setForm({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "" }); setEditContainer(null); setShowModal(true); };
-  const openEdit = (c) => { setForm({ name: c.name, type: c.type, color: c.color || "", notes: c.notes || "", area_id: c.area_id || "", dim_w_ft: c.dim_w_ft || "", dim_d_ft: c.dim_d_ft || "" }); setEditContainer(c); setShowModal(true); };
+  const openAdd = () => { setForm({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "" }); setEditContainer(null); setShowModal(true); };
+  const openEdit = (c) => { setForm({ name: c.name, type: c.type, color: c.color || "", notes: c.notes || "", area_id: c.area_id || "", dim_w_ft: c.dim_w_ft || "", dim_d_ft: c.dim_d_ft || "", parent_container_id: c.parent_container_id || "" }); setEditContainer(c); setShowModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      const payload = { ...form, area_id: form.area_id || null, dim_w_ft: form.dim_w_ft !== "" ? parseFloat(form.dim_w_ft) : null, dim_d_ft: form.dim_d_ft !== "" ? parseFloat(form.dim_d_ft) : null };
+      const payload = { ...form, area_id: form.area_id || null, dim_w_ft: form.dim_w_ft !== "" ? parseFloat(form.dim_w_ft) : null, dim_d_ft: form.dim_d_ft !== "" ? parseFloat(form.dim_d_ft) : null, parent_container_id: form.parent_container_id || null };
       if (editContainer) {
         await api.updateContainer(editContainer.id, payload);
         setContainers(prev => prev.map(c => c.id === editContainer.id ? { ...c, ...payload } : c));
@@ -912,64 +912,75 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
         <button style={{ ...primaryBtn, fontSize: 12, padding: "6px 12px" }} onClick={openAdd}>+ Add Container</button>
       </div>
       <div className="card" style={{ overflow: "hidden" }}>
-        {containers.map((c, i) => {
-          const ciList = containerItems.filter(ci => ci.container_id === c.id);
-          const area = areas.find(a => a.id === c.area_id);
-          const isExpanded = expandedId === c.id;
-          const isMisc = c.type === "misc";
-          const availableItems = items.filter(it => !ciList.find(ci => ci.item_id === it.id));
-          return (
-            <div key={c.id} style={{ borderBottom: i < containers.length - 1 ? "1px solid #f3f4f6" : "none" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px" }}>
-                <span style={{ fontSize: 18 }}>{ctIcon(c.type)}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 500, fontSize: 14 }}>{c.name}</span>
-                    <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
-                    {c.color && <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>
-                    {isMisc ? "Event-specific items" : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
-                    {area ? ` · ${area.name}` : ""}
-                    {c.dim_w_ft && c.dim_d_ft ? ` · ${c.dim_w_ft}×${c.dim_d_ft}ft` : ""}
-                    {c.notes ? ` · ${c.notes}` : ""}
-                  </div>
-                </div>
-                {!isMisc && (
-                  <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => setExpandedId(isExpanded ? null : c.id)}>
-                    {isExpanded ? "▲ Items" : "▼ Items"}
-                  </button>
-                )}
-                <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => openEdit(c)}>Edit</button>
-                <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(c.id)}>Remove</button>
-              </div>
-              {isExpanded && !isMisc && (
-                <div style={{ padding: "0 14px 14px 42px", display: "flex", flexDirection: "column", gap: 6 }}>
-                  {ciList.map(ci => {
-                    const item = items.find(it => it.id === ci.item_id);
-                    if (!item) return null;
-                    return (
-                      <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{item.name}</span>
-                        <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContainerItemQty(ci.id, ci.qty - 1)}>−</button>
-                        <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
-                        <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContainerItemQty(ci.id, ci.qty + 1)}>+</button>
-                        <button style={{ ...dangerBtn, padding: "3px 8px" }} onClick={() => removeContainerItem(ci.id)}>✕</button>
+        {(() => {
+          const topLevel = containers.filter(c => !c.parent_container_id);
+          const childrenOf = (parentId) => containers.filter(c => c.parent_container_id === parentId);
+          const renderContainer = (c, isChild = false) => {
+            const ciList = containerItems.filter(ci => ci.container_id === c.id);
+            const area = areas.find(a => a.id === c.area_id);
+            const isExpanded = expandedId === c.id;
+            const isMisc = c.type === "misc";
+            const availableItems = items.filter(it => !ciList.find(ci => ci.item_id === it.id));
+            const children = childrenOf(c.id);
+            return (
+              <div key={c.id}>
+                <div style={{ borderBottom: "1px solid #f3f4f6", background: isChild ? "#f9fafb" : "#fff" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", paddingLeft: isChild ? 30 : 14 }}>
+                    {isChild && <span style={{ color: "#d1d5db", fontSize: 12, marginRight: -4 }}>└</span>}
+                    <span style={{ fontSize: 18 }}>{ctIcon(c.type)}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 500, fontSize: 14 }}>{c.name}</span>
+                        <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
+                        {c.color && <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />}
                       </div>
-                    );
-                  })}
-                  {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items yet</div>}
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
-                    <ItemSearchInput items={availableItems} value={addItemForm.item_id} onChange={id => setAddItemForm(f => ({ ...f, item_id: id }))} placeholder="Search items..." />
-                    <input type="number" value={addItemForm.qty} onChange={e => setAddItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
-                    <button style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }} onClick={() => addItemToContainer(c.id)} disabled={addingItem || !addItemForm.item_id}>Add</button>
+                      <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>
+                        {isMisc ? "Event-specific items" : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
+                        {!isChild && children.length > 0 ? ` · ${children.length} sub-container${children.length !== 1 ? "s" : ""}` : ""}
+                        {area ? ` · ${area.name}` : ""}
+                        {c.dim_w_ft && c.dim_d_ft ? ` · ${c.dim_w_ft}×${c.dim_d_ft}ft` : ""}
+                        {c.notes ? ` · ${c.notes}` : ""}
+                      </div>
+                    </div>
+                    {!isMisc && (
+                      <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => setExpandedId(isExpanded ? null : c.id)}>
+                        {isExpanded ? "▲ Items" : "▼ Items"}
+                      </button>
+                    )}
+                    <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => openEdit(c)}>Edit</button>
+                    <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(c.id)}>Remove</button>
                   </div>
+                  {isExpanded && !isMisc && (
+                    <div style={{ padding: "0 14px 14px", paddingLeft: isChild ? 46 : 42, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {ciList.map(ci => {
+                        const item = items.find(it => it.id === ci.item_id);
+                        if (!item) return null;
+                        return (
+                          <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{item.name}</span>
+                            <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContainerItemQty(ci.id, ci.qty - 1)}>−</button>
+                            <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
+                            <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContainerItemQty(ci.id, ci.qty + 1)}>+</button>
+                            <button style={{ ...dangerBtn, padding: "3px 8px" }} onClick={() => removeContainerItem(ci.id)}>✕</button>
+                          </div>
+                        );
+                      })}
+                      {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items yet</div>}
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
+                        <ItemSearchInput items={availableItems} value={addItemForm.item_id} onChange={id => setAddItemForm(f => ({ ...f, item_id: id }))} placeholder="Search items..." />
+                        <input type="number" value={addItemForm.qty} onChange={e => setAddItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
+                        <button style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }} onClick={() => addItemToContainer(c.id)} disabled={addingItem || !addItemForm.item_id}>Add</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
-        {containers.length === 0 && <div style={{ padding: 16, fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No containers yet</div>}
+                {children.map(child => renderContainer(child, true))}
+              </div>
+            );
+          };
+          if (topLevel.length === 0) return <div style={{ padding: 16, fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No containers yet</div>;
+          return topLevel.map(c => renderContainer(c));
+        })()}
       </div>
 
       {showModal && (
@@ -1003,6 +1014,13 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
                 style={{ width: 28, height: 28, borderRadius: "50%", background: col, border: form.color === col ? "3px solid #111" : "2px solid transparent", cursor: "pointer", outline: "none", padding: 0 }} />
             ))}
           </div>
+          <label style={labelStyle}>Parent Container (optional)</label>
+          <select value={form.parent_container_id} onChange={e => setForm(f => ({ ...f, parent_container_id: e.target.value }))} style={iStyle}>
+            <option value="">None — top-level container</option>
+            {containers.filter(c => !c.parent_container_id && c.id !== editContainer?.id).map(c => (
+              <option key={c.id} value={c.id}>{ctIcon(c.type)} {c.name}</option>
+            ))}
+          </select>
           <label style={labelStyle}>Notes (optional)</label>
           <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Any details..." />
         </Modal>
@@ -2179,6 +2197,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             <span style={{ fontWeight: 500, fontSize: 15 }}>{c.name}</span>
                             <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
                             {c.color && <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                            {c.parent_container_id && (() => { const par = containers.find(p => p.id === c.parent_container_id); return par ? <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>inside {par.name}</span> : null; })()}
                           </div>
                           <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
                             {isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
@@ -2252,6 +2271,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             <span style={{ fontSize: 14, fontWeight: 500 }}>{c.name}</span>
                             <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 500 }}>{ctLabel(c.type)}</span>
                             {c.color && <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                            {c.parent_container_id && (() => { const par = containers.find(p => p.id === c.parent_container_id); return par ? <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>inside {par.name}</span> : null; })()}
                           </div>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
                             <span style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}</span>
@@ -2454,7 +2474,13 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
             <>
               <label style={labelStyle}>Select Container</label>
               <select value={addContainerId} onChange={e => setAddContainerId(e.target.value)} style={iStyle}>
-                {availableContainers.length === 0 ? <option value="">All containers already added</option> : availableContainers.map(c => <option key={c.id} value={c.id}>{ctIcon(c.type)} {c.name} ({ctLabel(c.type)})</option>)}
+                {availableContainers.length === 0
+                  ? <option value="">All containers already added</option>
+                  : availableContainers.map(c => {
+                      const parent = containers.find(p => p.id === c.parent_container_id);
+                      return <option key={c.id} value={c.id}>{ctIcon(c.type)} {c.name}{parent ? ` — inside ${parent.name}` : ""} ({ctLabel(c.type)})</option>;
+                    })
+                }
               </select>
               {assignedTrailers.length > 0 && (
                 <>

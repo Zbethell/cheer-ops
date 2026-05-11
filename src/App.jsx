@@ -779,6 +779,8 @@ const ctLabel = (type) => CONTAINER_TYPES.find(t => t.value === type)?.label || 
 function ItemSearchInput({ items, value, onChange, placeholder = "Search items...", style = {} }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const wrapRef = useRef();
   const ref = useRef();
 
   const selected = items.find(i => i.id === value);
@@ -786,18 +788,36 @@ function ItemSearchInput({ items, value, onChange, placeholder = "Search items..
     ? items.filter(i => `${i.name} ${i.category || ""}`.toLowerCase().includes(query.toLowerCase()))
     : items;
 
+  const calcCoords = () => {
+    if (wrapRef.current) {
+      const r = wrapRef.current.getBoundingClientRect();
+      setCoords({ top: r.bottom + 2, left: r.left, width: r.width });
+    }
+  };
+
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const update = () => calcCoords();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => { window.removeEventListener("scroll", update, true); window.removeEventListener("resize", update); };
+  }, [open]);
+
+  const openDropdown = () => { calcCoords(); setOpen(true); };
   const select = (item) => { onChange(item.id); setQuery(""); setOpen(false); };
   const clear = () => { onChange(""); setQuery(""); };
 
+  const dropStyle = { position: "fixed", top: coords.top, left: coords.left, width: coords.width, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 7, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 9999, maxHeight: 220, overflowY: "auto" };
+
   return (
     <div ref={ref} style={{ position: "relative", flex: 1, ...style }}>
-      <div style={{ display: "flex", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 7, background: "#fff", overflow: "hidden" }}>
+      <div ref={wrapRef} style={{ display: "flex", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 7, background: "#fff", overflow: "hidden" }}>
         {selected && !open ? (
           <div style={{ flex: 1, padding: "7px 10px", fontSize: 13, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {selected.name}{selected.category ? <span style={{ color: "#9ca3af", marginLeft: 6 }}>({selected.category})</span> : null}
@@ -805,8 +825,8 @@ function ItemSearchInput({ items, value, onChange, placeholder = "Search items..
         ) : (
           <input
             value={query}
-            onChange={e => { setQuery(e.target.value); setOpen(true); }}
-            onFocus={() => setOpen(true)}
+            onChange={e => { setQuery(e.target.value); if (!open) openDropdown(); }}
+            onFocus={openDropdown}
             placeholder={selected ? selected.name : placeholder}
             style={{ flex: 1, border: "none", outline: "none", padding: "7px 10px", fontSize: 13, fontFamily: "inherit", background: "transparent", minWidth: 0 }}
           />
@@ -816,7 +836,7 @@ function ItemSearchInput({ items, value, onChange, placeholder = "Search items..
         )}
       </div>
       {open && filtered.length > 0 && (
-        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 7, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, maxHeight: 220, overflowY: "auto", marginTop: 2 }}>
+        <div style={dropStyle}>
           {filtered.map(item => (
             <div
               key={item.id}
@@ -831,8 +851,8 @@ function ItemSearchInput({ items, value, onChange, placeholder = "Search items..
           ))}
         </div>
       )}
-      {open && filtered.length === 0 && (
-        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 7, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, padding: "10px 12px", fontSize: 13, color: "#9ca3af", marginTop: 2 }}>
+      {open && filtered.length === 0 && query && (
+        <div style={{ ...dropStyle, padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>
           No items match "{query}"
         </div>
       )}

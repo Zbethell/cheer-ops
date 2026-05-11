@@ -2249,7 +2249,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             {c.parent_container_id && (() => { const par = containers.find(p => p.id === c.parent_container_id); return par ? <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>inside {par.name}</span> : null; })()}
                           </div>
                           <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
-                            {isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}
+                            {(() => { const sc = containers.filter(ch => ch.parent_container_id === c.id).length; return isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}${sc > 0 ? ` · ${sc} sub-container${sc !== 1 ? "s" : ""}` : ""}`; })()}
                           </div>
                           {assignedTrailers.length > 0 && (
                             <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
@@ -2348,7 +2348,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             {c.parent_container_id && (() => { const par = containers.find(p => p.id === c.parent_container_id); return par ? <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>inside {par.name}</span> : null; })()}
                           </div>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-                            <span style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}`}</span>
+                            <span style={{ fontSize: 12, color: "#9ca3af" }}>{(() => { const sc = containers.filter(ch => ch.parent_container_id === c.id).length; return isMisc ? `${ciList.length} event item${ciList.length !== 1 ? "s" : ""}` : `${ciList.length} item type${ciList.length !== 1 ? "s" : ""}${sc > 0 ? ` · ${sc} sub-container${sc !== 1 ? "s" : ""}` : ""}`; })()}</span>
                             {assignedTrailers.length > 0 && assignedTrailers.map(t => (
                               <button key={t.id} onClick={() => assignTrailerToItem(entry, t.id)}
                                 style={{ padding: "2px 8px", borderRadius: 99, fontSize: 11, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, border: `1px solid ${entry.trailer_id === t.id ? "#1a1a2e" : "#e5e7eb"}`, background: entry.trailer_id === t.id ? "#1a1a2e" : "#fff", color: entry.trailer_id === t.id ? "#fff" : "#6b7280" }}>

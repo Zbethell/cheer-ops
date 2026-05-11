@@ -2295,7 +2295,32 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                               </div>
                             );
                           })}
-                          {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? "No items added yet" : "No items in loadout"}</div>}
+                          {ciList.length === 0 && !isMisc && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items in loadout</div>}
+                          {isMisc && ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items added yet</div>}
+                          {!isMisc && containers.filter(child => child.parent_container_id === c.id).map(child => {
+                            const childItems = containerItems.filter(ci => ci.container_id === child.id);
+                            return (
+                              <div key={child.id} style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #e5e7eb" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                                  <span style={{ fontSize: 14 }}>{ctIcon(child.type)}</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{child.name}</span>
+                                  <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 6px", borderRadius: 99, fontSize: 10, fontWeight: 500 }}>{ctLabel(child.type)}</span>
+                                  {child.color && <span style={{ width: 8, height: 8, borderRadius: "50%", background: child.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                                </div>
+                                {childItems.map(ci => {
+                                  const it = items.find(x => x.id === ci.item_id);
+                                  if (!it) return null;
+                                  return (
+                                    <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 20, padding: "4px 0 4px 20px", borderBottom: "1px solid #f3f4f6" }}>
+                                      <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{it.name}</span>
+                                      <span style={{ fontSize: 13, color: "#9ca3af" }}>×{ci.qty}</span>
+                                    </div>
+                                  );
+                                })}
+                                {childItems.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 20 }}>No items in loadout</div>}
+                              </div>
+                            );
+                          })}
                           {isMisc && (
                             <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, paddingTop: 8, borderTop: "1px solid #f3f4f6" }}>
                               <select value={miscItemForm.item_id} onChange={e => setMiscItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyleMobile, flex: 1, fontSize: 14 }}>
@@ -2358,7 +2383,32 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                               </div>
                             );
                           })}
-                          {ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>{isMisc ? "No items added yet" : "No items in loadout"}</div>}
+                          {ciList.length === 0 && !isMisc && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items in loadout</div>}
+                          {isMisc && ciList.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>No items added yet</div>}
+                          {!isMisc && containers.filter(child => child.parent_container_id === c.id).map(child => {
+                            const childItems = containerItems.filter(ci => ci.container_id === child.id);
+                            return (
+                              <div key={child.id} style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #e5e7eb" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                                  <span style={{ fontSize: 14 }}>{ctIcon(child.type)}</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{child.name}</span>
+                                  <span style={{ background: "#f3f4f6", color: "#6b7280", padding: "1px 6px", borderRadius: 99, fontSize: 10, fontWeight: 500 }}>{ctLabel(child.type)}</span>
+                                  {child.color && <span style={{ width: 8, height: 8, borderRadius: "50%", background: child.color, display: "inline-block", border: "1px solid rgba(0,0,0,0.1)" }} />}
+                                </div>
+                                {childItems.map(ci => {
+                                  const it = items.find(x => x.id === ci.item_id);
+                                  if (!it) return null;
+                                  return (
+                                    <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0 3px 20px", borderBottom: "1px solid #f3f4f6" }}>
+                                      <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{it.name}</span>
+                                      <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ci.qty}</span>
+                                    </div>
+                                  );
+                                })}
+                                {childItems.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", paddingLeft: 20 }}>No items in loadout</div>}
+                              </div>
+                            );
+                          })}
                           {isMisc && (
                             <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: "1px solid #f3f4f6" }}>
                               <select value={miscItemForm.item_id} onChange={e => setMiscItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyle, flex: 1, fontSize: 13, padding: "6px 10px" }}>

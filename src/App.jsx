@@ -1296,6 +1296,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
   const [entriesView, setEntriesView] = useState("detail"); // detail | summary
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
+  const [presetMonth, setPresetMonth] = useState(() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`; });
   const [showAddEmp, setShowAddEmp] = useState(false);
   const [empForm, setEmpForm] = useState({ name: "", company: "pro", code: "" });
   const [savingEmp, setSavingEmp] = useState(false);
@@ -1428,19 +1429,27 @@ function EmployeeHours({ isMobile: m, showToast }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {(() => {
-              const t = new Date();
-              const y = t.getFullYear(), mo = t.getMonth();
               const pad = (n) => String(n).padStart(2, "0");
-              const lastDay = new Date(y, mo + 1, 0).getDate();
-              const monthName = t.toLocaleString("default", { month: "short" });
-              const p1From = `${y}-${pad(mo + 1)}-01`, p1To = `${y}-${pad(mo + 1)}-15`;
-              const p2From = `${y}-${pad(mo + 1)}-16`, p2To = `${y}-${pad(mo + 1)}-${lastDay}`;
+              const [py, pmo] = presetMonth.split("-").map(Number);
+              const lastDay = new Date(py, pmo, 0).getDate();
+              const monthName = new Date(py, pmo - 1, 1).toLocaleString("default", { month: "short" });
+              const p1From = `${py}-${pad(pmo)}-01`, p1To = `${py}-${pad(pmo)}-15`;
+              const p2From = `${py}-${pad(pmo)}-16`, p2To = `${py}-${pad(pmo)}-${lastDay}`;
               const p1Active = filterFrom === p1From && filterTo === p1To;
               const p2Active = filterFrom === p2From && filterTo === p2To;
               const presetBtn = (label, from, to, active) => (
                 <button onClick={() => { setFilterFrom(from); setFilterTo(to); }} style={{ ...ghostBtn, background: active ? "#1a1a2e" : "none", color: active ? "#fff" : "#374151", borderColor: active ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>{label}</button>
               );
+              const monthOptions = [];
+              const now = new Date();
+              for (let i = 0; i < 12; i++) {
+                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+                const lbl = d.toLocaleString("default", { month: "long", year: "numeric" });
+                monthOptions.push(<option key={val} value={val}>{lbl}</option>);
+              }
               return <>
+                <select value={presetMonth} onChange={e => setPresetMonth(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }}>{monthOptions}</select>
                 {presetBtn(`1–15 ${monthName}`, p1From, p1To, p1Active)}
                 {presetBtn(`16–${lastDay} ${monthName}`, p2From, p2To, p2Active)}
               </>;

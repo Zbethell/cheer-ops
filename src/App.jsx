@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
 
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
@@ -1380,6 +1381,47 @@ function EmployeeHours({ isMobile: m, showToast }) {
     return true;
   });
 
+  const exportToExcel = () => {
+    const fmtHours = (ms) => { const h = Math.floor(ms / 3600000); const mins = Math.floor((ms % 3600000) / 60000); return `${h}h ${mins}m`; };
+    const fmtDt = (ts) => ts ? new Date(ts).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+
+    const detailRows = filteredEntries.map(e => {
+      const emp = employees.find(x => x.id === e.employee_id);
+      const ms = e.clock_out ? new Date(e.clock_out) - new Date(e.clock_in) : null;
+      return {
+        "Employee": emp?.name || "Unknown",
+        "Company": companyLabel(emp?.company),
+        "Clock In": fmtDt(e.clock_in),
+        "Clock Out": e.clock_out ? fmtDt(e.clock_out) : "Still clocked in",
+        "Duration": ms !== null ? fmtHours(ms) : "",
+        "Notes": e.notes || "",
+        "Needs Review": e.needs_review ? "Yes" : "",
+      };
+    });
+
+    const totalsMap = {};
+    filteredEntries.forEach(e => {
+      if (!e.clock_out) return;
+      const emp = employees.find(x => x.id === e.employee_id);
+      const key = e.employee_id;
+      if (!totalsMap[key]) totalsMap[key] = { name: emp?.name || "Unknown", company: companyLabel(emp?.company), ms: 0, shifts: 0 };
+      totalsMap[key].ms += new Date(e.clock_out) - new Date(e.clock_in);
+      totalsMap[key].shifts += 1;
+    });
+    const summaryRows = Object.values(totalsMap)
+      .sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name))
+      .map(r => ({ "Employee": r.name, "Company": r.company, "Total Hours": fmtHours(r.ms), "Shifts": r.shifts }));
+    const totalAllMs = Object.values(totalsMap).reduce((s, r) => s + r.ms, 0);
+    summaryRows.push({ "Employee": "TOTAL", "Company": "", "Total Hours": fmtHours(totalAllMs), "Shifts": Object.values(totalsMap).reduce((s, r) => s + r.shifts, 0) });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows), "Time Entries");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "Summary");
+
+    const label = filterFrom && filterTo ? `${filterFrom}_to_${filterTo}` : "all";
+    XLSX.writeFile(wb, `employee-hours_${label}.xlsx`);
+  };
+
   const liveEntries = timeEntries.filter(e => !e.clock_out).map(e => ({ ...e, employee: employees.find(x => x.id === e.employee_id) })).filter(e => e.employee);
 
   const tabBtn = (key, label) => (
@@ -1467,10 +1509,13 @@ function EmployeeHours({ isMobile: m, showToast }) {
             <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ ...iStyle, width: "auto", flex: "none" }} />
             <button onClick={() => setFilterReview(f => !f)} style={{ ...ghostBtn, background: filterReview ? "#1a1a2e" : "none", color: filterReview ? "#fff" : "#374151", borderColor: filterReview ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>Needs Review</button>
             {(filterCompany || filterEmployee || filterReview || filterFrom || filterTo) && <button onClick={() => { setFilterCompany(""); setFilterEmployee(""); setFilterReview(false); setFilterFrom(""); setFilterTo(""); }} style={{ ...ghostBtn }}>Clear</button>}
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 6, padding: 3 }}>
-              {["detail", "summary"].map(v => (
-                <button key={v} onClick={() => setEntriesView(v)} style={{ padding: "4px 12px", border: "none", borderRadius: 5, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: entriesView === v ? "#fff" : "transparent", color: entriesView === v ? "#111" : "#6b7280", boxShadow: entriesView === v ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>{v === "detail" ? "Detail" : "Summary"}</button>
-              ))}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={exportToExcel} disabled={filteredEntries.length === 0} style={{ ...ghostBtn, whiteSpace: "nowrap", opacity: filteredEntries.length === 0 ? 0.4 : 1 }}>Export Excel</button>
+              <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 6, padding: 3 }}>
+                {["detail", "summary"].map(v => (
+                  <button key={v} onClick={() => setEntriesView(v)} style={{ padding: "4px 12px", border: "none", borderRadius: 5, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: entriesView === v ? "#fff" : "transparent", color: entriesView === v ? "#111" : "#6b7280", boxShadow: entriesView === v ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>{v === "detail" ? "Detail" : "Summary"}</button>
+                ))}
+              </div>
             </div>
           </div>
 

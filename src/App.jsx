@@ -1304,6 +1304,9 @@ function EmployeeHours({ isMobile: m, showToast }) {
   const [editEntry, setEditEntry] = useState(null);
   const [editForm, setEditForm] = useState({ clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
   const [savingEntry, setSavingEntry] = useState(false);
+  const [showAddEntry, setShowAddEntry] = useState(false);
+  const [addEntryForm, setAddEntryForm] = useState({ employee_id: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
+  const [savingAddEntry, setSavingAddEntry] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
   useEffect(() => {
@@ -1380,6 +1383,32 @@ function EmployeeHours({ isMobile: m, showToast }) {
     if (filterTo && new Date(e.clock_in) > new Date(filterTo + "T23:59:59")) return false;
     return true;
   });
+
+  const approveEntry = async (entry) => {
+    try {
+      const patch = { needs_review: false };
+      await api.updateTimeEntry(entry.id, patch);
+      setTimeEntries(prev => prev.map(e => e.id === entry.id ? { ...e, ...patch } : e));
+      showToast("Entry approved");
+    } catch { showToast("Error approving entry"); }
+  };
+
+  const saveAddEntry = async () => {
+    if (!addEntryForm.employee_id || !addEntryForm.clock_in_date || !addEntryForm.clock_in_time) return;
+    setSavingAddEntry(true);
+    try {
+      const ci = new Date(`${addEntryForm.clock_in_date}T${addEntryForm.clock_in_time}`).toISOString();
+      const co = addEntryForm.clock_out_date && addEntryForm.clock_out_time
+        ? new Date(`${addEntryForm.clock_out_date}T${addEntryForm.clock_out_time}`).toISOString()
+        : null;
+      const [created] = await api.addTimeEntry({ employee_id: addEntryForm.employee_id, clock_in: ci, clock_out: co, notes: addEntryForm.notes || null, is_manual: true, needs_review: false });
+      setTimeEntries(prev => [created, ...prev]);
+      setShowAddEntry(false);
+      setAddEntryForm({ employee_id: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
+      showToast("Entry added");
+    } catch { showToast("Error adding entry"); }
+    setSavingAddEntry(false);
+  };
 
   const exportToExcel = () => {
     const fmtHours = (ms) => { const h = Math.floor(ms / 3600000); const mins = Math.floor((ms % 3600000) / 60000); return `${h}h ${mins}m`; };
@@ -1510,6 +1539,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
             <button onClick={() => setFilterReview(f => !f)} style={{ ...ghostBtn, background: filterReview ? "#1a1a2e" : "none", color: filterReview ? "#fff" : "#374151", borderColor: filterReview ? "#1a1a2e" : "#e5e7eb", whiteSpace: "nowrap" }}>Needs Review</button>
             {(filterCompany || filterEmployee || filterReview || filterFrom || filterTo) && <button onClick={() => { setFilterCompany(""); setFilterEmployee(""); setFilterReview(false); setFilterFrom(""); setFilterTo(""); }} style={{ ...ghostBtn }}>Clear</button>}
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={() => setShowAddEntry(true)} style={{ ...primaryBtn, fontSize: 13, whiteSpace: "nowrap" }}>+ Add Entry</button>
               <button onClick={exportToExcel} disabled={filteredEntries.length === 0} style={{ ...ghostBtn, whiteSpace: "nowrap", opacity: filteredEntries.length === 0 ? 0.4 : 1 }}>Export Excel</button>
               <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 6, padding: 3 }}>
                 {["detail", "summary"].map(v => (
@@ -1575,6 +1605,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
                       </div>
                       {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}
                     </div>
+                    {entry.needs_review && <button onClick={() => approveEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap", color: "#059669", borderColor: "#059669" }}>Approve</button>}
                     <button onClick={() => openEditEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}>Edit</button>
                   </div>
                 );
@@ -1622,6 +1653,28 @@ function EmployeeHours({ isMobile: m, showToast }) {
             <button type="button" onClick={genCode} style={{ ...ghostBtn, whiteSpace: "nowrap" }}>Generate</button>
           </div>
           <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Give this code to the employee so they can clock in at the kiosk.</p>
+        </Modal>
+      )}
+
+      {showAddEntry && (
+        <Modal title="Add Time Entry" onClose={() => { setShowAddEntry(false); setAddEntryForm({ employee_id: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" }); }} onSave={saveAddEntry} saveLabel="Add Entry" saving={savingAddEntry} isMobile={m}>
+          <label style={labelStyle}>Employee</label>
+          <select value={addEntryForm.employee_id} onChange={e => setAddEntryForm(f => ({ ...f, employee_id: e.target.value }))} style={iStyle} autoFocus>
+            <option value="">Select employee...</option>
+            {employees.filter(e => e.active).map(e => <option key={e.id} value={e.id}>{e.name} — {companyLabel(e.company)}</option>)}
+          </select>
+          <label style={labelStyle}>Clock In</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={addEntryForm.clock_in_date} onChange={e => setAddEntryForm(f => ({ ...f, clock_in_date: e.target.value, clock_out_date: f.clock_out_date || e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+            <input type="time" value={addEntryForm.clock_in_time} onChange={e => setAddEntryForm(f => ({ ...f, clock_in_time: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+          </div>
+          <label style={labelStyle}>Clock Out <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional)</span></label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={addEntryForm.clock_out_date} onChange={e => setAddEntryForm(f => ({ ...f, clock_out_date: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+            <input type="time" value={addEntryForm.clock_out_time} onChange={e => setAddEntryForm(f => ({ ...f, clock_out_time: e.target.value }))} style={{ ...iStyle, flex: 1 }} />
+          </div>
+          <label style={labelStyle}>Notes <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional)</span></label>
+          <input value={addEntryForm.notes} onChange={e => setAddEntryForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Reason for manual entry..." />
         </Modal>
       )}
 

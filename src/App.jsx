@@ -95,7 +95,7 @@ const api = {
   uploadLogo: async (file, path) => {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
       method: "POST",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken || SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
       body: file,
     });
     if (!res.ok) { const err = await res.text(); throw new Error(err); }
@@ -4035,7 +4035,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
       const path = `floorplan-${selectedEventId}-${Date.now()}.${file.name.split(".").pop()}`;
       const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
         method: "POST",
-        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken || SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
         body: file,
       });
       if (!res.ok) throw new Error(await res.text());

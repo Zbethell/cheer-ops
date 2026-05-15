@@ -1105,7 +1105,7 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
 // ─── Clock Page (kiosk) ───────────────────────────────────────────────────────
 function ClockPage() {
   const [digits, setDigits] = useState([]);
-  const [screen, setScreen] = useState("code"); // code | dashboard | manual | success
+  const [screen, setScreen] = useState("code"); // code | resolve | dashboard | manual | success
   const [employee, setEmployee] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1113,10 +1113,12 @@ function ClockPage() {
   const [successMsg, setSuccessMsg] = useState("");
   const [now, setNow] = useState(new Date());
   const [manualForm, setManualForm] = useState({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" });
+  const [resolveEntry, setResolveEntry] = useState(null);
+  const [resolveForm, setResolveForm] = useState({ date: "", time: "", notes: "" });
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
-  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
 
   const pressDigit = (d) => {
     if (digits.length >= 4 || loading) return;
@@ -1136,8 +1138,12 @@ function ClockPage() {
       if (open) {
         const ageH = (new Date() - new Date(open.clock_in)) / 3600000;
         if (ageH >= AUTO_CLOCKOUT_HOURS) {
-          await api.updateTimeEntry(open.id, { clock_out: new Date().toISOString(), is_auto_clocked_out: true, needs_review: true });
-          open = null;
+          setEmployee(emp);
+          setResolveEntry(open);
+          setResolveForm({ date: new Date(open.clock_in).toISOString().split("T")[0], time: "", notes: "" });
+          setScreen("resolve");
+          setLoading(false);
+          return;
         }
       }
       setEmployee(emp); setOpenEntry(open); setScreen("dashboard");
@@ -1184,6 +1190,18 @@ function ClockPage() {
     setLoading(false);
   };
 
+  const submitResolve = async () => {
+    if (!resolveForm.date || !resolveForm.time) { setError("Please enter when you finished."); return; }
+    setLoading(true); setError("");
+    try {
+      const co = new Date(`${resolveForm.date}T${resolveForm.time}`).toISOString();
+      await api.updateTimeEntry(resolveEntry.id, { clock_out: co, is_manual: true, needs_review: true, notes: resolveForm.notes || null });
+      setOpenEntry(null);
+      setScreen("dashboard");
+    } catch { setError("Error submitting. Please try again."); }
+    setLoading(false);
+  };
+
   const numPad = [1,2,3,4,5,6,7,8,9,"←",0,"✓"];
   const companyColor = employee?.company === "progymservices" ? "#059669" : "#2563eb";
 
@@ -1196,6 +1214,28 @@ function ClockPage() {
         <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
         <div style={{ fontSize: 20, fontWeight: 700, color: "#111", marginBottom: 8 }}>{employee?.name}</div>
         <div style={{ fontSize: 15, color: "#374151" }}>{successMsg}</div>
+      </div>
+    </div>
+  );
+
+  if (screen === "resolve") return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 6 }}>Hi, {employee?.name}!</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>
+            Your shift on <strong style={{ color: "#374151" }}>{fmtDate(resolveEntry?.clock_in)}</strong> starting at <strong style={{ color: "#374151" }}>{fmtTime(resolveEntry?.clock_in)}</strong> was never clocked out.
+          </div>
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 16 }}>When did you finish that shift?</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Date</div><input type="date" value={resolveForm.date} onChange={e => setResolveForm(f => ({ ...f, date: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Time finished</div><input type="time" value={resolveForm.time} onChange={e => setResolveForm(f => ({ ...f, time: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Notes (optional)</div><input value={resolveForm.notes} onChange={e => setResolveForm(f => ({ ...f, notes: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} placeholder="e.g. forgot to clock out before leaving" /></div>
+          {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
+          <button onClick={submitResolve} disabled={loading} style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1 }}>{loading ? "Submitting..." : "Submit for Approval"}</button>
+          <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: 0 }}>This entry will be flagged for admin review.</p>
+        </div>
       </div>
     </div>
   );

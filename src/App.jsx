@@ -6,6 +6,7 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const ORG_LOGO_PATH = "org-logo.png";
 const ORG_LOGO_PUBLIC_URL = `${SUPABASE_URL}/storage/v1/object/public/logos/${ORG_LOGO_PATH}`;
 const ADMIN_EMAIL = "zack@canadiancheer.com";
+const KIOSK_CODE = "cheerops2026";
 
 let authToken = null;
 
@@ -1105,6 +1106,16 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
 // ─── Clock Page (kiosk) ───────────────────────────────────────────────────────
 function ClockPage() {
   const [digits, setDigits] = useState([]);
+  const [kioskUnlocked] = useState(() => {
+    if (localStorage.getItem("cheerops_kiosk") === KIOSK_CODE) return true;
+    try {
+      const s = JSON.parse(localStorage.getItem("sb_session") || "{}");
+      return (s.expires_at || 0) > Math.floor(Date.now() / 1000) + 60;
+    } catch { return false; }
+  });
+  const [kioskInput, setKioskInput] = useState("");
+  const [kioskError, setKioskError] = useState("");
+
   const [screen, setScreen] = useState("code"); // code | company | resolve | dashboard | manual | success
   const [employee, setEmployee] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
@@ -1197,6 +1208,16 @@ function ClockPage() {
     setLoading(false);
   };
 
+  const submitKioskCode = () => {
+    if (kioskInput === KIOSK_CODE) {
+      localStorage.setItem("cheerops_kiosk", KIOSK_CODE);
+      window.location.reload();
+    } else {
+      setKioskError("Incorrect activation code.");
+      setKioskInput("");
+    }
+  };
+
   const submitResolve = async () => {
     if (!resolveForm.date || !resolveForm.time) { setError("Please enter when you finished."); return; }
     setLoading(true); setError("");
@@ -1214,6 +1235,29 @@ function ClockPage() {
 
   const base = { fontFamily: "DM Sans, sans-serif", minHeight: "100vh", background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 };
   const card = { background: "#fff", borderRadius: 20, padding: "40px 36px", width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" };
+
+  if (!kioskUnlocked) return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 8 }}>Kiosk Setup</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>Enter the activation code to set up this device.</div>
+        </div>
+        <input
+          type="password"
+          value={kioskInput}
+          onChange={e => { setKioskInput(e.target.value); setKioskError(""); }}
+          onKeyDown={e => e.key === "Enter" && submitKioskCode()}
+          style={{ ...inputStyle, fontSize: 16, marginBottom: 12 }}
+          placeholder="Activation code"
+          autoFocus
+        />
+        {kioskError && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 12 }}>{kioskError}</div>}
+        <button onClick={submitKioskCode} style={{ width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Activate Device</button>
+        <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: "16px 0 0" }}>This device will stay activated until browser storage is cleared.</p>
+      </div>
+    </div>
+  );
 
   if (screen === "success") return (
     <div style={base}>

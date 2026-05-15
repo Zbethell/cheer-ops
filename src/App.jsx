@@ -1105,7 +1105,7 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
 // ─── Clock Page (kiosk) ───────────────────────────────────────────────────────
 function ClockPage() {
   const [digits, setDigits] = useState([]);
-  const [screen, setScreen] = useState("code"); // code | resolve | dashboard | manual | success
+  const [screen, setScreen] = useState("code"); // code | company | resolve | dashboard | manual | success
   const [employee, setEmployee] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1115,10 +1115,11 @@ function ClockPage() {
   const [manualForm, setManualForm] = useState({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" });
   const [resolveEntry, setResolveEntry] = useState(null);
   const [resolveForm, setResolveForm] = useState({ date: "", time: "", notes: "" });
+  const [selectedCompany, setSelectedCompany] = useState(null);
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
-  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
 
   const pressDigit = (d) => {
     if (digits.length >= 4 || loading) return;
@@ -1146,7 +1147,13 @@ function ClockPage() {
           return;
         }
       }
-      setEmployee(emp); setOpenEntry(open); setScreen("dashboard");
+      const empCompanies = emp.companies?.length ? emp.companies : [emp.company];
+      if (!open && empCompanies.length > 1) {
+        setEmployee(emp); setOpenEntry(null); setScreen("company");
+      } else {
+        setSelectedCompany(open ? (open.company || empCompanies[0]) : empCompanies[0]);
+        setEmployee(emp); setOpenEntry(open); setScreen("dashboard");
+      }
     } catch { setError("Connection error. Please try again."); setDigits([]); }
     setLoading(false);
   };
@@ -1154,7 +1161,7 @@ function ClockPage() {
   const clockIn = async () => {
     setLoading(true);
     try {
-      const rows = await api.addTimeEntry({ employee_id: employee.id, clock_in: new Date().toISOString() });
+      const rows = await api.addTimeEntry({ employee_id: employee.id, clock_in: new Date().toISOString(), company: selectedCompany });
       setOpenEntry(rows[0]);
       setSuccessMsg("Clocked in! Have a great shift.");
       setScreen("success");
@@ -1203,7 +1210,7 @@ function ClockPage() {
   };
 
   const numPad = [1,2,3,4,5,6,7,8,9,"←",0,"✓"];
-  const companyColor = employee?.company === "progymservices" ? "#059669" : "#2563eb";
+  const companyColor = (selectedCompany || employee?.company) === "progymservices" ? "#059669" : "#2563eb";
 
   const base = { fontFamily: "DM Sans, sans-serif", minHeight: "100vh", background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 };
   const card = { background: "#fff", borderRadius: 20, padding: "40px 36px", width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" };
@@ -1214,6 +1221,30 @@ function ClockPage() {
         <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
         <div style={{ fontSize: 20, fontWeight: 700, color: "#111", marginBottom: 8 }}>{employee?.name}</div>
         <div style={{ fontSize: 15, color: "#374151" }}>{successMsg}</div>
+      </div>
+    </div>
+  );
+
+  if (screen === "company") return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111", marginBottom: 8 }}>Hi, {employee?.name}!</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>Which company are you clocking in for?</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {(employee?.companies?.length ? employee.companies : [employee?.company]).map(co => {
+            const color = co === "progymservices" ? "#059669" : "#2563eb";
+            return (
+              <button key={co} onClick={() => { setSelectedCompany(co); setScreen("dashboard"); }} style={{ width: "100%", background: color, color: "#fff", border: "none", borderRadius: 14, padding: "18px", fontSize: 20, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                {companyLabel(co)}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={reset} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Not you?</button>
+        </div>
       </div>
     </div>
   );
@@ -1270,7 +1301,7 @@ function ClockPage() {
       <div style={card}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ fontSize: 28, fontWeight: 800, color: "#111", marginBottom: 4 }}>Hi, {employee?.name}!</div>
-          <span style={{ background: companyColor, color: "#fff", padding: "3px 12px", borderRadius: 99, fontSize: 13, fontWeight: 600 }}>{companyLabel(employee?.company)}</span>
+          <span style={{ background: companyColor, color: "#fff", padding: "3px 12px", borderRadius: 99, fontSize: 13, fontWeight: 600 }}>{companyLabel(selectedCompany || employee?.company)}</span>
         </div>
         {openEntry ? (
           <div style={{ textAlign: "center", marginBottom: 24 }}>
@@ -1339,7 +1370,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
   const [filterTo, setFilterTo] = useState("");
   const [presetMonth, setPresetMonth] = useState(() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`; });
   const [showAddEmp, setShowAddEmp] = useState(false);
-  const [empForm, setEmpForm] = useState({ name: "", company: "pro", code: "" });
+  const [empForm, setEmpForm] = useState({ name: "", companies: ["pro"], code: "" });
   const [savingEmp, setSavingEmp] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [editForm, setEditForm] = useState({ clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
@@ -1372,12 +1403,12 @@ function EmployeeHours({ isMobile: m, showToast }) {
   };
 
   const saveEmployee = async () => {
-    if (!empForm.name.trim() || empForm.code.length !== 4) { showToast("Name and 4-digit code required"); return; }
+    if (!empForm.name.trim() || empForm.code.length !== 4 || empForm.companies.length === 0) { showToast("Name, at least one company, and 4-digit code required"); return; }
     setSavingEmp(true);
     try {
-      const created = await api.addEmployee({ name: empForm.name.trim(), company: empForm.company, code: empForm.code, active: true });
+      const created = await api.addEmployee({ name: empForm.name.trim(), company: empForm.companies[0], companies: empForm.companies, code: empForm.code, active: true });
       setEmployees(prev => [...prev, created[0]].sort((a, b) => a.name.localeCompare(b.name)));
-      setEmpForm({ name: "", company: "pro", code: "" });
+      setEmpForm({ name: "", companies: ["pro"], code: "" });
       setShowAddEmp(false);
       showToast("Employee added");
     } catch (e) { showToast(e.message?.includes("unique") ? "That code is already in use" : "Error adding employee"); }
@@ -1416,7 +1447,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
 
   const filteredEntries = timeEntries.filter(e => {
     const emp = employees.find(x => x.id === e.employee_id);
-    if (filterCompany && emp?.company !== filterCompany) return false;
+    if (filterCompany && (e.company || emp?.company) !== filterCompany) return false;
     if (filterEmployee && e.employee_id !== filterEmployee) return false;
     if (filterReview && !e.needs_review) return false;
     if (filterFrom && new Date(e.clock_in) < new Date(filterFrom)) return false;
@@ -1459,7 +1490,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
       const ms = e.clock_out ? new Date(e.clock_out) - new Date(e.clock_in) : null;
       return {
         "Employee": emp?.name || "Unknown",
-        "Company": companyLabel(emp?.company),
+        "Company": companyLabel(e.company || emp?.company),
         "Clock In": fmtDt(e.clock_in),
         "Clock Out": e.clock_out ? fmtDt(e.clock_out) : "Still clocked in",
         "Duration": ms !== null ? fmtHours(ms) : "",
@@ -1472,8 +1503,9 @@ function EmployeeHours({ isMobile: m, showToast }) {
     filteredEntries.forEach(e => {
       if (!e.clock_out) return;
       const emp = employees.find(x => x.id === e.employee_id);
-      const key = e.employee_id;
-      if (!totalsMap[key]) totalsMap[key] = { name: emp?.name || "Unknown", company: companyLabel(emp?.company), ms: 0, shifts: 0 };
+      const co = companyLabel(e.company || emp?.company);
+      const key = `${e.employee_id}_${co}`;
+      if (!totalsMap[key]) totalsMap[key] = { name: emp?.name || "Unknown", company: co, ms: 0, shifts: 0 };
       totalsMap[key].ms += new Date(e.clock_out) - new Date(e.clock_in);
       totalsMap[key].shifts += 1;
     });
@@ -1511,7 +1543,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {liveEntries.length === 0 && <div className="card" style={{ padding: 32, textAlign: "center", color: "#9ca3af" }}>No one is currently clocked in.</div>}
           {COMPANIES.map(co => {
-            const group = liveEntries.filter(e => e.employee.company === co.value);
+            const group = liveEntries.filter(e => (e.company || e.employee.company) === co.value);
             if (group.length === 0) return null;
             return (
               <div key={co.value}>
@@ -1593,24 +1625,27 @@ function EmployeeHours({ isMobile: m, showToast }) {
             const byEmployee = {};
             filteredEntries.forEach(e => {
               if (!e.clock_out) return;
-              if (!byEmployee[e.employee_id]) byEmployee[e.employee_id] = { totalMs: 0, shifts: 0, flagged: 0 };
-              byEmployee[e.employee_id].totalMs += new Date(e.clock_out) - new Date(e.clock_in);
-              byEmployee[e.employee_id].shifts += 1;
-              if (e.needs_review) byEmployee[e.employee_id].flagged += 1;
+              const emp = employees.find(x => x.id === e.employee_id);
+              const co = e.company || emp?.company || "";
+              const key = `${e.employee_id}_${co}`;
+              if (!byEmployee[key]) byEmployee[key] = { empId: e.employee_id, company: co, totalMs: 0, shifts: 0, flagged: 0 };
+              byEmployee[key].totalMs += new Date(e.clock_out) - new Date(e.clock_in);
+              byEmployee[key].shifts += 1;
+              if (e.needs_review) byEmployee[key].flagged += 1;
             });
-            const rows = Object.entries(byEmployee).map(([empId, data]) => ({ empId, ...data, employee: employees.find(x => x.id === empId) }))
-              .sort((a, b) => (a.employee?.company || "").localeCompare(b.employee?.company || "") || (a.employee?.name || "").localeCompare(b.employee?.name || ""));
+            const rows = Object.values(byEmployee).map(data => ({ ...data, employee: employees.find(x => x.id === data.empId) }))
+              .sort((a, b) => (a.company || "").localeCompare(b.company || "") || (a.employee?.name || "").localeCompare(b.employee?.name || ""));
             if (rows.length === 0) return <div className="card" style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No completed entries match your filters</div>;
             const fmtHours = (ms) => { const h = Math.floor(ms / 3600000); const mins = Math.floor((ms % 3600000) / 60000); return `${h}h ${mins}m`; };
             const totalMs = rows.reduce((sum, r) => sum + r.totalMs, 0);
             return (
               <div className="card" style={{ overflow: "hidden" }}>
                 {rows.map((row, i) => (
-                  <div key={row.empId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < rows.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  <div key={`${row.empId}_${row.company}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: i < rows.length - 1 ? "1px solid #f3f4f6" : "none" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, fontSize: 14 }}>{row.employee?.name || "Unknown"}</span>
-                        <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 7px", borderRadius: 99 }}>{companyLabel(row.employee?.company)}</span>
+                        <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 7px", borderRadius: 99 }}>{companyLabel(row.company || row.employee?.company)}</span>
                         {row.flagged > 0 && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>{row.flagged} need{row.flagged === 1 ? "s" : ""} review</span>}
                       </div>
                       <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>{row.shifts} shift{row.shifts !== 1 ? "s" : ""}</div>
@@ -1634,7 +1669,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, fontSize: 13 }}>{emp?.name || "Unknown"}</span>
-                        <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(emp?.company)}</span>
+                        <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(entry.company || emp?.company)}</span>
                         {entry.is_manual && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
                         {entry.is_auto_clocked_out && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Auto Clock-Out</span>}
                         {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
@@ -1667,7 +1702,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 600, fontSize: 14 }}>{emp.name}</span>
-                    <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 7px", borderRadius: 99 }}>{companyLabel(emp.company)}</span>
+                    <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 7px", borderRadius: 99 }}>{(emp.companies?.length ? emp.companies : [emp.company]).map(companyLabel).join(" · ")}</span>
                     {!emp.active && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Inactive</span>}
                   </div>
                   <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>Code: <span style={{ fontWeight: 700, color: "#374151", fontFamily: "monospace", letterSpacing: 2 }}>{emp.code}</span></div>
@@ -1684,9 +1719,14 @@ function EmployeeHours({ isMobile: m, showToast }) {
           <label style={labelStyle}>Name</label>
           <input value={empForm.name} onChange={e => setEmpForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="Full name" autoFocus />
           <label style={labelStyle}>Company</label>
-          <select value={empForm.company} onChange={e => setEmpForm(f => ({ ...f, company: e.target.value }))} style={iStyle}>
-            {COMPANIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {COMPANIES.map(c => (
+              <label key={c.value} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                <input type="checkbox" checked={empForm.companies.includes(c.value)} onChange={e => setEmpForm(f => ({ ...f, companies: e.target.checked ? [...f.companies, c.value] : f.companies.filter(v => v !== c.value) }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                {c.label}
+              </label>
+            ))}
+          </div>
           <label style={labelStyle}>4-Digit Code</label>
           <div style={{ display: "flex", gap: 8 }}>
             <input value={empForm.code} onChange={e => setEmpForm(f => ({ ...f, code: e.target.value.replace(/\D/g, "").slice(0, 4) }))} style={{ ...iStyle, flex: 1, fontFamily: "monospace", fontSize: 22, letterSpacing: 4 }} placeholder="0000" maxLength={4} />

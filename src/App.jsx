@@ -789,6 +789,7 @@ const ctLabel = (type) => CONTAINER_TYPES.find(t => t.value === type)?.label || 
 const COMPANIES = [
   { value: "pro", label: "Pro" },
   { value: "progymservices", label: "Pro Gym Services" },
+  { value: "evo", label: "EVO" },
 ];
 const companyLabel = (v) => COMPANIES.find(c => c.value === v)?.label || v;
 const AUTO_CLOCKOUT_HOURS = 16;

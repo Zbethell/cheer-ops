@@ -1372,6 +1372,9 @@ function EmployeeHours({ isMobile: m, showToast }) {
   const [showAddEmp, setShowAddEmp] = useState(false);
   const [empForm, setEmpForm] = useState({ name: "", companies: ["pro"], code: "" });
   const [savingEmp, setSavingEmp] = useState(false);
+  const [editEmp, setEditEmp] = useState(null);
+  const [editEmpForm, setEditEmpForm] = useState({ name: "", companies: [], code: "" });
+  const [savingEditEmp, setSavingEditEmp] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [editForm, setEditForm] = useState({ clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
   const [savingEntry, setSavingEntry] = useState(false);
@@ -1395,11 +1398,11 @@ function EmployeeHours({ isMobile: m, showToast }) {
     setLoading(false);
   };
 
-  const genCode = () => {
+  const genCode = (setter) => {
     const existing = new Set(employees.map(e => e.code));
     let code;
     do { code = String(Math.floor(1000 + Math.random() * 9000)); } while (existing.has(code));
-    setEmpForm(f => ({ ...f, code }));
+    setter(f => ({ ...f, code }));
   };
 
   const saveEmployee = async () => {
@@ -1420,6 +1423,24 @@ function EmployeeHours({ isMobile: m, showToast }) {
       await api.updateEmployee(emp.id, { active: !emp.active });
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, active: !e.active } : e));
     } catch { showToast("Error updating employee"); }
+  };
+
+  const openEditEmp = (emp) => {
+    setEditEmpForm({ name: emp.name, companies: emp.companies?.length ? emp.companies : [emp.company], code: emp.code });
+    setEditEmp(emp);
+  };
+
+  const saveEditEmployee = async () => {
+    if (!editEmpForm.name.trim() || editEmpForm.code.length !== 4 || editEmpForm.companies.length === 0) { showToast("Name, at least one company, and 4-digit code required"); return; }
+    setSavingEditEmp(true);
+    try {
+      const patch = { name: editEmpForm.name.trim(), company: editEmpForm.companies[0], companies: editEmpForm.companies, code: editEmpForm.code };
+      await api.updateEmployee(editEmp.id, patch);
+      setEmployees(prev => prev.map(e => e.id === editEmp.id ? { ...e, ...patch } : e).sort((a, b) => a.name.localeCompare(b.name)));
+      setEditEmp(null);
+      showToast("Employee updated");
+    } catch (e) { showToast(e.message?.includes("unique") ? "That code is already in use" : "Error updating employee"); }
+    setSavingEditEmp(false);
   };
 
   const openEditEntry = (entry) => {
@@ -1707,6 +1728,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
                   </div>
                   <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>Code: <span style={{ fontWeight: 700, color: "#374151", fontFamily: "monospace", letterSpacing: 2 }}>{emp.code}</span></div>
                 </div>
+                <button onClick={() => openEditEmp(emp)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px" }}>Edit</button>
                 <button onClick={() => toggleActive(emp)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px" }}>{emp.active ? "Deactivate" : "Activate"}</button>
               </div>
             ))}
@@ -1730,9 +1752,30 @@ function EmployeeHours({ isMobile: m, showToast }) {
           <label style={labelStyle}>4-Digit Code</label>
           <div style={{ display: "flex", gap: 8 }}>
             <input value={empForm.code} onChange={e => setEmpForm(f => ({ ...f, code: e.target.value.replace(/\D/g, "").slice(0, 4) }))} style={{ ...iStyle, flex: 1, fontFamily: "monospace", fontSize: 22, letterSpacing: 4 }} placeholder="0000" maxLength={4} />
-            <button type="button" onClick={genCode} style={{ ...ghostBtn, whiteSpace: "nowrap" }}>Generate</button>
+            <button type="button" onClick={() => genCode(setEmpForm)} style={{ ...ghostBtn, whiteSpace: "nowrap" }}>Generate</button>
           </div>
           <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Give this code to the employee so they can clock in at the kiosk.</p>
+        </Modal>
+      )}
+
+      {editEmp && (
+        <Modal title="Edit Employee" onClose={() => setEditEmp(null)} onSave={saveEditEmployee} saveLabel="Save Changes" saving={savingEditEmp} isMobile={m}>
+          <label style={labelStyle}>Name</label>
+          <input value={editEmpForm.name} onChange={e => setEditEmpForm(f => ({ ...f, name: e.target.value }))} style={iStyle} autoFocus />
+          <label style={labelStyle}>Company</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {COMPANIES.map(c => (
+              <label key={c.value} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                <input type="checkbox" checked={editEmpForm.companies.includes(c.value)} onChange={e => setEditEmpForm(f => ({ ...f, companies: e.target.checked ? [...f.companies, c.value] : f.companies.filter(v => v !== c.value) }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                {c.label}
+              </label>
+            ))}
+          </div>
+          <label style={labelStyle}>4-Digit Code</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={editEmpForm.code} onChange={e => setEditEmpForm(f => ({ ...f, code: e.target.value.replace(/\D/g, "").slice(0, 4) }))} style={{ ...iStyle, flex: 1, fontFamily: "monospace", fontSize: 22, letterSpacing: 4 }} placeholder="0000" maxLength={4} />
+            <button type="button" onClick={() => genCode(setEditEmpForm)} style={{ ...ghostBtn, whiteSpace: "nowrap" }}>Generate</button>
+          </div>
         </Modal>
       )}
 

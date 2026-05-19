@@ -1955,7 +1955,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -2001,6 +2001,7 @@ export default function App() {
             ok(p.can_view_events) && "events",
             ok(p.can_view_reports) && "reports",
             p.can_view_tech && "tech",
+            p.can_view_pro && "pro",
           ].filter(Boolean);
           const curBase = cur === "event-detail" ? "events" : cur;
           return accessible.includes(curBase) ? cur : (accessible[0] || cur);
@@ -2073,6 +2074,7 @@ export default function App() {
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
   const canViewContainers = isAdmin || ok(userPerms.can_view_containers);
   const canViewEmployeeHours = isAdmin || !!userPerms.can_view_employee_hours;
+  const canViewPro       = isAdmin || !!userPerms.can_view_pro;
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -2120,7 +2122,7 @@ export default function App() {
           {isAdmin && <button className={`nav-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}>Users</button>}
         </>}
         <div style={{ flex: 1 }} />
-        {!m && <a href="https://pro-crm-topaz.vercel.app" target="_blank" rel="noreferrer" style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", textDecoration: "none", fontWeight: 500 }}>PRO Sales</a>}
+        {!m && canViewPro && <a href="https://pro-crm-topaz.vercel.app" target="_blank" rel="noreferrer" style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", textDecoration: "none", fontWeight: 500 }}>PRO Sales</a>}
         {!m && <button style={{ background: "none", border: "none", fontSize: 13, padding: "6px 10px", color: "#9ca3af", cursor: "pointer", fontFamily: "inherit" }} onClick={handleLogout}>Sign out</button>}
         <button style={{ background: "none", border: "none", fontSize: 20, padding: "8px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>
       </div>
@@ -4626,7 +4628,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false });
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -4637,13 +4639,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro });
     setEditUser(user);
     setShowModal(true);
   };
@@ -4653,11 +4655,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -4685,6 +4687,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     { key: "can_view_reports",        label: "Reports",                sub: "Area reports"                     },
     { key: "can_view_tech",           label: "Tech Setups",            sub: "Network diagrams (admin feature)" },
     { key: "can_view_employee_hours", label: "Employee Hours",         sub: "Time tracking and employee hours" },
+    { key: "can_view_pro",            label: "PRO Sales CRM",          sub: "Access to the PRO Sales CRM" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
@@ -4747,6 +4750,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
                 {user.can_view_reports !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Reports</span>}
                 {user.can_view_tech && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Tech Setups</span>}
                 {user.can_view_employee_hours && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Employee Hours</span>}
+                {user.can_view_pro && <span className="pill" style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 11 }}>PRO Sales</span>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

@@ -1,7 +1,6 @@
 export default async function handler(req, res) {
   const { AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET } = process.env;
 
-  // Get a token from Microsoft
   const tokenRes = await fetch(
     `https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token`,
     {
@@ -23,23 +22,30 @@ export default async function handler(req, res) {
 
   const { access_token } = await tokenRes.json();
 
-  // Call Graph API to get items from a SharePoint list
   const { siteId, listId } = req.query;
 
   if (!siteId || !listId) {
     return res.status(400).json({ error: "siteId and listId query params are required" });
   }
 
-  const graphRes = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`,
-    { headers: { Authorization: `Bearer ${access_token}` } }
-  );
+  // Fetch all pages following @odata.nextLink
+  let allItems = [];
+  let url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`;
 
-  if (!graphRes.ok) {
-    const err = await graphRes.text();
-    return res.status(500).json({ error: "Failed to fetch SharePoint data", detail: err });
+  while (url) {
+    const graphRes = await fetch(url, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+
+    if (!graphRes.ok) {
+      const err = await graphRes.text();
+      return res.status(500).json({ error: "Failed to fetch SharePoint data", detail: err });
+    }
+
+    const data = await graphRes.json();
+    allItems = allItems.concat(data.value || []);
+    url = data["@odata.nextLink"] || null;
   }
 
-  const data = await graphRes.json();
-  res.status(200).json(data.value);
+  res.status(200).json(allItems);
 }

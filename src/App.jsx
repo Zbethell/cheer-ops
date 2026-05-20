@@ -1955,7 +1955,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -2075,6 +2075,7 @@ export default function App() {
   const canViewContainers = isAdmin || ok(userPerms.can_view_containers);
   const canViewEmployeeHours = isAdmin || !!userPerms.can_view_employee_hours;
   const canViewPro       = isAdmin || !!userPerms.can_view_pro;
+  const canViewExpenses  = isAdmin || !!userPerms.can_view_expenses;
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const eventPacking = packing.filter(p => p.event_id === selectedEventId);
   const m = isMobile;
@@ -2119,6 +2120,7 @@ export default function App() {
           {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
           {canViewEmployeeHours && <button className={`nav-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}>Employee Hours</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
+          {canViewExpenses && <button className={`nav-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}>Expenses</button>}
           {isAdmin && <button className={`nav-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}>Users</button>}
         </>}
         <div style={{ flex: 1 }} />
@@ -2136,6 +2138,7 @@ export default function App() {
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
+        {view === "expenses" && canViewExpenses && <ExpensesAdmin isMobile={m} showToast={showToast} />}
         {view === "users" && isAdmin && <UserManagement isMobile={m} showToast={showToast} currentUserEmail={session.user.email} />}
       </div>
 
@@ -2148,6 +2151,7 @@ export default function App() {
           {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
           {canViewEmployeeHours && <button className={`tab-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}><span className="tab-icon">⏱️</span>Hours</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
+          {canViewExpenses && <button className={`tab-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}><span className="tab-icon">💳</span>Expenses</button>}
           {isAdmin && <button className={`tab-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}><span className="tab-icon">👥</span>Users</button>}
         </nav>
       )}
@@ -4622,13 +4626,421 @@ function TechSetups({ isMobile: m, events, showToast }) {
   );
 }
 
+// ─── Expenses Admin ───────────────────────────────────────────────────────────
+const DEFAULT_EXPENSE_CONFIG = {
+  formTitle: "Expense Report",
+  formSubtitle: "Submit your expense for reimbursement. You'll receive a link to track its status.",
+  categories: ["Meal", "Gas", "Office Supplies", "Mileage"],
+  mileageRate: 0.70,
+  expenseCompanies: ["Pro", "Pro Gym Services", "EVO"],
+  labels: {
+    name: "Your Name", email: "Email Address", amount: "Amount ($)",
+    date: "Date of Expense", category: "Category", company: "Company",
+    description: "Description", receipt: "Receipt Photo",
+    startLocation: "Start Location", endLocation: "End Location", totalKMs: "Total KMs",
+  },
+};
+
+function ExpensesAdmin({ isMobile: m, showToast }) {
+  const [expenses, setExpenses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("Pending");
+  const [updating, setUpdating] = useState(new Set());
+  const [activeSection, setActiveSection] = useState("submissions");
+  const [config, setConfig] = useState(DEFAULT_EXPENSE_CONFIG);
+  const [configDraft, setConfigDraft] = useState(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+  const [newCompany, setNewCompany] = useState("");
+  const [filterCompany, setFilterCompany] = useState("");
+
+  useEffect(() => {
+    const authHeader = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+    fetch("/api/expenses-list", { headers: authHeader })
+      .then((r) => r.json())
+      .then((data) => setExpenses(Array.isArray(data) ? data : []))
+      .catch(() => showToast("Failed to load expenses"))
+      .finally(() => setLoading(false));
+    fetch("/api/expense-config")
+      .then((r) => r.json())
+      .then((c) => { setConfig(c); setConfigDraft(c); })
+      .catch(() => {});
+  }, []);
+
+  function openSettings() {
+    setConfigDraft(JSON.parse(JSON.stringify(config)));
+    setActiveSection("settings");
+  }
+
+  function setDraft(field, value) {
+    setConfigDraft((d) => ({ ...d, [field]: value }));
+  }
+
+  function setLabel(key, value) {
+    setConfigDraft((d) => ({ ...d, labels: { ...d.labels, [key]: value } }));
+  }
+
+  function addCategory() {
+    const cat = newCategory.trim();
+    if (!cat || configDraft.categories.includes(cat)) return;
+    setConfigDraft((d) => ({ ...d, categories: [...d.categories, cat] }));
+    setNewCategory("");
+  }
+
+  function removeCategory(cat) {
+    setConfigDraft((d) => ({ ...d, categories: d.categories.filter((c) => c !== cat) }));
+  }
+
+  function moveCategory(index, dir) {
+    const cats = [...configDraft.categories];
+    const swap = index + dir;
+    if (swap < 0 || swap >= cats.length) return;
+    [cats[index], cats[swap]] = [cats[swap], cats[index]];
+    setConfigDraft((d) => ({ ...d, categories: cats }));
+  }
+
+  function addCompany() {
+    const co = newCompany.trim();
+    const list = configDraft.expenseCompanies || [];
+    if (!co || list.includes(co)) return;
+    setConfigDraft((d) => ({ ...d, expenseCompanies: [...list, co] }));
+    setNewCompany("");
+  }
+
+  function removeCompany(co) {
+    setConfigDraft((d) => ({ ...d, expenseCompanies: (d.expenseCompanies || []).filter((c) => c !== co) }));
+  }
+
+  function moveCompany(index, dir) {
+    const list = [...(configDraft.expenseCompanies || [])];
+    const swap = index + dir;
+    if (swap < 0 || swap >= list.length) return;
+    [list[index], list[swap]] = [list[swap], list[index]];
+    setConfigDraft((d) => ({ ...d, expenseCompanies: list }));
+  }
+
+  async function saveConfig() {
+    setSavingConfig(true);
+    try {
+      const r = await fetch("/api/expense-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+        body: JSON.stringify(configDraft),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      setConfig(configDraft);
+      showToast("Form settings saved");
+      setActiveSection("submissions");
+    } catch {
+      showToast("Failed to save settings");
+    }
+    setSavingConfig(false);
+  }
+
+  async function markPaid(expense) {
+    setUpdating((s) => new Set(s).add(expense.id));
+    try {
+      const r = await fetch(`/api/expense-update/${expense.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+        body: JSON.stringify({ status: "Paid" }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      setExpenses((prev) => prev.map((e) => e.id === expense.id ? { ...e, status: "Paid" } : e));
+      showToast(`Marked ${expense.submitterName}'s expense as paid`);
+    } catch {
+      showToast("Failed to update expense");
+    }
+    setUpdating((s) => { const n = new Set(s); n.delete(expense.id); return n; });
+  }
+
+  const pending = expenses.filter((e) => e.status === "Pending");
+  const pendingTotal = pending.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  const pendingCount = pending.length;
+
+  const allCompanies = [...new Set(expenses.map((e) => e.company || "").filter(Boolean))].sort();
+  const companyBreakdown = allCompanies.map((co) => {
+    const rows = pending.filter((e) => (e.company || "") === co);
+    return { company: co, count: rows.length, total: rows.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0) };
+  }).filter((c) => c.count > 0);
+
+  const filtered = expenses
+    .filter((e) => filter === "All" || e.status === filter)
+    .filter((e) => !filterCompany || (e.company || "") === filterCompany);
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading expenses…</div>;
+
+  const iStyle = { width: "100%", padding: "9px 12px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, fontFamily: "inherit", color: "#1a1a2e", background: "#fff", boxSizing: "border-box" };
+
+  if (activeSection === "settings") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Form Settings</h1>
+            <p style={{ color: "#6b7280", fontSize: 14 }}>Customize what the public expense form displays</p>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setActiveSection("submissions")} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>Cancel</button>
+            <button onClick={saveConfig} disabled={savingConfig} style={{ ...primaryBtn, padding: "8px 20px", width: "auto", opacity: savingConfig ? 0.6 : 1 }}>{savingConfig ? "Saving…" : "Save Changes"}</button>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Page Text</div>
+          <div>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Form Title</label>
+            <input style={iStyle} value={configDraft.formTitle} onChange={(e) => setDraft("formTitle", e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Form Subtitle</label>
+            <textarea style={{ ...iStyle, minHeight: 72, resize: "vertical" }} value={configDraft.formSubtitle} onChange={(e) => setDraft("formSubtitle", e.target.value)} />
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Field Labels</div>
+          {Object.entries(configDraft.labels).map(([key, val]) => (
+            <div key={key}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6, textTransform: "capitalize" }}>{key}</label>
+              <input style={iStyle} value={val} onChange={(e) => setLabel(key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Mileage Settings</div>
+          <div>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Rate per KM ($)</label>
+            <input
+              style={{ ...iStyle, maxWidth: 160 }}
+              type="number" min="0" step="0.01"
+              value={configDraft.mileageRate ?? 0.70}
+              onChange={(e) => setDraft("mileageRate", parseFloat(e.target.value) || 0)}
+            />
+            <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>
+              The reimbursement amount is calculated automatically from KMs × this rate. Update here when the rate changes.
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Categories</div>
+          {configDraft.categories.map((cat, i) => (
+            <div key={cat} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, padding: "9px 12px", background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14 }}>{cat}</div>
+              <button onClick={() => moveCategory(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↑</button>
+              <button onClick={() => moveCategory(i, 1)} disabled={i === configDraft.categories.length - 1} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === configDraft.categories.length - 1 ? "default" : "pointer", color: i === configDraft.categories.length - 1 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↓</button>
+              <button onClick={() => removeCategory(cat)} style={{ background: "none", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px", cursor: "pointer", color: "#ef4444", fontFamily: "inherit", fontSize: 13 }}>✕</button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <input
+              style={{ ...iStyle, flex: 1 }}
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCategory())}
+              placeholder="New category name…"
+            />
+            <button onClick={addCategory} style={{ ...primaryBtn, width: "auto", padding: "9px 18px", fontSize: 13 }}>Add</button>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Companies</div>
+          {(configDraft.expenseCompanies || []).map((co, i) => (
+            <div key={co} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, padding: "9px 12px", background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14 }}>{co}</div>
+              <button onClick={() => moveCompany(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↑</button>
+              <button onClick={() => moveCompany(i, 1)} disabled={i === (configDraft.expenseCompanies || []).length - 1} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === (configDraft.expenseCompanies || []).length - 1 ? "default" : "pointer", color: i === (configDraft.expenseCompanies || []).length - 1 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↓</button>
+              <button onClick={() => removeCompany(co)} style={{ background: "none", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px", cursor: "pointer", color: "#ef4444", fontFamily: "inherit", fontSize: 13 }}>✕</button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <input
+              style={{ ...iStyle, flex: 1 }}
+              value={newCompany}
+              onChange={(e) => setNewCompany(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCompany())}
+              placeholder="New company name…"
+            />
+            <button onClick={addCompany} style={{ ...primaryBtn, width: "auto", padding: "9px 18px", fontSize: 13 }}>Add</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Expenses</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>Review and approve reimbursement requests</p>
+        </div>
+        <button onClick={openSettings} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>⚙ Form Settings</button>
+      </div>
+
+      {pendingCount > 0 && (
+        <div className="card" style={{ padding: m ? "14px 16px" : "16px 20px", background: "#fffbeb", borderColor: "#fde68a" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: "#92400e" }}>{pendingCount} expense{pendingCount !== 1 ? "s" : ""} awaiting reimbursement</div>
+              <div style={{ fontSize: 13, color: "#b45309", marginTop: 2 }}>Total outstanding: <strong>${pendingTotal.toFixed(2)}</strong></div>
+            </div>
+          </div>
+          {companyBreakdown.length > 0 && (
+            <div style={{ display: "flex", gap: m ? 10 : 16, flexWrap: "wrap", marginTop: 12, paddingTop: 10, borderTop: "1px solid #fde68a" }}>
+              {companyBreakdown.map(({ company, count, total }) => (
+                <button
+                  key={company}
+                  onClick={() => setFilterCompany(filterCompany === company ? "" : company)}
+                  style={{
+                    background: filterCompany === company ? "#92400e" : "#fef3c7",
+                    color: filterCompany === company ? "#fff" : "#92400e",
+                    border: "1px solid #f59e0b", borderRadius: 8, padding: "6px 12px",
+                    cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 500,
+                  }}
+                >
+                  {company}: <strong>${total.toFixed(2)}</strong>
+                  <span style={{ fontWeight: 400, marginLeft: 4 }}>({count})</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {["Pending", "Paid", "All"].map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            style={{
+              padding: "7px 16px", borderRadius: 8, border: "1px solid", fontFamily: "inherit",
+              fontSize: 13, fontWeight: 500, cursor: "pointer",
+              background: filter === f ? "#1a1a2e" : "#fff",
+              color: filter === f ? "#fff" : "#374151",
+              borderColor: filter === f ? "#1a1a2e" : "#e5e7eb",
+            }}
+          >
+            {f}
+            {f === "Pending" && pendingCount > 0 && (
+              <span style={{ marginLeft: 6, background: "#ef4444", color: "#fff", borderRadius: 99, padding: "1px 6px", fontSize: 11 }}>{pendingCount}</span>
+            )}
+          </button>
+        ))}
+        {allCompanies.length > 0 && (
+          <select
+            value={filterCompany}
+            onChange={(e) => setFilterCompany(e.target.value)}
+            style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid #e5e7eb", fontFamily: "inherit", fontSize: 13, color: filterCompany ? "#1a1a2e" : "#6b7280", background: filterCompany ? "#f0f0ff" : "#fff", cursor: "pointer" }}
+          >
+            <option value="">All Companies</option>
+            {allCompanies.map((co) => <option key={co} value={co}>{co}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="card" style={{ overflow: "hidden" }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: "40px 16px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+            No {filter === "All" ? "" : filter.toLowerCase() + " "}expenses
+          </div>
+        ) : filtered.map((expense, i) => (
+          <div key={expense.id} style={{ padding: m ? "14px 16px" : "16px 20px", borderBottom: i < filtered.length - 1 ? "1px solid #f3f4f6" : "none", display: "flex", gap: m ? 10 : 16, alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                <span style={{ fontWeight: 600, fontSize: m ? 14 : 15, color: "#1a1a2e" }}>{expense.submitterName}</span>
+                <span className="pill" style={{
+                  background: expense.status === "Paid" ? "#d1fae5" : "#fef3c7",
+                  color: expense.status === "Paid" ? "#065f46" : "#92400e",
+                  fontSize: 11,
+                }}>
+                  {expense.status}
+                </span>
+                {expense.company && (
+                  <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>
+                    {expense.company}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 13, color: "#374151", marginBottom: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <strong style={{ fontSize: m ? 15 : 16 }}>${parseFloat(expense.amount).toFixed(2)}</strong>
+                {expense.extractedTotal != null && (
+                  <span style={{
+                    fontSize: 12, fontWeight: 500,
+                    color: Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02 ? "#dc2626" : "#059669",
+                  }}>
+                    {Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02
+                      ? `⚠ Receipt total $${expense.extractedTotal.toFixed(2)}`
+                      : `✓ Amount verified`}
+                  </span>
+                )}
+                {expense.extractedDate && (() => {
+                  const submitted = expense.expenseDate?.split("T")[0];
+                  const match = expense.extractedDate === submitted;
+                  return (
+                    <span style={{ fontSize: 12, fontWeight: 500, color: match ? "#059669" : "#dc2626" }}>
+                      {match ? "✓ Date verified" : `⚠ Receipt date ${expense.extractedDate}`}
+                    </span>
+                  );
+                })()}
+                <span style={{ color: "#9ca3af" }}>{expense.category}</span>
+                {expense.expenseDate && <span style={{ color: "#9ca3af" }}>{expense.expenseDate.split("T")[0]}</span>}
+              </div>
+              {expense.totalKMs != null && (
+                <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>
+                  🚗 {expense.startLocation} → {expense.endLocation}
+                  <span style={{ color: "#9ca3af", marginLeft: 8 }}>{expense.totalKMs} km @ ${expense.mileageRate?.toFixed(2)}/km</span>
+                </div>
+              )}
+              {expense.merchantName && (
+                <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>
+                  🏪 {expense.merchantName}
+                  {expense.extractedSubtotal != null && <span style={{ color: "#9ca3af", marginLeft: 8 }}>Subtotal: ${expense.extractedSubtotal.toFixed(2)}</span>}
+                  {expense.extractedTax != null && <span style={{ color: "#9ca3af", marginLeft: 8 }}>Tax: ${expense.extractedTax.toFixed(2)}</span>}
+                </div>
+              )}
+              {expense.description && <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 4 }}>{expense.description}</div>}
+              {expense.extractedItems && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 4, whiteSpace: "pre-line" }}>{expense.extractedItems}</div>}
+              <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <span>{expense.submitterEmail}</span>
+                {expense.submittedAt && <span>Submitted {new Date(expense.submittedAt).toLocaleDateString("en-CA")}</span>}
+                {expense.receiptURL && (
+                  <a href={expense.receiptURL} target="_blank" rel="noreferrer" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>View Receipt →</a>
+                )}
+              </div>
+            </div>
+            {expense.status === "Pending" && (
+              <button
+                onClick={() => markPaid(expense)}
+                disabled={updating.has(expense.id)}
+                style={{
+                  background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
+                  padding: m ? "8px 12px" : "8px 16px", fontSize: 13, fontWeight: 500,
+                  cursor: updating.has(expense.id) ? "wait" : "pointer",
+                  fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap",
+                  opacity: updating.has(expense.id) ? 0.6 : 1,
+                }}
+              >
+                {updating.has(expense.id) ? "Saving…" : "Mark Paid"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── User Management ──────────────────────────────────────────────────────────
 function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false });
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -4639,13 +5051,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses });
     setEditUser(user);
     setShowModal(true);
   };
@@ -4655,11 +5067,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -4688,6 +5100,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     { key: "can_view_tech",           label: "Tech Setups",            sub: "Network diagrams (admin feature)" },
     { key: "can_view_employee_hours", label: "Employee Hours",         sub: "Time tracking and employee hours" },
     { key: "can_view_pro",            label: "PRO Sales CRM",          sub: "Access to the PRO Sales CRM" },
+    { key: "can_view_expenses",       label: "Expenses",               sub: "Expense submission review and approval" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;

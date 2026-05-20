@@ -80,15 +80,26 @@ export async function requireAdmin(req, res) {
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  const token = auth.slice(7);
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY },
-  });
-  if (!r.ok) {
-    res.status(401).json({ error: "Unauthorized" });
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error("requireAdmin: SUPABASE_URL or SUPABASE_ANON_KEY env var missing");
+    res.status(500).json({ error: "Server misconfiguration: Supabase env vars not set" });
     return null;
   }
-  return await r.json();
+  try {
+    const token = auth.slice(7);
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) {
+      res.status(401).json({ error: "Unauthorized" });
+      return null;
+    }
+    return await r.json();
+  } catch (e) {
+    console.error("requireAdmin fetch error:", e.message);
+    res.status(500).json({ error: `Auth check failed: ${e.message}` });
+    return null;
+  }
 }
 
 export async function sendMail(msToken, { to, subject, html }) {

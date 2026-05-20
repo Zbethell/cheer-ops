@@ -4655,9 +4655,10 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [filterCompany, setFilterCompany] = useState("");
 
   useEffect(() => {
-    const authHeader = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-    fetch("/api/expenses-list", { headers: authHeader })
-      .then((r) => r.json())
+    const stored = localStorage.getItem("sb_session");
+    const token = authToken || (stored ? JSON.parse(stored).access_token : null);
+    fetch("/api/expenses-list", { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then((data) => setExpenses(Array.isArray(data) ? data : []))
       .catch(() => showToast("Failed to load expenses"))
       .finally(() => setLoading(false));

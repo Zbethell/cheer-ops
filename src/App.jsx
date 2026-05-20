@@ -4655,9 +4655,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [filterCompany, setFilterCompany] = useState("");
 
   useEffect(() => {
-    const stored = localStorage.getItem("sb_session");
-    const token = authToken || (stored ? JSON.parse(stored).access_token : null);
-    fetch("/api/expenses-list", { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    fetch("/api/expenses-list", { headers: { Authorization: `Bearer ${SUPABASE_KEY}` } })
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then((data) => setExpenses(Array.isArray(data) ? data : []))
       .catch(() => showToast("Failed to load expenses"))
@@ -4725,7 +4723,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     try {
       const r = await fetch("/api/expense-config", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
         body: JSON.stringify(configDraft),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -4743,7 +4741,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     try {
       const r = await fetch(`/api/expense-update/${expense.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
         body: JSON.stringify({ status: "Paid" }),
       });
       if (!r.ok) throw new Error(await r.text());

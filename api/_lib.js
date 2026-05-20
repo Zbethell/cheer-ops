@@ -74,9 +74,11 @@ export async function analyzeReceipt(fileBuffer, mimeType) {
 
 // Verifies the Supabase JWT from the Authorization header.
 // Returns the user object or sends a 401 and returns null.
+const ADMIN_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
+
 export async function requireAdmin(req, res) {
   const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ") || auth.slice(7) !== SUPABASE_ANON_KEY) {
+  if (!auth?.startsWith("Bearer ") || auth.slice(7) !== ADMIN_TOKEN) {
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }

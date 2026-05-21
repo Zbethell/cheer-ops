@@ -4744,7 +4744,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
         body: JSON.stringify({ status: "Paid" }),
       });
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
       setExpenses((prev) => prev.map((e) => e.id === expense.id ? { ...e, status: "Paid" } : e));
       showToast(`Marked ${expense.submitterName}'s expense as paid`);
     } catch (e) {

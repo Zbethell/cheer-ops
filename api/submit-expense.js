@@ -30,7 +30,12 @@ export default async function handler(req, res) {
     let extracted = {};
     if (receiptBase64 && receiptFileName) {
       const fileBuffer = Buffer.from(receiptBase64, "base64");
-      const safeName = `${Date.now()}-${receiptFileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const ext = receiptFileName.split(".").pop().replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+      const namePart = submitterName.trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, "");
+      const categoryPart = category.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, "");
+      const amountPart = parseFloat(amount).toFixed(2);
+      const dateStr = expenseDate || new Date().toISOString().split("T")[0];
+      const safeName = `${dateStr}_${namePart}_${categoryPart}_$${amountPart}.${ext}`;
       const [uploadRes] = await Promise.all([
         fetch(
           `https://graph.microsoft.com/v1.0/drives/${SHAREPOINT_DRIVE_ID}/root:/Expense%20Receipts/${encodeURIComponent(safeName)}:/content`,

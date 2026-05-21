@@ -1,10 +1,12 @@
 const {
   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
-  DOC_INTEL_KEY, DOC_INTEL_ENDPOINT,
+  DOC_INTEL_KEY,
   SUPABASE_URL, SUPABASE_ANON_KEY,
   EXPENSE_FROM_EMAIL, EXPENSE_NOTIFY_EMAIL,
   APP_URL,
 } = process.env;
+
+const DOC_INTEL_ENDPOINT = (process.env.DOC_INTEL_ENDPOINT || "").trim();
 
 export const SITE_ID = "canadiancheer.sharepoint.com,3de101e2-cad1-4d01-b8f2-581326ad7ef2,b28c2a3b-2636-4279-9c6a-ba34c5edfcb9";
 export const EXPENSES_LIST_ID = "33fd6b8c-b4df-47bd-af5b-b17ee2bfcf51";

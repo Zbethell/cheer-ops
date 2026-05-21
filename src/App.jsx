@@ -4747,8 +4747,8 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
       if (!r.ok) throw new Error(await r.text());
       setExpenses((prev) => prev.map((e) => e.id === expense.id ? { ...e, status: "Paid" } : e));
       showToast(`Marked ${expense.submitterName}'s expense as paid`);
-    } catch {
-      showToast("Failed to update expense");
+    } catch (e) {
+      showToast(`Failed to update expense: ${e.message}`);
     }
     setUpdating((s) => { const n = new Set(s); n.delete(expense.id); return n; });
   }

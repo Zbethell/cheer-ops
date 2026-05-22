@@ -108,14 +108,27 @@ export async function sendMail(msToken, { to, subject, html }) {
   if (!r.ok) console.error("sendMail failed:", await r.text());
 }
 
-function row(label, value) {
-  return `<tr>
-    <td style="padding:10px 14px;background:#f8f9fb;font-weight:600;color:#374151;width:36%;vertical-align:top;">${label}</td>
-    <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;color:#1a1a2e;">${value}</td>
-  </tr>`;
+function itemTableRows(lineItems) {
+  return lineItems.map((item) =>
+    `<tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:13px;">${item.expenseDate || "—"}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#374151;font-size:13px;">${item.category}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:13px;">${item.description || "—"}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#1a1a2e;font-size:13px;text-align:right;font-weight:500;">$${parseFloat(item.amount).toFixed(2)}</td>
+    </tr>`
+  ).join("");
 }
 
-export function accountantEmailHtml({ submitterName, submitterEmail, amount, category, company, expenseDate, description, dashboardUrl }) {
+function itemTableHeader() {
+  return `<thead><tr style="background:#f8f9fb;">
+    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Date</th>
+    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Category</th>
+    <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Description</th>
+    <th style="padding:10px 12px;text-align:right;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Amount</th>
+  </tr></thead>`;
+}
+
+export function accountantEmailHtml({ submitterName, submitterEmail, company, lineItems, totalAmount, dashboardUrl }) {
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.12);">
     <div style="background:#1a1a2e;padding:28px 32px;">
@@ -123,25 +136,29 @@ export function accountantEmailHtml({ submitterName, submitterEmail, amount, cat
       <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:600;">New Expense Submitted</h1>
     </div>
     <div style="padding:32px;">
-      <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.5;">A new expense has been submitted and is awaiting your review.</p>
-      <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        ${row("Submitted By", `${submitterName}<br><span style="color:#6b7280;font-size:12px;">${submitterEmail}</span>`)}
-        ${row("Amount", `<strong style="font-size:16px;">$${parseFloat(amount).toFixed(2)}</strong>`)}
-        ${row("Category", category)}
-        ${company ? row("Company", company) : ""}
-        ${row("Expense Date", expenseDate)}
-        ${description ? row("Description", `<span style="color:#6b7280;">${description}</span>`) : ""}
+      <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.5;">
+        <strong>${submitterName}</strong> (${submitterEmail}) submitted ${lineItems.length} expense${lineItems.length !== 1 ? "s" : ""} for <strong>${company}</strong> totalling <strong>$${totalAmount.toFixed(2)}</strong>.
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;margin-bottom:20px;">
+        ${itemTableHeader()}
+        <tbody>
+          ${itemTableRows(lineItems)}
+          <tr style="background:#f8f9fb;">
+            <td colspan="3" style="padding:10px 12px;font-weight:700;font-size:14px;color:#1a1a2e;">Total</td>
+            <td style="padding:10px 12px;font-weight:700;font-size:15px;color:#1a1a2e;text-align:right;">$${totalAmount.toFixed(2)}</td>
+          </tr>
+        </tbody>
       </table>
-      <div style="margin-top:28px;">
+      <div style="margin-top:24px;">
         <a href="${dashboardUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Review in CheerOps →</a>
       </div>
-      <p style="margin:28px 0 0;color:#9ca3af;font-size:12px;">Sent by CheerOps expense portal. Log in to approve or mark as paid.</p>
+      <p style="margin:24px 0 0;color:#9ca3af;font-size:12px;">Sent by CheerOps expense portal. Log in to approve or mark as paid.</p>
     </div>
   </div>
 </body></html>`;
 }
 
-export function submitterConfirmationHtml({ submitterName, amount, category, expenseDate, description, trackingUrl }) {
+export function submitterConfirmationHtml({ submitterName, company, lineItems, totalAmount, trackingUrl }) {
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.12);">
     <div style="background:#1a1a2e;padding:28px 32px;">
@@ -149,15 +166,20 @@ export function submitterConfirmationHtml({ submitterName, amount, category, exp
       <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:600;">Expense Submitted</h1>
     </div>
     <div style="padding:32px;">
-      <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.5;">Hi ${submitterName}, your expense has been received and is pending review. You can check the status at any time using the link below.</p>
-      <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        ${row("Amount", `<strong style="font-size:16px;">$${parseFloat(amount).toFixed(2)}</strong>`)}
-        ${row("Category", category)}
-        ${row("Expense Date", expenseDate)}
-        ${description ? row("Description", `<span style="color:#6b7280;">${description}</span>`) : ""}
-        ${row("Status", `<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;">Pending</span>`)}
+      <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.5;">
+        Hi ${submitterName}, your ${lineItems.length > 1 ? `${lineItems.length} expenses have` : "expense has"} been received for <strong>${company}</strong> and ${lineItems.length > 1 ? "are" : "is"} pending review.
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;margin-bottom:20px;">
+        ${itemTableHeader()}
+        <tbody>
+          ${itemTableRows(lineItems)}
+          <tr style="background:#f8f9fb;">
+            <td colspan="3" style="padding:10px 12px;font-weight:700;font-size:14px;color:#1a1a2e;">Total</td>
+            <td style="padding:10px 12px;font-weight:700;font-size:15px;color:#1a1a2e;text-align:right;">$${totalAmount.toFixed(2)}</td>
+          </tr>
+        </tbody>
       </table>
-      <div style="margin-top:28px;">
+      <div style="margin-top:24px;">
         <a href="${trackingUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Track Your Expense →</a>
       </div>
       <p style="margin:20px 0 0;color:#9ca3af;font-size:12px;">Keep this link to check your reimbursement status. You'll receive another email when payment is processed.</p>
@@ -166,7 +188,10 @@ export function submitterConfirmationHtml({ submitterName, amount, category, exp
 </body></html>`;
 }
 
-export function paidNotificationHtml({ submitterName, amount, category, expenseDate }) {
+export function paidNotificationHtml({ submitterName, company, lineItems, totalAmount, amount, category, expenseDate }) {
+  // support both multi-item (lineItems) and legacy single-item (amount/category/expenseDate)
+  const items = lineItems || [{ category: category || "", amount: amount || 0, expenseDate: expenseDate || "" }];
+  const total = totalAmount != null ? totalAmount : (parseFloat(amount) || 0);
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.12);">
     <div style="background:#065f46;padding:28px 32px;">
@@ -174,14 +199,20 @@ export function paidNotificationHtml({ submitterName, amount, category, expenseD
       <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:600;">Expense Approved</h1>
     </div>
     <div style="padding:32px;">
-      <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.5;">Hi ${submitterName}, your expense has been reviewed and payment has been processed.</p>
-      <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        ${row("Amount", `<strong style="font-size:16px;">$${parseFloat(amount).toFixed(2)}</strong>`)}
-        ${row("Category", category)}
-        ${row("Expense Date", expenseDate)}
-        ${row("Status", `<span style="background:#d1fae5;color:#065f46;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;">Paid</span>`)}
+      <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.5;">
+        Hi ${submitterName}, your ${items.length > 1 ? `${items.length} expenses have` : "expense has"} been reviewed and payment has been processed${company ? ` for <strong>${company}</strong>` : ""}.
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;margin-bottom:20px;">
+        ${itemTableHeader()}
+        <tbody>
+          ${itemTableRows(items)}
+          <tr style="background:#f8f9fb;">
+            <td colspan="3" style="padding:10px 12px;font-weight:700;font-size:14px;color:#1a1a2e;">Total</td>
+            <td style="padding:10px 12px;font-weight:700;font-size:15px;color:#065f46;text-align:right;">$${total.toFixed(2)}</td>
+          </tr>
+        </tbody>
       </table>
-      <p style="margin:28px 0 0;color:#9ca3af;font-size:12px;">If you have any questions about this payment, please contact the accounting team.</p>
+      <p style="margin:0;color:#9ca3af;font-size:12px;">If you have any questions about this payment, please contact the accounting team.</p>
     </div>
   </div>
 </body></html>`;

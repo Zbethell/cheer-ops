@@ -4627,6 +4627,111 @@ function TechSetups({ isMobile: m, events, showToast }) {
 }
 
 // ─── Expenses Admin ───────────────────────────────────────────────────────────
+function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFilter }) {
+  const sorted = [...items].sort((a, b) => (a.expenseDate || "").localeCompare(b.expenseDate || ""));
+  const companyName = company || "All Companies";
+  const periodText = (dateFrom || dateTo) ? `${dateFrom || "—"} to ${dateTo || "—"}` : "All dates";
+  const generatedDate = new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
+
+  const withTax = sorted.map((e) => {
+    const total = parseFloat(e.amount) || 0;
+    const isMileage = e.totalKMs != null;
+    const tax = isMileage ? 0 : (e.extractedTax != null ? e.extractedTax : null);
+    const net = tax != null ? total - tax : total;
+    return { ...e, _total: total, _tax: tax, _net: net };
+  });
+
+  const byCat = {};
+  withTax.forEach((e) => {
+    const cat = e.category || "Other";
+    if (!byCat[cat]) byCat[cat] = { net: 0, tax: 0, total: 0 };
+    byCat[cat].total += e._total;
+    byCat[cat].tax  += e._tax  ?? 0;
+    byCat[cat].net  += e._net;
+  });
+  const grandTotal = withTax.reduce((s, e) => s + e._total, 0);
+  const grandTax   = withTax.reduce((s, e) => s + (e._tax ?? 0), 0);
+  const grandNet   = withTax.reduce((s, e) => s + e._net, 0);
+  const hasMissingTax = withTax.some((e) => e._tax == null && e.totalKMs == null);
+
+  const fmt = (n) => `$${n.toFixed(2)}`;
+  const fmtOpt = (n) => n == null ? "—" : `$${n.toFixed(2)}`;
+
+  const catRows = Object.entries(byCat).map(([cat, v]) =>
+    `<tr><td>${cat}</td><td class="num">${fmt(v.net)}</td><td class="num">${v.tax > 0 || !hasMissingTax ? fmt(v.tax) : "—"}</td><td class="num fw">${fmt(v.total)}</td></tr>`
+  ).join("");
+
+  const txRows = withTax.map((e) =>
+    `<tr>
+      <td>${(e.expenseDate || "—").split("T")[0]}</td>
+      <td>${e.submitterName}</td>
+      <td>${e.merchantName || (e.totalKMs != null ? "Mileage" : "—")}</td>
+      <td>${e.totalKMs != null ? `${e.startLocation} → ${e.endLocation} (${e.totalKMs} km)` : (e.description || "—")}</td>
+      <td>${e.category}</td>
+      <td class="num">${fmt(e._net)}</td>
+      <td class="num">${fmtOpt(e._tax)}</td>
+      <td class="num fw">${fmt(e._total)}</td>
+    </tr>`
+  ).join("");
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${companyName} Expense Report</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,'Segoe UI',sans-serif;color:#1a1a2e;padding:40px;font-size:14px}
+  .no-print{margin-bottom:24px}
+  @media print{.no-print{display:none}body{padding:20px}}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px}
+  .header h1{font-size:20px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+  .header p{color:#6b7280;font-size:13px;margin-top:3px}
+  .grand{font-size:26px;font-weight:700;text-align:right}
+  .grand-sub{font-size:12px;color:#6b7280;text-align:right;margin-top:4px}
+  h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b7280;margin:28px 0 10px;border-bottom:2px solid #1a1a2e;padding-bottom:5px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{padding:8px 10px;text-align:left;background:#f8f9fb;font-size:11px;font-weight:600;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap}
+  td{padding:8px 10px;border-bottom:1px solid #f3f4f6}
+  .num{text-align:right;white-space:nowrap}
+  .fw{font-weight:600}
+  .total-row td{font-weight:700;background:#f8f9fb;border-top:2px solid #1a1a2e}
+  .signatures{display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:48px;page-break-inside:avoid}
+  .sig-line{border-top:1px solid #1a1a2e;padding-top:6px;margin-bottom:24px;font-size:12px;color:#6b7280}
+  .note{margin-top:20px;font-size:11px;color:#9ca3af}
+</style></head><body>
+<div class="no-print">
+  <button onclick="window.print()" style="background:#1a1a2e;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:14px;cursor:pointer;font-family:inherit;">🖨 Print / Save as PDF</button>
+</div>
+<div class="header">
+  <div>
+    <h1>${companyName}<br>Expense Report</h1>
+    <p>Period: ${periodText}</p>
+    <p>Generated: ${generatedDate}</p>
+    ${statusFilter !== "All" ? `<p>Status: ${statusFilter}</p>` : ""}
+  </div>
+  <div>
+    <div class="grand">${fmt(grandTotal)}</div>
+    <div class="grand-sub">incl. tax where available</div>
+  </div>
+</div>
+
+<h2>Summary by Category</h2>
+<table>
+  <thead><tr><th>Category</th><th class="num">Net (CAD)</th><th class="num">Tax (CAD)</th><th class="num">Total (CAD)</th></tr></thead>
+  <tbody>${catRows}<tr class="total-row"><td>Total</td><td class="num">${fmt(grandNet)}</td><td class="num">${grandTax > 0 ? fmt(grandTax) : "—"}</td><td class="num">${fmt(grandTotal)}</td></tr></tbody>
+</table>
+
+<h2>Transactions</h2>
+<table>
+  <thead><tr><th>Date</th><th>Submitter</th><th>Supplier</th><th>Description</th><th>Category</th><th class="num">Net (CAD)</th><th class="num">Tax (CAD)</th><th class="num">Total (CAD)</th></tr></thead>
+  <tbody>${txRows}<tr class="total-row"><td colspan="5">Total</td><td class="num">${fmt(grandNet)}</td><td class="num">${grandTax > 0 ? fmt(grandTax) : "—"}</td><td class="num">${fmt(grandTotal)}</td></tr></tbody>
+</table>
+
+<div class="signatures">
+  <div><div class="sig-line">Employee Signature</div><div class="sig-line">Date</div></div>
+  <div><div class="sig-line">Approver's Signature</div><div class="sig-line">Date</div></div>
+</div>
+${hasMissingTax ? `<p class="note">* Tax not separately available for all items (receipt analysis may not have run). Net shown as full amount for those items.</p>` : ""}
+</body></html>`;
+}
+
 const DEFAULT_EXPENSE_CONFIG = {
   formTitle: "Expense Report",
   formSubtitle: "Submit your expense for reimbursement. You'll receive a link to track its status.",
@@ -4653,6 +4758,8 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [newCategory, setNewCategory] = useState("");
   const [newCompany, setNewCompany] = useState("");
   const [filterCompany, setFilterCompany] = useState("");
+  const [showExport, setShowExport] = useState(false);
+  const [exportOpts, setExportOpts] = useState({ company: "", dateFrom: "", dateTo: "", statusFilter: "All" });
 
   useEffect(() => {
     fetch("/api/expenses-list", { headers: { Authorization: `Bearer ${SUPABASE_KEY}` } })
@@ -4736,36 +4843,83 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     setSavingConfig(false);
   }
 
-  async function markPaid(expense) {
-    setUpdating((s) => new Set(s).add(expense.id));
+  function groupExpenses(arr) {
+    const map = {};
+    arr.forEach((e) => {
+      const key = e.token || e.id;
+      if (!map[key]) map[key] = [];
+      map[key].push(e);
+    });
+    return Object.values(map).map((items) => ({
+      key:           items[0].token || items[0].id,
+      token:         items[0].token || "",
+      firstId:       items[0].id,
+      submitterName: items[0].submitterName,
+      submitterEmail:items[0].submitterEmail,
+      company:       items[0].company,
+      status:        items.every((i) => i.status === "Paid") ? "Paid" : "Pending",
+      total:         items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0),
+      submittedAt:   items[0].submittedAt,
+      items:         [...items].sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)),
+    })).sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  }
+
+  async function markReportPaid(report) {
+    setUpdating((s) => new Set(s).add(report.key));
     try {
-      const r = await fetch(`/api/expense-update/${expense.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
-        body: JSON.stringify({ status: "Paid" }),
-      });
+      let r;
+      if (report.token) {
+        r = await fetch(`/api/expense-report-update?token=${encodeURIComponent(report.token)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+          body: JSON.stringify({ status: "Paid" }),
+        });
+      } else {
+        r = await fetch(`/api/expense-update/${report.firstId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+          body: JSON.stringify({ status: "Paid" }),
+        });
+      }
       if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-      setExpenses((prev) => prev.map((e) => e.id === expense.id ? { ...e, status: "Paid" } : e));
-      showToast(`Marked ${expense.submitterName}'s expense as paid`);
+      setExpenses((prev) => prev.map((e) =>
+        (report.token ? e.token === report.token : e.id === report.firstId) ? { ...e, status: "Paid" } : e
+      ));
+      showToast(`Marked ${report.submitterName}'s expense as paid`);
     } catch (e) {
       showToast(`Failed to update expense: ${e.message}`);
     }
-    setUpdating((s) => { const n = new Set(s); n.delete(expense.id); return n; });
+    setUpdating((s) => { const n = new Set(s); n.delete(report.key); return n; });
   }
 
-  const pending = expenses.filter((e) => e.status === "Pending");
-  const pendingTotal = pending.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  function exportReport() {
+    let items = expenses;
+    if (exportOpts.company) items = items.filter((e) => e.company === exportOpts.company);
+    if (exportOpts.dateFrom) items = items.filter((e) => e.expenseDate && e.expenseDate.split("T")[0] >= exportOpts.dateFrom);
+    if (exportOpts.dateTo) items = items.filter((e) => e.expenseDate && e.expenseDate.split("T")[0] <= exportOpts.dateTo);
+    if (exportOpts.statusFilter !== "All") items = items.filter((e) => e.status === exportOpts.statusFilter);
+    if (items.length === 0) { showToast("No expenses match the selected filters"); return; }
+    const html = generateExpenseReportHtml(items, exportOpts);
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+    setShowExport(false);
+  }
+
+  const reports = groupExpenses(expenses);
+  const pending = reports.filter((r) => r.status === "Pending");
+  const pendingTotal = pending.reduce((s, r) => s + r.total, 0);
   const pendingCount = pending.length;
 
   const allCompanies = [...new Set(expenses.map((e) => e.company || "").filter(Boolean))].sort();
   const companyBreakdown = allCompanies.map((co) => {
-    const rows = pending.filter((e) => (e.company || "") === co);
-    return { company: co, count: rows.length, total: rows.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0) };
+    const rows = pending.filter((r) => r.company === co);
+    return { company: co, count: rows.length, total: rows.reduce((s, r) => s + r.total, 0) };
   }).filter((c) => c.count > 0);
 
-  const filtered = expenses
-    .filter((e) => filter === "All" || e.status === filter)
-    .filter((e) => !filterCompany || (e.company || "") === filterCompany);
+  const filtered = reports
+    .filter((r) => filter === "All" || r.status === filter)
+    .filter((r) => !filterCompany || r.company === filterCompany);
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading expenses…</div>;
 
@@ -4877,7 +5031,10 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
           <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Expenses</h1>
           <p style={{ color: "#6b7280", fontSize: 14 }}>Review and approve reimbursement requests</p>
         </div>
-        <button onClick={openSettings} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>⚙ Form Settings</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { setExportOpts({ company: filterCompany, dateFrom: "", dateTo: "", statusFilter: "All" }); setShowExport(true); }} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>↓ Export Report</button>
+          <button onClick={openSettings} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>⚙ Form Settings</button>
+        </div>
       </div>
 
       {pendingCount > 0 && (
@@ -4946,89 +5103,132 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
           <div style={{ padding: "40px 16px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
             No {filter === "All" ? "" : filter.toLowerCase() + " "}expenses
           </div>
-        ) : filtered.map((expense, i) => (
-          <div key={expense.id} style={{ padding: m ? "14px 16px" : "16px 20px", borderBottom: i < filtered.length - 1 ? "1px solid #f3f4f6" : "none", display: "flex", gap: m ? 10 : 16, alignItems: "flex-start" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, fontSize: m ? 14 : 15, color: "#1a1a2e" }}>{expense.submitterName}</span>
-                <span className="pill" style={{
-                  background: expense.status === "Paid" ? "#d1fae5" : "#fef3c7",
-                  color: expense.status === "Paid" ? "#065f46" : "#92400e",
-                  fontSize: 11,
-                }}>
-                  {expense.status}
-                </span>
-                {expense.company && (
-                  <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>
-                    {expense.company}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 13, color: "#374151", marginBottom: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <strong style={{ fontSize: m ? 15 : 16 }}>${parseFloat(expense.amount).toFixed(2)}</strong>
-                {expense.extractedTotal != null && (
-                  <span style={{
-                    fontSize: 12, fontWeight: 500,
-                    color: Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02 ? "#dc2626" : "#059669",
-                  }}>
-                    {Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02
-                      ? `⚠ Receipt total $${expense.extractedTotal.toFixed(2)}`
-                      : `✓ Amount verified`}
-                  </span>
-                )}
-                {expense.extractedDate && (() => {
-                  const submitted = expense.expenseDate?.split("T")[0];
-                  const match = expense.extractedDate === submitted;
-                  return (
-                    <span style={{ fontSize: 12, fontWeight: 500, color: match ? "#059669" : "#dc2626" }}>
-                      {match ? "✓ Date verified" : `⚠ Receipt date ${expense.extractedDate}`}
-                    </span>
-                  );
-                })()}
-                <span style={{ color: "#9ca3af" }}>{expense.category}</span>
-                {expense.expenseDate && <span style={{ color: "#9ca3af" }}>{expense.expenseDate.split("T")[0]}</span>}
-              </div>
-              {expense.totalKMs != null && (
-                <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>
-                  🚗 {expense.startLocation} → {expense.endLocation}
-                  <span style={{ color: "#9ca3af", marginLeft: 8 }}>{expense.totalKMs} km @ ${expense.mileageRate?.toFixed(2)}/km</span>
+        ) : filtered.map((report, ri) => (
+          <div key={report.key} style={{ padding: m ? "14px 16px" : "16px 20px", borderBottom: ri < filtered.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+            {/* Report header row */}
+            <div style={{ display: "flex", gap: m ? 10 : 16, alignItems: "flex-start" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, fontSize: m ? 14 : 15, color: "#1a1a2e" }}>{report.submitterName}</span>
+                  <span className="pill" style={{
+                    background: report.status === "Paid" ? "#d1fae5" : "#fef3c7",
+                    color: report.status === "Paid" ? "#065f46" : "#92400e",
+                    fontSize: 11,
+                  }}>{report.status}</span>
+                  {report.company && (
+                    <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>{report.company}</span>
+                  )}
+                  {report.items.length > 1 && (
+                    <span className="pill" style={{ background: "#f0f0ff", color: "#4f46e5", fontSize: 11 }}>{report.items.length} items</span>
+                  )}
                 </div>
-              )}
-              {expense.merchantName && (
-                <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>
-                  🏪 {expense.merchantName}
-                  {expense.extractedSubtotal != null && <span style={{ color: "#9ca3af", marginLeft: 8 }}>Subtotal: ${expense.extractedSubtotal.toFixed(2)}</span>}
-                  {expense.extractedTax != null && <span style={{ color: "#9ca3af", marginLeft: 8 }}>Tax: ${expense.extractedTax.toFixed(2)}</span>}
+                <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <span>{report.submitterEmail}</span>
+                  {report.submittedAt && <span>Submitted {new Date(report.submittedAt).toLocaleDateString("en-CA")}</span>}
                 </div>
-              )}
-              {expense.description && <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 4 }}>{expense.description}</div>}
-              {expense.extractedItems && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 4, whiteSpace: "pre-line" }}>{expense.extractedItems}</div>}
-              <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <span>{expense.submitterEmail}</span>
-                {expense.submittedAt && <span>Submitted {new Date(expense.submittedAt).toLocaleDateString("en-CA")}</span>}
-                {expense.receiptURL && (
-                  <a href={expense.receiptURL} target="_blank" rel="noreferrer" style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>View Receipt →</a>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
+                <span style={{ fontSize: m ? 16 : 18, fontWeight: 700, color: "#1a1a2e" }}>${report.total.toFixed(2)}</span>
+                {report.status === "Pending" && (
+                  <button
+                    onClick={() => markReportPaid(report)}
+                    disabled={updating.has(report.key)}
+                    style={{
+                      background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
+                      padding: m ? "7px 12px" : "7px 16px", fontSize: 13, fontWeight: 500,
+                      cursor: updating.has(report.key) ? "wait" : "pointer",
+                      fontFamily: "inherit", whiteSpace: "nowrap",
+                      opacity: updating.has(report.key) ? 0.6 : 1,
+                    }}
+                  >
+                    {updating.has(report.key) ? "Saving…" : "Mark Paid"}
+                  </button>
                 )}
               </div>
             </div>
-            {expense.status === "Pending" && (
-              <button
-                onClick={() => markPaid(expense)}
-                disabled={updating.has(expense.id)}
-                style={{
-                  background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
-                  padding: m ? "8px 12px" : "8px 16px", fontSize: 13, fontWeight: 500,
-                  cursor: updating.has(expense.id) ? "wait" : "pointer",
-                  fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap",
-                  opacity: updating.has(expense.id) ? 0.6 : 1,
-                }}
-              >
-                {updating.has(expense.id) ? "Saving…" : "Mark Paid"}
-              </button>
-            )}
+
+            {/* Line items */}
+            {report.items.map((expense, ei) => (
+              <div key={expense.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f3f4f6" }}>
+                <div style={{ fontSize: 13, color: "#374151", marginBottom: 3, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 14 }}>${parseFloat(expense.amount).toFixed(2)}</strong>
+                  {expense.extractedTotal != null && (
+                    <span style={{ fontSize: 12, fontWeight: 500, color: Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02 ? "#dc2626" : "#059669" }}>
+                      {Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02 ? `⚠ Receipt $${expense.extractedTotal.toFixed(2)}` : "✓ Verified"}
+                    </span>
+                  )}
+                  {expense.extractedDate && (() => {
+                    const submitted = expense.expenseDate?.split("T")[0];
+                    const match = expense.extractedDate === submitted;
+                    return <span style={{ fontSize: 12, fontWeight: 500, color: match ? "#059669" : "#dc2626" }}>{match ? "✓ Date ok" : `⚠ Receipt date ${expense.extractedDate}`}</span>;
+                  })()}
+                  <span style={{ color: "#9ca3af" }}>{expense.category}</span>
+                  {expense.expenseDate && <span style={{ color: "#9ca3af" }}>{expense.expenseDate.split("T")[0]}</span>}
+                </div>
+                {expense.totalKMs != null && (
+                  <div style={{ fontSize: 13, color: "#374151", marginBottom: 3 }}>
+                    🚗 {expense.startLocation} → {expense.endLocation}
+                    <span style={{ color: "#9ca3af", marginLeft: 8 }}>{expense.totalKMs} km @ ${expense.mileageRate?.toFixed(2)}/km</span>
+                  </div>
+                )}
+                {expense.merchantName && (
+                  <div style={{ fontSize: 13, color: "#374151", marginBottom: 3 }}>
+                    🏪 {expense.merchantName}
+                    {expense.extractedSubtotal != null && <span style={{ color: "#9ca3af", marginLeft: 8 }}>Sub: ${expense.extractedSubtotal.toFixed(2)}</span>}
+                    {expense.extractedTax != null && <span style={{ color: "#9ca3af", marginLeft: 8 }}>Tax: ${expense.extractedTax.toFixed(2)}</span>}
+                  </div>
+                )}
+                {expense.description && <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 3 }}>{expense.description}</div>}
+                {expense.extractedItems && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 3, whiteSpace: "pre-line" }}>{expense.extractedItems}</div>}
+                {expense.receiptURL && (
+                  <a href={expense.receiptURL} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>View Receipt →</a>
+                )}
+              </div>
+            ))}
           </div>
         ))}
       </div>
+
+      {/* Export modal */}
+      {showExport && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowExport(false)}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: "28px 24px", width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#1a1a2e", marginBottom: 4 }}>Generate Expense Report</h2>
+            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 20 }}>Generates a printable report you can save as PDF.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Company</label>
+                <select style={iStyle} value={exportOpts.company} onChange={(e) => setExportOpts((o) => ({ ...o, company: e.target.value }))}>
+                  <option value="">All Companies</option>
+                  {allCompanies.map((co) => <option key={co} value={co}>{co}</option>)}
+                </select>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Date From</label>
+                  <input style={iStyle} type="date" value={exportOpts.dateFrom} onChange={(e) => setExportOpts((o) => ({ ...o, dateFrom: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Date To</label>
+                  <input style={iStyle} type="date" value={exportOpts.dateTo} onChange={(e) => setExportOpts((o) => ({ ...o, dateTo: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Status</label>
+                <select style={iStyle} value={exportOpts.statusFilter} onChange={(e) => setExportOpts((o) => ({ ...o, statusFilter: e.target.value }))}>
+                  <option value="All">All</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Paid">Paid</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <button onClick={() => setShowExport(false)} style={{ flex: 1, padding: "10px", border: "1px solid #d1d5db", borderRadius: 8, background: "none", fontSize: 14, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>Cancel</button>
+              <button onClick={exportReport} style={{ flex: 2, padding: "10px", border: "none", borderRadius: 8, background: "#1a1a2e", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Generate Report</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   try {
     const msToken = await getMicrosoftToken();
     const filter = `fields/Token eq '${token.replace(/'/g, "''")}'`;
-    const url = `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${EXPENSES_LIST_ID}/items?$expand=fields&$filter=${encodeURIComponent(filter)}&$top=1`;
+    const url = `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${EXPENSES_LIST_ID}/items?$expand=fields&$filter=${encodeURIComponent(filter)}&$top=100`;
     const r = await fetch(url, {
       headers: {
         Authorization: `Bearer ${msToken}`,
@@ -20,17 +20,34 @@ export default async function handler(req, res) {
     const { value } = await r.json();
     if (!value || value.length === 0) return res.status(404).json({ error: "Expense not found" });
 
-    const f = value[0].fields;
+    const lineItems = value.map((item) => {
+      const f = item.fields;
+      return {
+        id: item.id,
+        category:      f.Category      || "",
+        expenseDate:   f.ExpenseDate   || "",
+        amount:        f.Amount        || 0,
+        description:   f.Description   || "",
+        receiptURL:    f.ReceiptURL    || "",
+        merchantName:  f.MerchantName  || null,
+        startLocation: f.StartLocation || null,
+        endLocation:   f.EndLocation   || null,
+        totalKMs:      f.TotalKMs      ?? null,
+        mileageRate:   f.MileageRate   ?? null,
+      };
+    });
+
+    const first = value[0].fields;
+    const overallStatus = value.every((i) => i.fields.Status === "Paid") ? "Paid" : "Pending";
+    const totalAmount = lineItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+
     res.json({
-      id: value[0].id,
-      submitterName: f.SubmitterName || "",
-      amount: f.Amount || 0,
-      category: f.Category || "",
-      expenseDate: f.ExpenseDate || "",
-      description: f.Description || "",
-      status: f.Status || "Pending",
-      submittedAt: f.Created || value[0].createdDateTime || null,
-      receiptURL: f.ReceiptURL || "",
+      submitterName: first.SubmitterName || "",
+      company:       first.Company       || "",
+      status:        overallStatus,
+      submittedAt:   first.Created || value[0].createdDateTime || null,
+      totalAmount,
+      lineItems,
     });
   } catch (e) {
     console.error("Expense status error:", e.message);

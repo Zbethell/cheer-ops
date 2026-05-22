@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const DEFAULT_CONFIG = {
   formTitle: "Expense Report",
-  formSubtitle: "Submit your expense for reimbursement. You'll receive a link to track its status.",
+  formSubtitle: "Submit your expenses for reimbursement. You'll receive a link to track their status.",
   categories: ["Meal", "Gas", "Office Supplies", "Mileage"],
   mileageRate: 0.70,
   expenseCompanies: ["Pro", "Pro Gym Services", "EVO"],
@@ -79,17 +79,11 @@ function AddressAutocomplete({ label, required, value, onSelect, placeholder }) 
     onSelect(s);
   }
 
-  const confirmed = !!value;
-
   return (
     <Field label={label} required={required}>
       <div ref={containerRef} style={{ position: "relative" }}>
         <input
-          style={{
-            ...inputStyle,
-            borderColor: confirmed ? "#1a1a2e" : "#d1d5db",
-            paddingRight: searching ? 36 : 12,
-          }}
+          style={{ ...inputStyle, borderColor: value ? "#1a1a2e" : "#d1d5db", paddingRight: 36 }}
           value={query}
           onChange={handleChange}
           placeholder={placeholder || "Start typing an address…"}
@@ -98,7 +92,7 @@ function AddressAutocomplete({ label, required, value, onSelect, placeholder }) 
         {searching && (
           <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#9ca3af" }}>…</div>
         )}
-        {confirmed && !searching && (
+        {value && !searching && (
           <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "#059669", fontSize: 14 }}>✓</div>
         )}
         {open && suggestions.length > 0 && (
@@ -114,7 +108,6 @@ function AddressAutocomplete({ label, required, value, onSelect, placeholder }) 
                 style={{
                   padding: "10px 14px", cursor: "pointer", fontSize: 14, color: "#1a1a2e",
                   borderBottom: i < suggestions.length - 1 ? "1px solid #f3f4f6" : "none",
-                  transition: "background 0.1s",
                 }}
                 onMouseEnter={(e) => e.currentTarget.style.background = "#f8f9fb"}
                 onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}
@@ -129,22 +122,186 @@ function AddressAutocomplete({ label, required, value, onSelect, placeholder }) 
   );
 }
 
+function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
+  const [calculatingKMs, setCalculatingKMs] = useState(false);
+  const fileRef = useRef(null);
+  const isMileage = item.category === "Mileage";
+  const mileageRate = config.mileageRate || 0.70;
+  const calculatedAmount = isMileage && item.totalKMs
+    ? (parseFloat(item.totalKMs) * mileageRate).toFixed(2)
+    : null;
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!item.fromPlace || !item.toPlace) return;
+    const { lat: fLat, lon: fLon } = item.fromPlace;
+    const { lat: tLat, lon: tLon } = item.toPlace;
+    setCalculatingKMs(true);
+    fetch(`/api/maps/distance?fromLat=${fLat}&fromLon=${fLon}&toLat=${tLat}&toLon=${tLon}`)
+      .then((r) => r.json())
+      .then((data) => { if (data.km) onUpdate({ totalKMs: String(data.km) }); })
+      .catch(() => {})
+      .finally(() => setCalculatingKMs(false));
+  }, [item.fromPlace?.lat, item.fromPlace?.lon, item.toPlace?.lat, item.toPlace?.lon]);
+
+  function handleFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => onUpdate({ receipt: file, receiptPreview: ev.target.result });
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "20px 20px 4px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a2e", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Expense #{index}
+        </div>
+        {total > 1 && (
+          <button
+            type="button"
+            onClick={onRemove}
+            style={{ background: "none", border: "1px solid #fecaca", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#ef4444", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Field label={config.labels.category} required>
+          <select
+            style={inputStyle}
+            value={item.category}
+            onChange={(e) => onUpdate({ category: e.target.value, fromPlace: null, toPlace: null, totalKMs: "" })}
+          >
+            <option value="">Select a category…</option>
+            {config.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label={config.labels.date} required>
+          <input
+            style={inputStyle}
+            type="date"
+            value={item.date}
+            onChange={(e) => onUpdate({ date: e.target.value })}
+          />
+        </Field>
+      </div>
+
+      {isMileage && (
+        <>
+          <AddressAutocomplete
+            label={config.labels.startLocation}
+            required
+            value={item.fromPlace}
+            onSelect={(s) => onUpdate({ fromPlace: s })}
+            placeholder="Start typing a start address…"
+          />
+          <AddressAutocomplete
+            label={config.labels.endLocation}
+            required
+            value={item.toPlace}
+            onSelect={(s) => onUpdate({ toPlace: s })}
+            placeholder="Start typing an end address…"
+          />
+          <Field
+            label={config.labels.totalKMs}
+            required
+            hint={calculatingKMs ? "Calculating route…" : `Rate: $${mileageRate.toFixed(2)}/km — auto-filled from addresses, adjust if needed`}
+          >
+            <input
+              style={{ ...inputStyle, background: calculatingKMs ? "#f8f9fb" : "#fff" }}
+              type="number" min="0.1" step="0.1"
+              value={item.totalKMs}
+              onChange={(e) => onUpdate({ totalKMs: e.target.value })}
+              placeholder="0.0"
+            />
+          </Field>
+          {calculatedAmount && (
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "12px 16px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 14, color: "#166534" }}>Calculated reimbursement</span>
+              <strong style={{ fontSize: 16, color: "#166534" }}>${calculatedAmount}</strong>
+            </div>
+          )}
+        </>
+      )}
+
+      {!isMileage && item.category && (
+        <Field label={config.labels.amount} required>
+          <input
+            style={inputStyle}
+            type="number" min="0.01" step="0.01"
+            value={item.amount}
+            onChange={(e) => onUpdate({ amount: e.target.value })}
+            placeholder="0.00"
+          />
+        </Field>
+      )}
+
+      <Field label={config.labels.description}>
+        <textarea
+          style={{ ...inputStyle, minHeight: 72, resize: "vertical" }}
+          value={item.description}
+          onChange={(e) => onUpdate({ description: e.target.value })}
+          placeholder="Brief description of the expense"
+        />
+      </Field>
+
+      {!isMileage && item.category && (
+        <Field label={config.labels.receipt} hint="Optional — attach a photo or PDF of your receipt">
+          <div
+            onClick={() => fileRef.current?.click()}
+            style={{
+              border: `2px dashed ${item.receipt ? "#1a1a2e" : "#d1d5db"}`, borderRadius: 8,
+              padding: "16px", textAlign: "center", cursor: "pointer",
+              background: "#fafafa", transition: "border-color 0.15s",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = "#1a1a2e"}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = item.receipt ? "#1a1a2e" : "#d1d5db"}
+          >
+            {item.receiptPreview && item.receipt?.type?.startsWith("image/") ? (
+              <img src={item.receiptPreview} alt="Receipt preview" style={{ maxHeight: 160, maxWidth: "100%", borderRadius: 6, objectFit: "contain" }} />
+            ) : item.receipt ? (
+              <div style={{ fontSize: 14, color: "#374151" }}>📄 {item.receipt.name}</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 24, marginBottom: 6 }}>📎</div>
+                <div style={{ fontSize: 13, color: "#6b7280" }}>Click to attach a photo or PDF</div>
+              </>
+            )}
+          </div>
+          {item.receipt && (
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
+              <span>{item.receipt.name}</span>
+              <button type="button" onClick={() => onUpdate({ receipt: null, receiptPreview: null })} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Remove</button>
+            </div>
+          )}
+          <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: "none" }} onChange={handleFileChange} />
+        </Field>
+      )}
+    </div>
+  );
+}
+
+function newItem() {
+  return {
+    id: crypto.randomUUID(),
+    category: "", date: "", amount: "", description: "",
+    fromPlace: null, toPlace: null, totalKMs: "",
+    receipt: null, receiptPreview: null,
+  };
+}
+
 export default function Expenses() {
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [form, setForm] = useState({
-    name: "", email: "", amount: "", category: "", company: "", date: "", description: "",
-  });
-  const [fromPlace, setFromPlace] = useState(null);
-  const [toPlace, setToPlace] = useState(null);
-  const [totalKMs, setTotalKMs] = useState("");
-  const [calculatingKMs, setCalculatingKMs] = useState(false);
-  const [receipt, setReceipt] = useState(null);
-  const [receiptPreview, setReceiptPreview] = useState(null);
+  const [reportForm, setReportForm] = useState({ name: "", email: "", company: "" });
+  const [lineItems, setLineItems] = useState([newItem()]);
   const [step, setStep] = useState("form");
   const [statusToken, setStatusToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const fileRef = useRef(null);
 
   useEffect(() => {
     fetch("/api/expense-config")
@@ -153,88 +310,94 @@ export default function Expenses() {
       .catch(() => {});
   }, []);
 
-  // Auto-calculate KMs when both addresses are confirmed
-  useEffect(() => {
-    if (!fromPlace || !toPlace) return;
-    setCalculatingKMs(true);
-    fetch(`/api/maps/distance?fromLat=${fromPlace.lat}&fromLon=${fromPlace.lon}&toLat=${toPlace.lat}&toLon=${toPlace.lon}`)
-      .then((r) => r.json())
-      .then((data) => { if (data.km) setTotalKMs(String(data.km)); })
-      .catch(() => {})
-      .finally(() => setCalculatingKMs(false));
-  }, [fromPlace, toPlace]);
+  const setRF = (field) => (e) => setReportForm((f) => ({ ...f, [field]: e.target.value }));
 
-  const isMileage = form.category === "Mileage";
-  const mileageRate = config.mileageRate || 0.70;
-  const calculatedAmount = isMileage && totalKMs
-    ? (parseFloat(totalKMs) * mileageRate).toFixed(2)
-    : null;
-
-  const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
-
-  function handleFileChange(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setReceipt(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setReceiptPreview(ev.target.result);
-    reader.readAsDataURL(file);
+  function addItem() {
+    setLineItems((prev) => [...prev, newItem()]);
   }
+
+  function removeItem(id) {
+    setLineItems((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  function updateItem(id, changes) {
+    setLineItems((prev) => prev.map((item) => item.id === id ? { ...item, ...changes } : item));
+  }
+
+  const mileageRate = config.mileageRate || 0.70;
+  const reportTotal = lineItems.reduce((sum, item) => {
+    if (item.category === "Mileage" && item.totalKMs) {
+      return sum + parseFloat(item.totalKMs) * mileageRate;
+    }
+    return sum + (parseFloat(item.amount) || 0);
+  }, 0);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
-    if (!form.name.trim() || !form.email.trim() || !form.category || !form.company || !form.date) {
-      setError("Please fill in all required fields.");
-      return;
+    if (!reportForm.name.trim() || !reportForm.email.trim() || !reportForm.company) {
+      setError("Please fill in your name, email, and company."); return;
     }
-    if (isMileage) {
-      if (!fromPlace || !toPlace) { setError("Please select both start and end addresses from the suggestions."); return; }
-      if (!totalKMs || parseFloat(totalKMs) <= 0) { setError("Please enter a valid KM amount."); return; }
-    } else {
-      if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
-        setError("Please enter a valid amount."); return;
+
+    for (let i = 0; i < lineItems.length; i++) {
+      const item = lineItems[i];
+      const n = i + 1;
+      if (!item.category) { setError(`Expense #${n}: please select a category.`); return; }
+      if (!item.date) { setError(`Expense #${n}: please select a date.`); return; }
+      if (item.category === "Mileage") {
+        if (!item.fromPlace || !item.toPlace) { setError(`Expense #${n}: please select both start and end addresses from the suggestions.`); return; }
+        if (!item.totalKMs || parseFloat(item.totalKMs) <= 0) { setError(`Expense #${n}: please enter a valid KM amount.`); return; }
+      } else {
+        if (!item.amount || isNaN(parseFloat(item.amount)) || parseFloat(item.amount) <= 0) {
+          setError(`Expense #${n}: please enter a valid amount.`); return;
+        }
       }
-      if (!receipt) { setError("A receipt is required for this expense type."); return; }
     }
 
     setLoading(true);
     try {
-      let receiptBase64 = null, receiptMimeType = null, receiptFileName = null;
-      if (receipt) {
-        receiptMimeType = receipt.type;
-        receiptFileName = receipt.name;
-        receiptBase64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(receipt);
-        });
-      }
-
-      const finalAmount = isMileage ? parseFloat(calculatedAmount) : parseFloat(form.amount);
+      const processedItems = await Promise.all(
+        lineItems.map(async (item) => {
+          let receiptBase64 = null, receiptMimeType = null, receiptFileName = null;
+          if (item.receipt) {
+            receiptMimeType = item.receipt.type;
+            receiptFileName = item.receipt.name;
+            receiptBase64 = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
+              reader.onerror = reject;
+              reader.readAsDataURL(item.receipt);
+            });
+          }
+          const isMileage = item.category === "Mileage";
+          const finalAmount = isMileage
+            ? parseFloat((parseFloat(item.totalKMs) * mileageRate).toFixed(2))
+            : parseFloat(item.amount);
+          return {
+            category:     item.category,
+            expenseDate:  item.date,
+            amount:       finalAmount,
+            description:  item.description.trim(),
+            receiptBase64, receiptMimeType, receiptFileName,
+            ...(isMileage && {
+              startLocation: item.fromPlace.address,
+              endLocation:   item.toPlace.address,
+              totalKMs:      parseFloat(item.totalKMs),
+              mileageRate,
+            }),
+          };
+        })
+      );
 
       const res = await fetch("/api/submit-expense", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          submitterName:  form.name.trim(),
-          submitterEmail: form.email.trim(),
-          amount:         finalAmount,
-          category:       form.category,
-          company:        form.company,
-          expenseDate:    form.date,
-          description:    form.description.trim(),
-          receiptBase64,
-          receiptMimeType,
-          receiptFileName,
-          ...(isMileage && {
-            startLocation: fromPlace.address,
-            endLocation:   toPlace.address,
-            totalKMs:      parseFloat(totalKMs),
-            mileageRate,
-          }),
+          submitterName:  reportForm.name.trim(),
+          submitterEmail: reportForm.email.trim(),
+          company:        reportForm.company,
+          lineItems:      processedItems,
         }),
       });
 
@@ -242,11 +405,19 @@ export default function Expenses() {
       if (!res.ok) throw new Error(data.error || "Submission failed");
       setStatusToken(data.token);
       setStep("success");
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function resetForm() {
+    setReportForm({ name: "", email: "", company: "" });
+    setLineItems([newItem()]);
+    setStatusToken("");
+    setError("");
+    setStep("form");
   }
 
   const statusUrl = `${window.location.origin}/expenses-status?token=${statusToken}`;
@@ -256,7 +427,7 @@ export default function Expenses() {
       <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", minHeight: "100vh", background: "#f8f9fb", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
         <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "40px 32px", maxWidth: 480, width: "100%", textAlign: "center" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a2e", margin: "0 0 8px" }}>Expense Submitted</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a2e", margin: "0 0 8px" }}>Expenses Submitted</h2>
           <p style={{ color: "#6b7280", fontSize: 15, margin: "0 0 28px" }}>
             Your expense report has been received. Bookmark the link below to check your reimbursement status.
           </p>
@@ -267,10 +438,10 @@ export default function Expenses() {
             Copy Status Link
           </button>
           <button
-            onClick={() => { setForm({ name: "", email: "", amount: "", category: "", company: "", date: "", description: "" }); setFromPlace(null); setToPlace(null); setTotalKMs(""); setReceipt(null); setReceiptPreview(null); setStep("form"); }}
+            onClick={resetForm}
             style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontFamily: "inherit", width: "100%", color: "#374151" }}
           >
-            Submit Another Expense
+            Submit Another Expense Report
           </button>
         </div>
       </div>
@@ -281,130 +452,82 @@ export default function Expenses() {
     <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", minHeight: "100vh", background: "#f8f9fb", padding: "32px 16px" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
 
-      <div style={{ maxWidth: 520, margin: "0 auto" }}>
-        <div style={{ marginBottom: 28, textAlign: "center" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+        <div style={{ marginBottom: 24, textAlign: "center" }}>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", marginBottom: 6 }}>{config.formTitle}</h1>
           <p style={{ color: "#6b7280", fontSize: 15 }}>{config.formSubtitle}</p>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "28px 24px" }}>
+        <form onSubmit={handleSubmit}>
+          {/* Report header — submitter info */}
+          <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "20px 20px 4px", marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a2e", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Your Information</div>
 
-          <Field label={config.labels.name} required>
-            <input style={inputStyle} value={form.name} onChange={set("name")} placeholder="Full name" />
-          </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <Field label={config.labels.name} required>
+                <input style={inputStyle} value={reportForm.name} onChange={setRF("name")} placeholder="Full name" />
+              </Field>
+              <Field label={config.labels.company} required>
+                <select style={inputStyle} value={reportForm.company} onChange={setRF("company")}>
+                  <option value="">Select…</option>
+                  {(config.expenseCompanies || []).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </Field>
+            </div>
 
-          <Field label={config.labels.email} required>
-            <input style={inputStyle} type="email" value={form.email} onChange={set("email")} placeholder="you@example.com" />
-          </Field>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <Field label={config.labels.company} required>
-              <select style={inputStyle} value={form.company} onChange={set("company")}>
-                <option value="">Select…</option>
-                {(config.expenseCompanies || []).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </Field>
-            <Field label={config.labels.date} required>
-              <input style={inputStyle} type="date" value={form.date} onChange={set("date")} />
+            <Field label={config.labels.email} required>
+              <input style={inputStyle} type="email" value={reportForm.email} onChange={setRF("email")} placeholder="you@example.com" />
             </Field>
           </div>
 
-          <Field label={config.labels.category} required>
-            <select style={inputStyle} value={form.category} onChange={(e) => { set("category")(e); setFromPlace(null); setToPlace(null); setTotalKMs(""); }}>
-              <option value="">Select a category…</option>
-              {config.categories.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </Field>
+          {/* Line items */}
+          {lineItems.map((item, i) => (
+            <LineItemEditor
+              key={item.id}
+              item={item}
+              index={i + 1}
+              total={lineItems.length}
+              config={config}
+              onUpdate={(changes) => updateItem(item.id, changes)}
+              onRemove={() => removeItem(item.id)}
+            />
+          ))}
 
-          {/* Mileage fields */}
-          {isMileage && (
-            <>
-              <AddressAutocomplete
-                label={config.labels.startLocation}
-                required
-                value={fromPlace}
-                onSelect={setFromPlace}
-                placeholder="Start typing a start address…"
-              />
-              <AddressAutocomplete
-                label={config.labels.endLocation}
-                required
-                value={toPlace}
-                onSelect={setToPlace}
-                placeholder="Start typing an end address…"
-              />
-              <Field
-                label={config.labels.totalKMs}
-                required
-                hint={calculatingKMs ? "Calculating route…" : `Rate: $${mileageRate.toFixed(2)}/km — auto-filled from addresses, adjust if needed`}
-              >
-                <input
-                  style={{ ...inputStyle, background: calculatingKMs ? "#f8f9fb" : "#fff" }}
-                  type="number" min="0.1" step="0.1"
-                  value={totalKMs}
-                  onChange={(e) => setTotalKMs(e.target.value)}
-                  placeholder="0.0"
-                />
-              </Field>
-              {calculatedAmount && (
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "12px 16px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 14, color: "#166534" }}>Calculated reimbursement</span>
-                  <strong style={{ fontSize: 16, color: "#166534" }}>${calculatedAmount}</strong>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Standard amount */}
-          {!isMileage && form.category && (
-            <Field label={config.labels.amount} required>
-              <input style={inputStyle} type="number" min="0.01" step="0.01" value={form.amount} onChange={set("amount")} placeholder="0.00" />
-            </Field>
-          )}
-
-          <Field label={config.labels.description}>
-            <textarea style={{ ...inputStyle, minHeight: 80, resize: "vertical" }} value={form.description} onChange={set("description")} placeholder="Brief description of the expense" />
-          </Field>
-
-          {/* Receipt — required unless mileage */}
-          {!isMileage && form.category && (
-            <Field label={config.labels.receipt} required>
-              <div
-                onClick={() => fileRef.current?.click()}
-                style={{
-                  border: `2px dashed ${receipt ? "#1a1a2e" : "#d1d5db"}`, borderRadius: 8,
-                  padding: "20px 16px", textAlign: "center", cursor: "pointer",
-                  background: "#fafafa", transition: "border-color 0.15s",
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.borderColor = "#1a1a2e"}
-                onMouseLeave={(e) => e.currentTarget.style.borderColor = receipt ? "#1a1a2e" : "#d1d5db"}
-              >
-                {receiptPreview && receipt?.type?.startsWith("image/") ? (
-                  <img src={receiptPreview} alt="Receipt preview" style={{ maxHeight: 200, maxWidth: "100%", borderRadius: 6, objectFit: "contain" }} />
-                ) : receipt ? (
-                  <div style={{ fontSize: 14, color: "#374151" }}>📄 {receipt.name}</div>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 28, marginBottom: 8 }}>📎</div>
-                    <div style={{ fontSize: 14, color: "#6b7280" }}>Click to attach a photo or PDF</div>
-                  </>
-                )}
-              </div>
-              {receipt && (
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
-                  <span>{receipt.name}</span>
-                  <button type="button" onClick={() => { setReceipt(null); setReceiptPreview(null); }} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Remove</button>
-                </div>
-              )}
-              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: "none" }} onChange={handleFileChange} />
-            </Field>
-          )}
-
-          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", color: "#dc2626", fontSize: 14, marginBottom: 16 }}>{error}</div>}
-
-          <button type="submit" style={primaryBtn} disabled={loading}>
-            {loading ? "Submitting…" : "Submit Expense"}
+          {/* Add item */}
+          <button
+            type="button"
+            onClick={addItem}
+            style={{
+              width: "100%", padding: "12px", border: "2px dashed #d1d5db", borderRadius: 12,
+              background: "none", fontSize: 14, color: "#6b7280", cursor: "pointer",
+              fontFamily: "inherit", fontWeight: 500, marginBottom: 16,
+              transition: "border-color 0.15s, color 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#1a1a2e"; e.currentTarget.style.color = "#1a1a2e"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#6b7280"; }}
+          >
+            + Add Another Expense
           </button>
+
+          {/* Total + submit */}
+          <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "20px 20px 20px" }}>
+            {reportTotal > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid #f3f4f6" }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>Report Total</span>
+                <span style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e" }}>${reportTotal.toFixed(2)}</span>
+              </div>
+            )}
+
+            {error && (
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", color: "#dc2626", fontSize: 14, marginBottom: 16 }}>
+                {error}
+              </div>
+            )}
+
+            <button type="submit" style={primaryBtn} disabled={loading}>
+              {loading ? "Submitting…" : `Submit ${lineItems.length > 1 ? `${lineItems.length} Expenses` : "Expense"}`}
+            </button>
+          </div>
         </form>
       </div>
     </div>

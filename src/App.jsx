@@ -4661,6 +4661,8 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
     `<tr><td>${cat}</td><td class="num">${fmt(v.net)}</td><td class="num">${v.tax > 0 || !hasMissingTax ? fmt(v.tax) : "—"}</td><td class="num fw">${fmt(v.total)}</td></tr>`
   ).join("");
 
+  const itemsWithReceipts = withTax.filter((e) => e.receiptURL);
+
   const txRows = withTax.map((e) =>
     `<tr>
       <td>${(e.expenseDate || "—").split("T")[0]}</td>
@@ -4671,8 +4673,25 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
       <td class="num">${fmt(e._net)}</td>
       <td class="num">${fmtOpt(e._tax)}</td>
       <td class="num fw">${fmt(e._total)}</td>
+      <td class="num">${e.receiptURL ? `<a href="${e.receiptURL}" target="_blank" style="color:#2563eb;text-decoration:none;font-weight:500;">View →</a>` : "—"}</td>
     </tr>`
   ).join("");
+
+  const receiptSection = itemsWithReceipts.length === 0 ? "" : `
+<h2>Receipts (${itemsWithReceipts.length})</h2>
+<div class="receipts-grid">
+  ${itemsWithReceipts.map((e, idx) => `
+  <div class="receipt-card">
+    <div class="receipt-num">#${idx + 1}</div>
+    <div class="receipt-detail">
+      <span class="receipt-cat">${e.category}</span>
+      <span class="receipt-meta">${(e.expenseDate || "").split("T")[0] || "—"} &nbsp;·&nbsp; ${fmt(e._total)}</span>
+      ${e.merchantName ? `<span class="receipt-meta">${e.merchantName}</span>` : ""}
+      ${e.description ? `<span class="receipt-desc">${e.description}</span>` : ""}
+    </div>
+    <a href="${e.receiptURL}" target="_blank" class="receipt-link">Open Receipt →</a>
+  </div>`).join("")}
+</div>`;
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${companyName} Expense Report</title>
 <style>
@@ -4695,6 +4714,15 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   .signatures{display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:48px;page-break-inside:avoid}
   .sig-line{border-top:1px solid #1a1a2e;padding-top:6px;margin-bottom:24px;font-size:12px;color:#6b7280}
   .note{margin-top:20px;font-size:11px;color:#9ca3af}
+  .receipts-grid{display:flex;flex-direction:column;gap:8px}
+  .receipt-card{display:flex;align-items:center;gap:16px;padding:12px 16px;border:1px solid #e5e7eb;border-radius:8px;page-break-inside:avoid}
+  .receipt-num{font-size:12px;font-weight:700;color:#9ca3af;min-width:24px}
+  .receipt-detail{flex:1;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+  .receipt-cat{font-size:13px;font-weight:600;color:#1a1a2e}
+  .receipt-meta{font-size:12px;color:#6b7280}
+  .receipt-desc{font-size:12px;color:#6b7280;width:100%}
+  .receipt-link{font-size:13px;font-weight:500;color:#2563eb;text-decoration:none;white-space:nowrap}
+  @media print{.receipt-link{color:#2563eb}}
 </style></head><body>
 <div class="no-print">
   <button onclick="window.print()" style="background:#1a1a2e;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:14px;cursor:pointer;font-family:inherit;">🖨 Print / Save as PDF</button>
@@ -4720,9 +4748,11 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
 
 <h2>Transactions</h2>
 <table>
-  <thead><tr><th>Date</th><th>Submitter</th><th>Supplier</th><th>Description</th><th>Category</th><th class="num">Net (CAD)</th><th class="num">Tax (CAD)</th><th class="num">Total (CAD)</th></tr></thead>
-  <tbody>${txRows}<tr class="total-row"><td colspan="5">Total</td><td class="num">${fmt(grandNet)}</td><td class="num">${grandTax > 0 ? fmt(grandTax) : "—"}</td><td class="num">${fmt(grandTotal)}</td></tr></tbody>
+  <thead><tr><th>Date</th><th>Submitter</th><th>Supplier</th><th>Description</th><th>Category</th><th class="num">Net (CAD)</th><th class="num">Tax (CAD)</th><th class="num">Total (CAD)</th><th class="num">Receipt</th></tr></thead>
+  <tbody>${txRows}<tr class="total-row"><td colspan="5">Total</td><td class="num">${fmt(grandNet)}</td><td class="num">${grandTax > 0 ? fmt(grandTax) : "—"}</td><td class="num">${fmt(grandTotal)}</td><td></td></tr></tbody>
 </table>
+
+${receiptSection}
 
 <div class="signatures">
   <div><div class="sig-line">Employee Signature</div><div class="sig-line">Date</div></div>

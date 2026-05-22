@@ -5190,36 +5190,38 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
                 <span style={{ fontSize: m ? 16 : 18, fontWeight: 700, color: "#1a1a2e" }}>${report.total.toFixed(2)}</span>
-                {report.status === "Pending" && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {report.status === "Pending" && (
+                    <button
+                      onClick={() => markReportPaid(report)}
+                      disabled={updating.has(report.key)}
+                      style={{
+                        background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
+                        padding: m ? "7px 12px" : "7px 16px", fontSize: 13, fontWeight: 500,
+                        cursor: updating.has(report.key) ? "wait" : "pointer",
+                        fontFamily: "inherit", whiteSpace: "nowrap",
+                        opacity: updating.has(report.key) ? 0.6 : 1,
+                      }}
+                    >
+                      {updating.has(report.key) ? "Saving…" : "Mark Paid"}
+                    </button>
+                  )}
                   <button
-                    onClick={() => markReportPaid(report)}
-                    disabled={updating.has(report.key)}
+                    onClick={() => {
+                      const html = generateExpenseReportHtml(report.items, { company: report.company, dateFrom: "", dateTo: "", statusFilter: "All" }, { proxyKey: SUPABASE_KEY, baseUrl: window.location.origin });
+                      const w = window.open("", "_blank");
+                      w.document.write(html);
+                      w.document.close();
+                    }}
                     style={{
-                      background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
-                      padding: m ? "7px 12px" : "7px 16px", fontSize: 13, fontWeight: 500,
-                      cursor: updating.has(report.key) ? "wait" : "pointer",
-                      fontFamily: "inherit", whiteSpace: "nowrap",
-                      opacity: updating.has(report.key) ? 0.6 : 1,
+                      background: "none", border: "1px solid #d1d5db", borderRadius: 8,
+                      padding: m ? "7px 10px" : "7px 12px", fontSize: 13, fontWeight: 500,
+                      cursor: "pointer", fontFamily: "inherit", color: "#374151", whiteSpace: "nowrap",
                     }}
                   >
-                    {updating.has(report.key) ? "Saving…" : "Mark Paid"}
+                    ↓ Export
                   </button>
-                )}
-                <button
-                  onClick={() => {
-                    const html = generateExpenseReportHtml(report.items, { company: report.company, dateFrom: "", dateTo: "", statusFilter: "All" }, { proxyKey: SUPABASE_KEY, baseUrl: window.location.origin });
-                    const w = window.open("", "_blank");
-                    w.document.write(html);
-                    w.document.close();
-                  }}
-                  style={{
-                    background: "none", border: "1px solid #d1d5db", borderRadius: 8,
-                    padding: m ? "5px 10px" : "5px 12px", fontSize: 12, fontWeight: 500,
-                    cursor: "pointer", fontFamily: "inherit", color: "#374151", whiteSpace: "nowrap",
-                  }}
-                >
-                  ↓ Export
-                </button>
+                </div>
               </div>
             </div>
 

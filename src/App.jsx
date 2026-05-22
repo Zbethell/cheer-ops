@@ -5144,6 +5144,21 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                     {updating.has(report.key) ? "Saving…" : "Mark Paid"}
                   </button>
                 )}
+                <button
+                  onClick={() => {
+                    const html = generateExpenseReportHtml(report.items, { company: report.company, dateFrom: "", dateTo: "", statusFilter: "All" });
+                    const w = window.open("", "_blank");
+                    w.document.write(html);
+                    w.document.close();
+                  }}
+                  style={{
+                    background: "none", border: "1px solid #d1d5db", borderRadius: 8,
+                    padding: m ? "5px 10px" : "5px 12px", fontSize: 12, fontWeight: 500,
+                    cursor: "pointer", fontFamily: "inherit", color: "#374151", whiteSpace: "nowrap",
+                  }}
+                >
+                  ↓ Export
+                </button>
               </div>
             </div>
 

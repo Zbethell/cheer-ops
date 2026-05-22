@@ -317,16 +317,19 @@ app.patch("/api/expense-report-update", async (req, res) => {
 
 // PATCH /api/expense-update/:id
 app.patch("/api/expense-update/:id", async (req, res) => {
-  const { status } = req.body;
-  if (!status) return res.status(400).json({ error: "status required" });
+  const { status, amount } = req.body;
+  if (!status && amount == null) return res.status(400).json({ error: "status or amount required" });
   try {
     const token = await getMicrosoftToken();
+    const fields = {};
+    if (status) fields.Status = status;
+    if (amount != null) fields.Amount = parseFloat(amount);
     const r = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${EXPENSES_LIST_ID}/items/${req.params.id}/fields`,
       {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: status }),
+        body: JSON.stringify(fields),
       }
     );
     if (!r.ok) throw new Error(await r.text());

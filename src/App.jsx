@@ -4794,6 +4794,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("Pending");
   const [updating, setUpdating] = useState(new Set());
+  const [correctingAmount, setCorrectingAmount] = useState(new Set());
   const [activeSection, setActiveSection] = useState("submissions");
   const [config, setConfig] = useState(DEFAULT_EXPENSE_CONFIG);
   const [configDraft, setConfigDraft] = useState(null);
@@ -4905,6 +4906,23 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
       submittedAt:   items[0].submittedAt,
       items:         [...items].sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)),
     })).sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  }
+
+  async function correctAmount(expenseId, newAmount) {
+    setCorrectingAmount((s) => new Set(s).add(expenseId));
+    try {
+      const r = await fetch(`/api/expense-update/${expenseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({ amount: newAmount }),
+      });
+      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+      setExpenses((prev) => prev.map((e) => e.id === expenseId ? { ...e, amount: newAmount } : e));
+      showToast("Amount corrected to match receipt");
+    } catch (e) {
+      showToast(`Failed to correct amount: ${e.message}`);
+    }
+    setCorrectingAmount((s) => { const n = new Set(s); n.delete(expenseId); return n; });
   }
 
   async function markReportPaid(report) {
@@ -5210,11 +5228,30 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
               <div key={expense.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f3f4f6" }}>
                 <div style={{ fontSize: 13, color: "#374151", marginBottom: 3, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 14 }}>${parseFloat(expense.amount).toFixed(2)}</strong>
-                  {expense.extractedTotal != null && (
-                    <span style={{ fontSize: 12, fontWeight: 500, color: Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02 ? "#dc2626" : "#059669" }}>
-                      {Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02 ? `⚠ Receipt $${expense.extractedTotal.toFixed(2)}` : "✓ Verified"}
-                    </span>
-                  )}
+                  {expense.extractedTotal != null && (() => {
+                    const mismatch = Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02;
+                    return (
+                      <>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: mismatch ? "#dc2626" : "#059669" }}>
+                          {mismatch ? `⚠ Receipt $${expense.extractedTotal.toFixed(2)}` : "✓ Verified"}
+                        </span>
+                        {mismatch && (
+                          <button
+                            onClick={() => correctAmount(expense.id, expense.extractedTotal)}
+                            disabled={correctingAmount.has(expense.id)}
+                            style={{
+                              fontSize: 11, fontWeight: 600, color: "#065f46", background: "#d1fae5",
+                              border: "1px solid #6ee7b7", borderRadius: 6, padding: "2px 8px",
+                              cursor: correctingAmount.has(expense.id) ? "wait" : "pointer",
+                              fontFamily: "inherit", opacity: correctingAmount.has(expense.id) ? 0.6 : 1,
+                            }}
+                          >
+                            {correctingAmount.has(expense.id) ? "Saving…" : `Use $${expense.extractedTotal.toFixed(2)}`}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                   {expense.extractedDate && (() => {
                     const submitted = expense.expenseDate?.split("T")[0];
                     const match = expense.extractedDate === submitted;

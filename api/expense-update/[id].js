@@ -10,11 +10,15 @@ export default async function handler(req, res) {
   if (!user) return;
 
   const { id } = req.query;
-  const { status } = req.body;
-  if (!status) return res.status(400).json({ error: "status required" });
+  const { status, amount } = req.body;
+  if (!status && amount == null) return res.status(400).json({ error: "status or amount required" });
 
   try {
     const token = await getMicrosoftToken();
+
+    const fields = {};
+    if (status) fields.Status = status;
+    if (amount != null) fields.Amount = parseFloat(amount);
 
     // Fetch expense details before updating (needed for paid notification)
     const detailRes = await fetch(
@@ -28,7 +32,7 @@ export default async function handler(req, res) {
       {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: status }),
+        body: JSON.stringify(fields),
       }
     );
     if (!r.ok) throw new Error(await r.text());

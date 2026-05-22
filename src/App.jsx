@@ -4686,7 +4686,8 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
     const imgUrl = proxyKey && e.receiptURL && !isPdf
       ? `/api/receipt-proxy?url=${encodeURIComponent(e.receiptURL)}&key=${encodeURIComponent(proxyKey)}`
       : null;
-    return `<div class="receipt-card">
+    return `<div class="receipt-block">
+  <div class="receipt-card">
     <div class="receipt-num">#${idx + 1}</div>
     <div class="receipt-detail">
       <span class="receipt-cat">${e.category}</span>
@@ -4697,7 +4698,8 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
     <a href="${e.receiptURL}" target="_blank" class="receipt-link">Open →</a>
   </div>
   ${imgUrl ? `<div class="receipt-img-wrap"><img src="${imgUrl}" alt="Receipt for ${e.category}" class="receipt-img" /></div>` : ""}
-  ${isPdf && proxyKey ? `<p class="receipt-pdf-note">📄 PDF receipt — click "Open →" above to view or print separately</p>` : ""}`;
+  ${isPdf && proxyKey ? `<p class="receipt-pdf-note">📄 PDF receipt — click "Open →" above to view or print separately</p>` : ""}
+</div>`;
   }).join("")}
 </div>`;
 
@@ -4730,10 +4732,11 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   .receipt-meta{font-size:12px;color:#6b7280}
   .receipt-desc{font-size:12px;color:#6b7280;width:100%}
   .receipt-link{font-size:13px;font-weight:500;color:#2563eb;text-decoration:none;white-space:nowrap}
-  .receipt-img-wrap{margin:6px 0 20px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;page-break-inside:avoid;max-width:560px}
-  .receipt-img{max-width:100%;height:auto;display:block}
-  .receipt-pdf-note{font-size:12px;color:#6b7280;padding:4px 0 20px;font-style:italic}
-  @media print{.receipt-link{color:#2563eb}.receipt-img{max-width:100%}}
+  .receipt-block{page-break-before:always}
+  .receipt-img-wrap{margin:6px 0 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+  .receipt-img{width:100%;max-height:230mm;object-fit:contain;display:block}
+  .receipt-pdf-note{font-size:12px;color:#6b7280;padding:4px 0 0;font-style:italic}
+  @media print{.receipt-link{color:#2563eb}}
 </style></head><body>
 <div class="no-print">
   <button onclick="window.print()" style="background:#1a1a2e;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:14px;cursor:pointer;font-family:inherit;">🖨 Print / Save as PDF</button>
@@ -4763,13 +4766,12 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   <tbody>${txRows}<tr class="total-row"><td colspan="5">Total</td><td class="num">${fmt(grandNet)}</td><td class="num">${grandTax > 0 ? fmt(grandTax) : "—"}</td><td class="num">${fmt(grandTotal)}</td><td></td></tr></tbody>
 </table>
 
-${receiptSection}
-
 <div class="signatures">
   <div><div class="sig-line">Employee Signature</div><div class="sig-line">Date</div></div>
   <div><div class="sig-line">Approver's Signature</div><div class="sig-line">Date</div></div>
 </div>
 ${hasMissingTax ? `<p class="note">* Tax not separately available for all items (receipt analysis may not have run). Net shown as full amount for those items.</p>` : ""}
+${receiptSection}
 </body></html>`;
 }
 

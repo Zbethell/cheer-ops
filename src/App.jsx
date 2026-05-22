@@ -5098,13 +5098,13 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
         )}
       </div>
 
-      <div className="card" style={{ overflow: "hidden" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {filtered.length === 0 ? (
-          <div style={{ padding: "40px 16px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+          <div className="card" style={{ padding: "40px 16px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
             No {filter === "All" ? "" : filter.toLowerCase() + " "}expenses
           </div>
-        ) : filtered.map((report, ri) => (
-          <div key={report.key} style={{ padding: m ? "14px 16px" : "16px 20px", borderBottom: ri < filtered.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+        ) : filtered.map((report) => (
+          <div key={report.key} className="card" style={{ padding: m ? "14px 16px" : "16px 20px" }}>
             {/* Report header row */}
             <div style={{ display: "flex", gap: m ? 10 : 16, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0 }}>

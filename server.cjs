@@ -258,6 +258,34 @@ app.get("/api/expenses-list", async (req, res) => {
   }
 });
 
+// GET /api/receipt-proxy?url=<encoded>&key=<anon-key>
+const RECEIPT_PROXY_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
+const SHAREPOINT_HOST = "https://canadiancheer.sharepoint.com";
+app.get("/api/receipt-proxy", async (req, res) => {
+  const { url, key } = req.query;
+  if (!url || key !== RECEIPT_PROXY_TOKEN) return res.status(401).json({ error: "Unauthorized" });
+  const decoded = decodeURIComponent(url);
+  if (!decoded.startsWith(SHAREPOINT_HOST)) return res.status(400).json({ error: "Invalid URL" });
+  try {
+    const msToken = await getMicrosoftToken();
+    const encoded = "u!" + Buffer.from(decoded).toString("base64")
+      .replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
+    const fileRes = await fetch(
+      `https://graph.microsoft.com/v1.0/shares/${encoded}/driveItem/content`,
+      { headers: { Authorization: `Bearer ${msToken}` } }
+    );
+    if (!fileRes.ok) return res.status(fileRes.status).end();
+    const contentType = fileRes.headers.get("content-type") || "application/octet-stream";
+    const buffer = await fileRes.arrayBuffer();
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(buffer));
+  } catch (e) {
+    console.error("Receipt proxy error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PATCH /api/expense-report-update?token=xxx
 app.patch("/api/expense-report-update", async (req, res) => {
   const { token } = req.query;

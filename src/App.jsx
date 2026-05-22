@@ -4627,7 +4627,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
 }
 
 // ─── Expenses Admin ───────────────────────────────────────────────────────────
-function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFilter }) {
+function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFilter }, { proxyKey = "", baseUrl = "" } = {}) {
   const sorted = [...items].sort((a, b) => (a.expenseDate || "").localeCompare(b.expenseDate || ""));
   const companyName = company || "All Companies";
   const periodText = (dateFrom || dateTo) ? `${dateFrom || "—"} to ${dateTo || "—"}` : "All dates";
@@ -4680,8 +4680,13 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   const receiptSection = itemsWithReceipts.length === 0 ? "" : `
 <h2>Receipts (${itemsWithReceipts.length})</h2>
 <div class="receipts-grid">
-  ${itemsWithReceipts.map((e, idx) => `
-  <div class="receipt-card">
+  ${itemsWithReceipts.map((e, idx) => {
+    const ext = (e.receiptURL || "").split("?")[0].split(".").pop().toLowerCase();
+    const isPdf = ext === "pdf";
+    const imgUrl = proxyKey && e.receiptURL && !isPdf
+      ? `/api/receipt-proxy?url=${encodeURIComponent(e.receiptURL)}&key=${encodeURIComponent(proxyKey)}`
+      : null;
+    return `<div class="receipt-card">
     <div class="receipt-num">#${idx + 1}</div>
     <div class="receipt-detail">
       <span class="receipt-cat">${e.category}</span>
@@ -4689,11 +4694,14 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
       ${e.merchantName ? `<span class="receipt-meta">${e.merchantName}</span>` : ""}
       ${e.description ? `<span class="receipt-desc">${e.description}</span>` : ""}
     </div>
-    <a href="${e.receiptURL}" target="_blank" class="receipt-link">Open Receipt →</a>
-  </div>`).join("")}
+    <a href="${e.receiptURL}" target="_blank" class="receipt-link">Open →</a>
+  </div>
+  ${imgUrl ? `<div class="receipt-img-wrap"><img src="${imgUrl}" alt="Receipt for ${e.category}" class="receipt-img" /></div>` : ""}
+  ${isPdf && proxyKey ? `<p class="receipt-pdf-note">📄 PDF receipt — click "Open →" above to view or print separately</p>` : ""}`;
+  }).join("")}
 </div>`;
 
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${companyName} Expense Report</title>
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">${baseUrl ? `<base href="${baseUrl}/">` : ""}<title>${companyName} Expense Report</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,'Segoe UI',sans-serif;color:#1a1a2e;padding:40px;font-size:14px}
@@ -4722,7 +4730,10 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   .receipt-meta{font-size:12px;color:#6b7280}
   .receipt-desc{font-size:12px;color:#6b7280;width:100%}
   .receipt-link{font-size:13px;font-weight:500;color:#2563eb;text-decoration:none;white-space:nowrap}
-  @media print{.receipt-link{color:#2563eb}}
+  .receipt-img-wrap{margin:6px 0 20px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;page-break-inside:avoid;max-width:560px}
+  .receipt-img{max-width:100%;height:auto;display:block}
+  .receipt-pdf-note{font-size:12px;color:#6b7280;padding:4px 0 20px;font-style:italic}
+  @media print{.receipt-link{color:#2563eb}.receipt-img{max-width:100%}}
 </style></head><body>
 <div class="no-print">
   <button onclick="window.print()" style="background:#1a1a2e;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:14px;cursor:pointer;font-family:inherit;">🖨 Print / Save as PDF</button>
@@ -4929,7 +4940,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     if (exportOpts.dateTo) items = items.filter((e) => e.expenseDate && e.expenseDate.split("T")[0] <= exportOpts.dateTo);
     if (exportOpts.statusFilter !== "All") items = items.filter((e) => e.status === exportOpts.statusFilter);
     if (items.length === 0) { showToast("No expenses match the selected filters"); return; }
-    const html = generateExpenseReportHtml(items, exportOpts);
+    const html = generateExpenseReportHtml(items, exportOpts, { proxyKey: SUPABASE_KEY, baseUrl: window.location.origin });
     const w = window.open("", "_blank");
     w.document.write(html);
     w.document.close();
@@ -5176,7 +5187,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                 )}
                 <button
                   onClick={() => {
-                    const html = generateExpenseReportHtml(report.items, { company: report.company, dateFrom: "", dateTo: "", statusFilter: "All" });
+                    const html = generateExpenseReportHtml(report.items, { company: report.company, dateFrom: "", dateTo: "", statusFilter: "All" }, { proxyKey: SUPABASE_KEY, baseUrl: window.location.origin });
                     const w = window.open("", "_blank");
                     w.document.write(html);
                     w.document.close();

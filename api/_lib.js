@@ -108,6 +108,14 @@ export async function sendMail(msToken, { to, subject, html }) {
   if (!r.ok) console.error("sendMail failed:", await r.text());
 }
 
+function emailButton(url, text, bgColor = "#1a1a2e") {
+  return `<table cellspacing="0" cellpadding="0" style="margin-top:24px;"><tr>
+    <td bgcolor="${bgColor}" style="border-radius:8px;padding:0;">
+      <a href="${url}" style="display:inline-block;color:#ffffff;font-family:Arial,'Helvetica Neue',sans-serif;font-size:14px;font-weight:bold;padding:13px 26px;text-decoration:none;">${text}</a>
+    </td>
+  </tr></table>`;
+}
+
 function itemTableRows(lineItems) {
   return lineItems.map((item) =>
     `<tr>
@@ -149,9 +157,7 @@ export function accountantEmailHtml({ submitterName, submitterEmail, company, li
           </tr>
         </tbody>
       </table>
-      <div style="margin-top:24px;">
-        <a href="${dashboardUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Review in CheerOps →</a>
-      </div>
+      ${emailButton(dashboardUrl, "Review in CheerOps →")}
       <p style="margin:24px 0 0;color:#9ca3af;font-size:12px;">Sent by CheerOps expense portal. Log in to approve or mark as paid.</p>
     </div>
   </div>
@@ -179,9 +185,7 @@ export function submitterConfirmationHtml({ submitterName, company, lineItems, t
           </tr>
         </tbody>
       </table>
-      <div style="margin-top:24px;">
-        <a href="${trackingUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Track Your Expense →</a>
-      </div>
+      ${emailButton(trackingUrl, "Track Your Expense →")}
       <p style="margin:20px 0 0;color:#9ca3af;font-size:12px;">Keep this link to check your reimbursement status. You'll receive another email when payment is processed.</p>
     </div>
   </div>
@@ -219,5 +223,5 @@ export function paidNotificationHtml({ submitterName, company, lineItems, totalA
 }
 
 export function appBaseUrl(req) {
-  return APP_URL || `https://${req.headers["x-forwarded-host"] || req.headers.host}`;
+  return (APP_URL || `https://${req.headers["x-forwarded-host"] || req.headers.host}`).trim();
 }

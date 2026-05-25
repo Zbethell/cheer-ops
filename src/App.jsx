@@ -2095,9 +2095,9 @@ export default function App() {
         .nav-btn.active { background: #1a1a2e; color: #fff; }
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e5e7eb; display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .tab-bar::-webkit-scrollbar { display: none; }
-        .tab-btn { flex: 0 0 auto; min-width: 68px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 6px; font-size: 10px; font-weight: 500; color: #9ca3af; background: none; border: none; gap: 3px; cursor: pointer; white-space: nowrap; }
+        .tab-btn { flex: 0 0 auto; min-width: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; font-size: 11px; font-weight: 500; color: #9ca3af; background: none; border: none; gap: 4px; cursor: pointer; white-space: nowrap; }
         .tab-btn.active { color: #1a1a2e; }
-        .tab-icon { font-size: 22px; line-height: 1; }
+        .tab-icon { font-size: 26px; line-height: 1; }
         .check-box-mobile { width: 28px; height: 28px; border: 2px solid #d1d5db; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
         .check-box-mobile.checked { background: #1a1a2e; border-color: #1a1a2e; }
         .check-box-desktop { width: 18px; height: 18px; border: 2px solid #d1d5db; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }

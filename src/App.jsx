@@ -102,6 +102,16 @@ const api = {
     if (!res.ok) { const err = await res.text(); throw new Error(err); }
     return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}`;
   },
+  uploadContainerDiagram: async (file, containerId) => {
+    const path = `container-diagram-${containerId}`;
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/logos/${path}`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken || SUPABASE_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+      body: file,
+    });
+    if (!res.ok) { const err = await res.text(); throw new Error(err); }
+    return `${SUPABASE_URL}/storage/v1/object/public/logos/${path}?t=${Date.now()}`;
+  },
   getContainers: () => sb("containers?order=name"),
   addContainer: (c) => sb("containers", { method: "POST", body: JSON.stringify(c) }),
   updateContainer: (id, patch) => sb(`containers?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -896,6 +906,8 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
   const [saving, setSaving] = useState(false);
   const [addItemForm, setAddItemForm] = useState({ item_id: "", qty: 1 });
   const [addingItem, setAddingItem] = useState(false);
+  const [uploadingDiagram, setUploadingDiagram] = useState(null); // container id being uploaded
+  const diagInputRef = useRef();
 
   const toggleParentExpand = (id) => setExpandedParentIds(prev => {
     const next = new Set(prev);
@@ -1037,6 +1049,40 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
                         <ItemSearchInput items={availableItems} value={addItemForm.item_id} onChange={id => setAddItemForm(f => ({ ...f, item_id: id }))} placeholder="Search items..." />
                         <input type="number" value={addItemForm.qty} onChange={e => setAddItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
                         <button style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }} onClick={() => addItemToContainer(c.id)} disabled={addingItem || !addItemForm.item_id}>Add</button>
+                      </div>
+                      {/* Packing diagram */}
+                      <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 10, marginTop: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>📐 Packing Diagram</div>
+                        {c.diagram_url && (
+                          <div style={{ marginBottom: 8 }}>
+                            <img src={c.diagram_url} alt="diagram" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 6, border: "1px solid #e5e7eb", display: "block" }} />
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input ref={diagInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={async (e) => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            setUploadingDiagram(c.id);
+                            try {
+                              const url = await api.uploadContainerDiagram(file, c.id);
+                              await api.updateContainer(c.id, { diagram_url: url });
+                              setContainers(prev => prev.map(x => x.id === c.id ? { ...x, diagram_url: url } : x));
+                              showToast("Diagram uploaded");
+                            } catch { showToast("Error uploading diagram"); }
+                            setUploadingDiagram(null);
+                            e.target.value = "";
+                          }} />
+                          <button style={{ ...ghostBtn, fontSize: 12, padding: "5px 12px" }} onClick={() => diagInputRef.current.click()} disabled={uploadingDiagram === c.id}>
+                            {uploadingDiagram === c.id ? "Uploading…" : c.diagram_url ? "Replace Diagram" : "Upload Diagram"}
+                          </button>
+                          {c.diagram_url && (
+                            <button style={{ ...dangerBtn, fontSize: 12, padding: "5px 10px" }} onClick={async () => {
+                              await api.updateContainer(c.id, { diagram_url: null });
+                              setContainers(prev => prev.map(x => x.id === c.id ? { ...x, diagram_url: null } : x));
+                              showToast("Diagram removed");
+                            }}>Remove</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2289,13 +2335,48 @@ function Dashboard({ isMobile: m, items, events, packing, trailers, setView, set
   );
 }
 
+// ─── Container label printing ─────────────────────────────────────────────────
+const printContainerLabels = async (containers) => {
+  const QRCode = (await import('qrcode')).default;
+  const labelData = await Promise.all(
+    containers.map(async c => ({
+      name: c.name,
+      type: ctLabel(c.type),
+      id: c.id,
+      qrUrl: await QRCode.toDataURL(`${window.location.origin}/container/${c.id}`, { width: 200, margin: 1, color: { dark: '#1a1a2e', light: '#ffffff' } }),
+    }))
+  );
+  const html = `<!DOCTYPE html><html><head><title>Container Labels</title>
+<style>
+  @page { margin: 0.4in; size: letter; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .label { border: 1.5px dashed #ccc; border-radius: 6px; padding: 12px 10px; text-align: center; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .label img { width: 140px; height: 140px; }
+  .name { font-weight: 700; font-size: 13pt; line-height: 1.2; }
+  .type { font-size: 9pt; color: #6b7280; }
+  .short-id { font-size: 7pt; color: #9ca3af; font-family: monospace; }
+</style></head>
+<body onload="window.print()"><div class="grid">
+${labelData.map(c => `<div class="label"><img src="${c.qrUrl}" alt="QR"/><div class="name">${c.name.replace(/</g,"&lt;")}</div><div class="type">${c.type}</div><div class="short-id">CO:${c.id.slice(0,8)}</div></div>`).join("")}
+</div></body></html>`;
+  const win = window.open("", "_blank");
+  if (!win) { alert("Allow popups to print labels"); return; }
+  win.document.write(html);
+  win.document.close();
+};
+
 // ─── Containers Page ──────────────────────────────────────────────────────────
 function ContainersPage({ isMobile: m, containers, setContainers, containerItems, setContainerItems, items, areas, showToast }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
-      <div>
-        <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Containers</h1>
-        <p style={{ color: "#6b7280", fontSize: 14 }}>Manage totes, travel cases, and rolling bins — and what goes inside each one.</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Containers</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>Manage totes, travel cases, and rolling bins — and what goes inside each one.</p>
+        </div>
+        <button style={{ ...ghostBtn, fontSize: 12, padding: "7px 14px", flexShrink: 0 }} onClick={() => printContainerLabels(containers)}>🏷️ Print Labels</button>
       </div>
       <ContainerManager
         containers={containers}
@@ -2700,6 +2781,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [miscSaving, setMiscSaving] = useState(false);
   const [showPackingLists, setShowPackingLists] = useState(false);
   const [packingListTab, setPackingListTab] = useState("trailer");
+  const [showScanMode, setShowScanMode] = useState(false);
   const [editForm, setEditForm] = useState({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
 
   useEffect(() => {
@@ -2967,6 +3049,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
               <button onClick={() => setShowDiagram(d => !d)}
                 style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "1px solid #e5e7eb", background: showDiagram ? "#1a1a2e" : "#fff", color: showDiagram ? "#fff" : "#374151", whiteSpace: "nowrap" }}>
                 {showDiagram ? "Hide Diagram" : "Show Diagram"}
+              </button>
+              <button onClick={() => setShowScanMode(true)}
+                style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontFamily: "inherit", cursor: "pointer", border: "none", background: "#16a34a", color: "#fff", whiteSpace: "nowrap", fontWeight: 600 }}>
+                📷 Scan Mode
               </button>
             </div>
           )}
@@ -3593,6 +3679,214 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           <p style={{ fontSize: 13, color: "#6b7280" }}>Items already on this list won't be duplicated. All copied items start as unpacked.</p>
         </Modal>
       )}
+
+      {showScanMode && activeTrailer && (
+        <ScanMode
+          event={event}
+          trailer={activeTrailer}
+          packing={packing}
+          setPacking={setPacking}
+          containers={containers}
+          onClose={() => setShowScanMode(false)}
+          showToast={showToast}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Scan Mode ────────────────────────────────────────────────────────────────
+const SCAN_ACTIONS = {
+  loaded:            { icon: "✅", color: "rgba(34,197,94,0.2)",   label: (t) => `Added to Trailer ${t.number}` },
+  moved:             { icon: "🔄", color: "rgba(59,130,246,0.2)",  label: (t) => `Moved to Trailer ${t.number}` },
+  warehoused:        { icon: "🏭", color: "rgba(245,158,11,0.2)",  label: () => "Returned to warehouse" },
+  already_here:      { icon: "ℹ️", color: "rgba(107,114,128,0.15)", label: (t) => `Already on Trailer ${t.number}` },
+  already_warehouse: { icon: "ℹ️", color: "rgba(107,114,128,0.15)", label: () => "Already in warehouse" },
+};
+
+function ScanMode({ event, trailer, packing, setPacking, containers, onClose, showToast }) {
+  const [mode, setMode] = useState("load");
+  const [scanInput, setScanInput] = useState("");
+  const [cameraActive, setCameraActive] = useState(false);
+  const [lastScan, setLastScan] = useState(null);
+  const [scanLog, setScanLog] = useState([]);
+  const [processing, setProcessing] = useState(false);
+  const inputRef = useRef();
+  const scannerRef = useRef(null);
+  const lastScannedRef = useRef({ id: null, time: 0 });
+  const processIdRef = useRef(null);
+
+  const processId = async (raw) => {
+    if (processing) return;
+    const cid = raw.startsWith("CO:") ? raw.slice(3)
+      : raw.includes("/container/") ? raw.split("/container/")[1].split("?")[0]
+      : raw.trim();
+    if (!cid) return;
+    const container = containers.find(c => c.id === cid);
+    if (!container) { showToast("Unknown container — check the QR code"); return; }
+    setProcessing(true);
+    try {
+      const existing = packing.find(p => p.container_id === cid && p.event_id === event.id);
+      let action;
+      if (mode === "load") {
+        if (existing?.trailer_id === trailer.id) {
+          action = "already_here";
+        } else if (existing) {
+          await api.updatePacking(existing.id, { trailer_id: trailer.id, packed: true });
+          setPacking(prev => prev.map(p => p.id === existing.id ? { ...p, trailer_id: trailer.id, packed: true } : p));
+          action = "moved";
+        } else {
+          const created = await api.addPacking({ event_id: event.id, container_id: cid, item_id: null, qty_needed: 1, packed: true, returned: false, trailer_id: trailer.id });
+          setPacking(prev => [...prev, created[0]]);
+          action = "loaded";
+        }
+      } else {
+        if (!existing || (!existing.packed && !existing.trailer_id)) {
+          action = "already_warehouse";
+        } else {
+          await api.updatePacking(existing.id, { trailer_id: null, packed: false });
+          setPacking(prev => prev.map(p => p.id === existing.id ? { ...p, trailer_id: null, packed: false } : p));
+          action = "warehoused";
+        }
+      }
+      const entry = { container, action, time: new Date() };
+      setLastScan(entry);
+      setScanLog(prev => [entry, ...prev.slice(0, 49)]);
+    } catch { showToast("Error processing scan"); }
+    setProcessing(false);
+    setTimeout(() => inputRef.current?.focus(), 60);
+  };
+
+  processIdRef.current = processId;
+
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 120);
+    return () => { scannerRef.current?.stop().catch(() => {}); };
+  }, []);
+
+  useEffect(() => {
+    if (!cameraActive) return;
+    let scanner;
+    let stopped = false;
+    (async () => {
+      const { Html5Qrcode } = await import('html5-qrcode');
+      if (stopped) return;
+      scanner = new Html5Qrcode("qr-scan-viewport");
+      scannerRef.current = scanner;
+      try {
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          (text) => {
+            const now = Date.now();
+            if (text === lastScannedRef.current.id && now - lastScannedRef.current.time < 2500) return;
+            lastScannedRef.current = { id: text, time: now };
+            processIdRef.current(text);
+          },
+          () => {}
+        );
+      } catch {
+        if (!stopped) { showToast("Could not access camera"); setCameraActive(false); }
+      }
+    })();
+    return () => { stopped = true; scanner?.stop().catch(() => {}); scannerRef.current = null; };
+  }, [cameraActive]);
+
+  const handleKey = (e) => {
+    if (e.key === "Enter") {
+      const val = scanInput.trim();
+      if (val) { processId(val); setScanInput(""); }
+    }
+  };
+
+  const ac = lastScan ? SCAN_ACTIONS[lastScan.action] : null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#0f172a", zIndex: 300, display: "flex", flexDirection: "column", fontFamily: "'DM Sans','Segoe UI',sans-serif", color: "#fff" }}>
+
+      {/* Header */}
+      <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+        <div>
+          <div style={{ color: "#64748b", fontSize: 12, fontWeight: 500, marginBottom: 2 }}>
+            {mode === "load" ? `Loading → Trailer ${trailer.number}` : "Returning to Warehouse"}
+          </div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Scan Mode</div>
+        </div>
+        <button onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#94a3b8", fontSize: 20, width: 38, height: 38, borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>✕</button>
+      </div>
+
+      {/* Mode toggle */}
+      <div style={{ padding: "14px 20px 10px", display: "flex", gap: 8, flexShrink: 0 }}>
+        <button onClick={() => setMode("load")} style={{ flex: 1, padding: "11px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 600, fontSize: 13, cursor: "pointer", background: mode === "load" ? "#16a34a" : "rgba(255,255,255,0.07)", color: mode === "load" ? "#fff" : "#64748b" }}>
+          📦 Load → Trailer {trailer.number}
+        </button>
+        <button onClick={() => setMode("warehouse")} style={{ flex: 1, padding: "11px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 600, fontSize: 13, cursor: "pointer", background: mode === "warehouse" ? "#d97706" : "rgba(255,255,255,0.07)", color: mode === "warehouse" ? "#fff" : "#64748b" }}>
+          🏭 Return to Warehouse
+        </button>
+      </div>
+
+      {/* Camera viewport */}
+      {cameraActive && <div id="qr-scan-viewport" style={{ width: "100%", maxHeight: 300, flexShrink: 0, background: "#000" }} />}
+
+      {/* Last scan feedback */}
+      <div style={{ padding: "8px 20px", flexShrink: 0 }}>
+        {ac ? (
+          <div style={{ background: ac.color, border: `1px solid ${ac.color}`, borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 28 }}>{ac.icon}</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{lastScan.container.name}</div>
+              <div style={{ color: "#94a3b8", fontSize: 13 }}>{ac.label(trailer)}</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ borderRadius: 12, padding: "13px 16px", border: "1px dashed rgba(255,255,255,0.1)", textAlign: "center", color: "#475569", fontSize: 14 }}>
+            Ready — scan a container QR code
+          </div>
+        )}
+      </div>
+
+      {/* Input row */}
+      <div style={{ padding: "8px 20px 12px", display: "flex", gap: 8, flexShrink: 0 }}>
+        <input
+          ref={inputRef}
+          value={scanInput}
+          onChange={e => setScanInput(e.target.value)}
+          onKeyDown={handleKey}
+          placeholder="Handheld scanner or type ID..."
+          autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+          style={{ flex: 1, padding: "13px 16px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 15, fontFamily: "inherit", outline: "none" }}
+        />
+        <button
+          onClick={() => setCameraActive(a => !a)}
+          title={cameraActive ? "Stop camera" : "Start camera"}
+          style={{ padding: "13px 16px", borderRadius: 10, background: cameraActive ? "#2563eb" : "rgba(255,255,255,0.08)", border: "none", color: "#fff", fontSize: 22, cursor: "pointer" }}>
+          📷
+        </button>
+      </div>
+
+      {/* Session log */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 32px" }}>
+        {scanLog.length > 0 && (
+          <>
+            <div style={{ color: "#475569", fontSize: 11, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Session · {scanLog.length} scan{scanLog.length !== 1 ? "s" : ""}
+            </div>
+            {scanLog.map((entry, i) => {
+              const a = SCAN_ACTIONS[entry.action];
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <span style={{ fontSize: 16 }}>{a.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.container.name}</div>
+                    <div style={{ color: "#475569", fontSize: 11 }}>{a.label(trailer)}</div>
+                  </div>
+                  <div style={{ color: "#334155", fontSize: 11, flexShrink: 0 }}>{entry.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
     </div>
   );
 }

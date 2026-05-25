@@ -2086,15 +2086,16 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         button { cursor: pointer; font-family: inherit; }
-        input, select, textarea { font-family: inherit; }
+        input, select, textarea { font-family: inherit; font-size: 16px; }
         .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; }
         .pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 500; }
         .toast { position: fixed; bottom: ${m ? "90px" : "24px"}; left: 50%; transform: translateX(-50%); background: #1a1a2e; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; z-index: 1000; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
         .nav-btn { background: none; border: none; padding: 8px 14px; border-radius: 6px; font-size: 14px; font-weight: 500; color: #6b7280; transition: all 0.15s; cursor: pointer; }
         .nav-btn:hover { background: #f3f4f6; color: #111; }
         .nav-btn.active { background: #1a1a2e; color: #fff; }
-        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e5e7eb; display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
-        .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; font-size: 11px; font-weight: 500; color: #9ca3af; background: none; border: none; gap: 3px; cursor: pointer; }
+        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e5e7eb; display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .tab-bar::-webkit-scrollbar { display: none; }
+        .tab-btn { flex: 0 0 auto; min-width: 68px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 6px; font-size: 10px; font-weight: 500; color: #9ca3af; background: none; border: none; gap: 3px; cursor: pointer; white-space: nowrap; }
         .tab-btn.active { color: #1a1a2e; }
         .tab-icon { font-size: 22px; line-height: 1; }
         .check-box-mobile { width: 28px; height: 28px; border: 2px solid #d1d5db; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }

@@ -5106,13 +5106,19 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [filterCompany, setFilterCompany] = useState("");
   const [showExport, setShowExport] = useState(false);
   const [exportOpts, setExportOpts] = useState({ company: "", dateFrom: "", dateTo: "", statusFilter: "All" });
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
+  function loadExpenses(opts = {}) {
+    if (opts.silent) setRefreshing(true); else setLoading(true);
     fetch("/api/expenses-list", { headers: { Authorization: `Bearer ${SUPABASE_KEY}` } })
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then((data) => setExpenses(Array.isArray(data) ? data : []))
       .catch(() => showToast("Failed to load expenses"))
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); setRefreshing(false); });
+  }
+
+  useEffect(() => {
+    loadExpenses();
     fetch("/api/expense-config")
       .then((r) => r.json())
       .then((c) => { setConfig(c); setConfigDraft(c); })
@@ -5396,6 +5402,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
           <p style={{ color: "#6b7280", fontSize: 14 }}>Review and approve reimbursement requests</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => loadExpenses({ silent: true })} disabled={refreshing} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: refreshing ? "wait" : "pointer", fontFamily: "inherit", color: "#374151", opacity: refreshing ? 0.6 : 1 }}>{refreshing ? "↻" : "↻"} Refresh</button>
           <button onClick={() => { setExportOpts({ company: filterCompany, dateFrom: "", dateTo: "", statusFilter: "All" }); setShowExport(true); }} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>↓ Export Report</button>
           <button onClick={openSettings} style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#374151" }}>⚙ Form Settings</button>
         </div>

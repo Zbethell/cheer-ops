@@ -4926,6 +4926,8 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   const sorted = [...items].sort((a, b) => (a.expenseDate || "").localeCompare(b.expenseDate || ""));
   const companyName = company || "All Companies";
   const periodText = (dateFrom || dateTo) ? `${dateFrom || "—"} to ${dateTo || "—"}` : "All dates";
+  const eventNames = [...new Set(sorted.filter((e) => e.eventName).map((e) => e.eventName))];
+  const singleEvent = eventNames.length === 1 ? eventNames[0] : null;
   const generatedDate = new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
 
   const withTax = sorted.map((e) => {
@@ -4958,19 +4960,23 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
 
   const itemsWithReceipts = withTax.filter((e) => e.receiptURL);
 
-  const txRows = withTax.map((e) =>
-    `<tr>
+  const txRows = withTax.map((e) => {
+    const desc = e.totalKMs != null
+      ? `${e.startLocation} → ${e.endLocation} (${e.totalKMs} km)`
+      : (e.description || "—");
+    const descCell = (eventNames.length > 1 && e.eventName) ? `${desc} <span style="color:#0369a1;font-size:12px;">[${e.eventName}]</span>` : desc;
+    return `<tr>
       <td>${(e.expenseDate || "—").split("T")[0]}</td>
       <td>${e.submitterName}</td>
       <td>${e.merchantName || (e.totalKMs != null ? "Mileage" : "—")}</td>
-      <td>${e.totalKMs != null ? `${e.startLocation} → ${e.endLocation} (${e.totalKMs} km)` : (e.description || "—")}</td>
+      <td>${descCell}</td>
       <td>${e.category}</td>
       <td class="num">${fmt(e._net)}</td>
       <td class="num">${fmtOpt(e._tax)}</td>
       <td class="num fw">${fmt(e._total)}</td>
       <td class="num">${e.receiptURL ? `<a href="${e.receiptURL}" target="_blank" style="color:#2563eb;text-decoration:none;font-weight:500;">View →</a>` : "—"}</td>
-    </tr>`
-  ).join("");
+    </tr>`;
+  }).join("");
 
   const receiptSection = itemsWithReceipts.length === 0 ? "" : `
 <h2>Receipts (${itemsWithReceipts.length})</h2>
@@ -5041,6 +5047,7 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
     <h1>${companyName}<br>Expense Report</h1>
     <p>Period: ${periodText}</p>
     <p>Generated: ${generatedDate}</p>
+    ${singleEvent ? `<p>Event: ${singleEvent}</p>` : ""}
     ${statusFilter !== "All" ? `<p>Status: ${statusFilter}</p>` : ""}
   </div>
   <div>
@@ -5476,7 +5483,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                     <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>{report.company}</span>
                   )}
                   {report.eventName && (
-                    <span className="pill" style={{ background: "#e0f2fe", color: "#0369a1", fontSize: 11 }}>🎪 {report.eventName}</span>
+                    <span className="pill" style={{ background: "#e0f2fe", color: "#0369a1", fontSize: 11 }}>{report.eventName}</span>
                   )}
                   {report.items.length > 1 && (
                     <span className="pill" style={{ background: "#f0f0ff", color: "#4f46e5", fontSize: 11 }}>{report.items.length} items</span>

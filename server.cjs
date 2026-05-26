@@ -1,4 +1,5 @@
 require("dotenv").config();
+require("dotenv").config({ path: ".env.local", override: true });
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
@@ -79,7 +80,7 @@ async function analyzeReceipt(fileBuffer, mimeType) {
 
 // POST /api/submit-expense
 app.post("/api/submit-expense", async (req, res) => {
-  const { submitterName, submitterEmail, company, lineItems } = req.body;
+  const { submitterName, submitterEmail, company, lineItems, eventId, eventName } = req.body;
 
   if (!submitterName || !submitterEmail || !company || !Array.isArray(lineItems) || lineItems.length === 0) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -157,6 +158,8 @@ app.post("/api/submit-expense", async (req, res) => {
               ...(item.endLocation   && { EndLocation:   item.endLocation }),
               ...(item.totalKMs      != null && { TotalKMs:    parseFloat(item.totalKMs) }),
               ...(item.mileageRate   != null && { MileageRate: parseFloat(item.mileageRate) }),
+              ...(eventId   && { EventId:   eventId }),
+              ...(eventName && { EventName: eventName }),
             },
           }),
         }
@@ -249,6 +252,8 @@ app.get("/api/expenses-list", async (req, res) => {
         totalKMs:          i.fields.TotalKMs           ?? null,
         mileageRate:       i.fields.MileageRate        ?? null,
         extractedDate:     i.fields.ExtractedDate       || null,
+        eventId:           i.fields.EventId            || null,
+        eventName:         i.fields.EventName          || null,
       }))
       .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
     res.json(items);

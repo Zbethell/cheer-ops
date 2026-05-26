@@ -93,8 +93,25 @@ app.post("/api/submit-expense", async (req, res) => {
 
   try {
     const msToken = await getMicrosoftToken();
-    const expenseToken = crypto.randomUUID();
     const submittedDate = new Date().toLocaleDateString("en-CA");
+
+    // Reuse existing pending token if this submitter already has an open report
+    let expenseToken = crypto.randomUUID();
+    try {
+      const filter = `fields/SubmitterEmail eq '${submitterEmail.replace(/'/g, "''")}' and fields/Status eq 'Pending'`;
+      const checkUrl = `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${EXPENSES_LIST_ID}/items?$expand=fields&$filter=${encodeURIComponent(filter)}&$orderby=fields/Created desc&$top=1`;
+      const checkRes = await fetch(checkUrl, {
+        headers: { Authorization: `Bearer ${msToken}`, Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" },
+      });
+      if (checkRes.ok) {
+        const { value } = await checkRes.json();
+        if (value?.length > 0 && value[0].fields?.Token) {
+          expenseToken = value[0].fields.Token;
+        }
+      }
+    } catch (e) {
+      console.warn("Pending token lookup failed, using new token:", e.message);
+    }
 
     await Promise.all(lineItems.map(async (item, i) => {
       let receiptURL = "";

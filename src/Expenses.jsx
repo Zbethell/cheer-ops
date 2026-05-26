@@ -512,7 +512,7 @@ export default function Expenses() {
             </Field>
 
             {reportForm.company === "EVO" && (
-              <Field label="Event" required hint={loadingEvents ? "Loading events…" : undefined}>
+              <Field label="Event" required>
                 <select
                   style={inputStyle}
                   value={reportForm.eventId}

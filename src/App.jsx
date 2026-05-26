@@ -5196,6 +5196,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
       submitterName: items[0].submitterName,
       submitterEmail:items[0].submitterEmail,
       company:       items[0].company,
+      eventName:     items[0].eventName || null,
       status:        items.every((i) => i.status === "Paid") ? "Paid" : "Pending",
       total:         items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0),
       submittedAt:   items[0].submittedAt,
@@ -5473,6 +5474,9 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                   }}>{report.status}</span>
                   {report.company && (
                     <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>{report.company}</span>
+                  )}
+                  {report.eventName && (
+                    <span className="pill" style={{ background: "#e0f2fe", color: "#0369a1", fontSize: 11 }}>🎪 {report.eventName}</span>
                   )}
                   {report.items.length > 1 && (
                     <span className="pill" style={{ background: "#f0f0ff", color: "#4f46e5", fontSize: 11 }}>{report.items.length} items</span>

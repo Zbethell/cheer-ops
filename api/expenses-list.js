@@ -36,6 +36,8 @@ export default async function handler(req, res) {
         endLocation:       i.fields.EndLocation       || null,
         totalKMs:          i.fields.TotalKMs          ?? null,
         mileageRate:       i.fields.MileageRate       ?? null,
+        eventId:           i.fields.EventId           || null,
+        eventName:         i.fields.EventName         || null,
       }))
       .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
     res.json(items);

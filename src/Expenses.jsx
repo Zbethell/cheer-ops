@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 
+const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
+
+const sbFetch = async (path) => {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+  });
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+};
+
 const DEFAULT_CONFIG = {
   formTitle: "Expense Report",
   formSubtitle: "Submit your expenses for reimbursement. You'll receive a link to track their status.",
@@ -296,7 +307,9 @@ function newItem() {
 
 export default function Expenses() {
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [reportForm, setReportForm] = useState({ name: "", email: "", company: "" });
+  const [reportForm, setReportForm] = useState({ name: "", email: "", company: "", eventId: "" });
+  const [evoEvents, setEvoEvents] = useState([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
   const [lineItems, setLineItems] = useState([newItem()]);
   const [step, setStep] = useState("form");
   const [statusToken, setStatusToken] = useState("");
@@ -309,6 +322,16 @@ export default function Expenses() {
       .then((c) => setConfig({ ...DEFAULT_CONFIG, ...c, labels: { ...DEFAULT_CONFIG.labels, ...(c.labels || {}) } }))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (reportForm.company !== "EVO") { setEvoEvents([]); return; }
+    setLoadingEvents(true);
+    sbFetch("events?status=eq.active&order=date")
+      .then((evs) => evs.length > 0 ? evs : sbFetch("events?status=eq.upcoming&order=date"))
+      .then(setEvoEvents)
+      .catch(() => {})
+      .finally(() => setLoadingEvents(false));
+  }, [reportForm.company]);
 
   const setRF = (field) => (e) => setReportForm((f) => ({ ...f, [field]: e.target.value }));
 
@@ -338,6 +361,9 @@ export default function Expenses() {
 
     if (!reportForm.name.trim() || !reportForm.email.trim() || !reportForm.company) {
       setError("Please fill in your name, email, and company."); return;
+    }
+    if (reportForm.company === "EVO" && !reportForm.eventId) {
+      setError("Please select an event for EVO expenses."); return;
     }
 
     for (let i = 0; i < lineItems.length; i++) {
@@ -390,6 +416,7 @@ export default function Expenses() {
         })
       );
 
+      const selectedEvent = evoEvents.find((ev) => ev.id === reportForm.eventId);
       const res = await fetch("/api/submit-expense", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -398,6 +425,7 @@ export default function Expenses() {
           submitterEmail: reportForm.email.trim(),
           company:        reportForm.company,
           lineItems:      processedItems,
+          ...(selectedEvent && { eventId: selectedEvent.id, eventName: selectedEvent.name }),
         }),
       });
 
@@ -468,7 +496,11 @@ export default function Expenses() {
                 <input style={inputStyle} value={reportForm.name} onChange={setRF("name")} placeholder="Full name" />
               </Field>
               <Field label={config.labels.company} required>
-                <select style={inputStyle} value={reportForm.company} onChange={setRF("company")}>
+                <select
+                  style={inputStyle}
+                  value={reportForm.company}
+                  onChange={(e) => setReportForm((f) => ({ ...f, company: e.target.value, eventId: "" }))}
+                >
                   <option value="">Select…</option>
                   {(config.expenseCompanies || []).map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
@@ -478,6 +510,22 @@ export default function Expenses() {
             <Field label={config.labels.email} required>
               <input style={inputStyle} type="email" value={reportForm.email} onChange={setRF("email")} placeholder="you@example.com" />
             </Field>
+
+            {reportForm.company === "EVO" && (
+              <Field label="Event" required hint={loadingEvents ? "Loading events…" : undefined}>
+                <select
+                  style={inputStyle}
+                  value={reportForm.eventId}
+                  onChange={setRF("eventId")}
+                  disabled={loadingEvents}
+                >
+                  <option value="">Select an event…</option>
+                  {evoEvents.map((ev) => (
+                    <option key={ev.id} value={ev.id}>{ev.name}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
           </div>
 
           {/* Line items */}

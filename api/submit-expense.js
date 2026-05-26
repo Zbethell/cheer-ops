@@ -11,7 +11,7 @@ const { EXPENSE_NOTIFY_EMAIL } = process.env;
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { submitterName, submitterEmail, company, lineItems } = req.body;
+  const { submitterName, submitterEmail, company, lineItems, eventId, eventName } = req.body;
 
   if (!submitterName || !submitterEmail || !company || !Array.isArray(lineItems) || lineItems.length === 0) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -93,6 +93,8 @@ export default async function handler(req, res) {
                 ...(item.endLocation   && { EndLocation:   item.endLocation }),
                 ...(item.totalKMs      != null && { TotalKMs:    parseFloat(item.totalKMs) }),
                 ...(item.mileageRate   != null && { MileageRate: parseFloat(item.mileageRate) }),
+                ...(eventId   && { EventId:   eventId }),
+                ...(eventName && { EventName: eventName }),
               },
             }),
           }

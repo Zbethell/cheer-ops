@@ -1790,7 +1790,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
                         {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
                       </div>
                       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
-                        {fmtDate(entry.clock_in)} · {fmtTime(entry.clock_in)} → {entry.clock_out ? fmtTime(entry.clock_out) : <span style={{ color: "#059669", fontWeight: 600 }}>Active</span>}
+                        {fmtDate(entry.clock_in)} · {fmtTime(entry.clock_in)} → {entry.clock_out ? fmtTime(entry.clock_out) : (new Date() - new Date(entry.clock_in)) / 3600000 >= AUTO_CLOCKOUT_HOURS ? <span style={{ color: "#b45309", fontWeight: 600 }}>Awaiting employee correction — auto clock-out initiated</span> : <span style={{ color: "#059669", fontWeight: 600 }}>Active</span>}
                         {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
                       </div>
                       {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}

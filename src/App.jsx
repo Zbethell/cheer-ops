@@ -5126,7 +5126,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     loadExpenses();
     fetch("/api/expense-config")
       .then((r) => r.json())
-      .then((c) => { setConfig(c); setConfigDraft(c); })
+      .then((c) => { const merged = { ...DEFAULT_EXPENSE_CONFIG, ...c, labels: { ...DEFAULT_EXPENSE_CONFIG.labels, ...(c.labels || {}) } }; setConfig(merged); setConfigDraft(merged); })
       .catch(() => {});
   }, []);
 

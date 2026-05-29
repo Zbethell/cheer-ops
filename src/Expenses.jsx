@@ -307,7 +307,7 @@ function newItem() {
 
 export default function Expenses() {
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [reportForm, setReportForm] = useState({ name: "", email: "", company: "", eventId: "" });
+  const [reportForm, setReportForm] = useState({ name: "", email: "", company: "", eventId: "", approvedBy: "" });
   const [evoEvents, setEvoEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [lineItems, setLineItems] = useState([newItem()]);
@@ -361,6 +361,9 @@ export default function Expenses() {
 
     if (!reportForm.name.trim() || !reportForm.email.trim() || !reportForm.company) {
       setError("Please fill in your name, email, and company."); return;
+    }
+    if (!reportForm.approvedBy) {
+      setError("Please select who approved this expense report."); return;
     }
     if (reportForm.company === "EVO" && !reportForm.eventId) {
       setError("Please select an event for EVO expenses."); return;
@@ -424,6 +427,7 @@ export default function Expenses() {
           submitterName:  reportForm.name.trim(),
           submitterEmail: reportForm.email.trim(),
           company:        reportForm.company,
+          approvedBy:     reportForm.approvedBy,
           lineItems:      processedItems,
           ...(selectedEvent && { eventId: selectedEvent.id, eventName: selectedEvent.name }),
         }),
@@ -441,7 +445,7 @@ export default function Expenses() {
   }
 
   function resetForm() {
-    setReportForm({ name: "", email: "", company: "" });
+    setReportForm({ name: "", email: "", company: "", eventId: "", approvedBy: "" });
     setLineItems([newItem()]);
     setStatusToken("");
     setError("");
@@ -509,6 +513,13 @@ export default function Expenses() {
 
             <Field label={config.labels.email} required>
               <input style={inputStyle} type="email" value={reportForm.email} onChange={setRF("email")} placeholder="you@example.com" />
+            </Field>
+
+            <Field label="Approved By" required>
+              <select style={inputStyle} value={reportForm.approvedBy} onChange={setRF("approvedBy")}>
+                <option value="">Select approver…</option>
+                {["Doug", "Frank", "Steph", "Nic"].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
             </Field>
 
             {reportForm.company === "EVO" && (

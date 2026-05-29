@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = {
   categories: ["Meal", "Gas", "Office Supplies", "Mileage"],
   mileageRate: 0.70,
   expenseCompanies: ["Pro", "Pro Gym Services", "EVO"],
+  approvers: ["Doug", "Frank", "Steph", "Nic"],
   labels: {
     name: "Your Name", email: "Email Address", amount: "Amount ($)",
     date: "Date of Expense", category: "Category", company: "Company",
@@ -518,7 +519,7 @@ export default function Expenses() {
             <Field label="Approved By" required>
               <select style={inputStyle} value={reportForm.approvedBy} onChange={setRF("approvedBy")}>
                 <option value="">Select approver…</option>
-                {["Doug", "Frank", "Steph", "Nic"].map((n) => <option key={n} value={n}>{n}</option>)}
+                {(config.approvers || []).map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
             </Field>
 

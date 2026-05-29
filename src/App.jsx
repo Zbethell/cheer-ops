@@ -5086,6 +5086,7 @@ const DEFAULT_EXPENSE_CONFIG = {
   categories: ["Meal", "Gas", "Office Supplies", "Mileage"],
   mileageRate: 0.70,
   expenseCompanies: ["Pro", "Pro Gym Services", "EVO"],
+  approvers: ["Doug", "Frank", "Steph", "Nic"],
   labels: {
     name: "Your Name", email: "Email Address", amount: "Amount ($)",
     date: "Date of Expense", category: "Category", company: "Company",
@@ -5106,6 +5107,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [savingConfig, setSavingConfig] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [newCompany, setNewCompany] = useState("");
+  const [newApprover, setNewApprover] = useState("");
   const [filterCompany, setFilterCompany] = useState("");
   const [showExport, setShowExport] = useState(false);
   const [exportOpts, setExportOpts] = useState({ company: "", dateFrom: "", dateTo: "", statusFilter: "All" });
@@ -5178,6 +5180,26 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     if (swap < 0 || swap >= list.length) return;
     [list[index], list[swap]] = [list[swap], list[index]];
     setConfigDraft((d) => ({ ...d, expenseCompanies: list }));
+  }
+
+  function addApprover() {
+    const name = newApprover.trim();
+    const list = configDraft.approvers || [];
+    if (!name || list.includes(name)) return;
+    setConfigDraft((d) => ({ ...d, approvers: [...list, name] }));
+    setNewApprover("");
+  }
+
+  function removeApprover(name) {
+    setConfigDraft((d) => ({ ...d, approvers: (d.approvers || []).filter((a) => a !== name) }));
+  }
+
+  function moveApprover(index, dir) {
+    const list = [...(configDraft.approvers || [])];
+    const swap = index + dir;
+    if (swap < 0 || swap >= list.length) return;
+    [list[index], list[swap]] = [list[swap], list[index]];
+    setConfigDraft((d) => ({ ...d, approvers: list }));
   }
 
   async function saveConfig() {
@@ -5391,6 +5413,28 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
               placeholder="New company name…"
             />
             <button onClick={addCompany} style={{ ...primaryBtn, width: "auto", padding: "9px 18px", fontSize: 13 }}>Add</button>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Approvers</div>
+          {(configDraft.approvers || []).map((name, i) => (
+            <div key={name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, padding: "9px 12px", background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14 }}>{name}</div>
+              <button onClick={() => moveApprover(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↑</button>
+              <button onClick={() => moveApprover(i, 1)} disabled={i === (configDraft.approvers || []).length - 1} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === (configDraft.approvers || []).length - 1 ? "default" : "pointer", color: i === (configDraft.approvers || []).length - 1 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↓</button>
+              <button onClick={() => removeApprover(name)} style={{ background: "none", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px", cursor: "pointer", color: "#ef4444", fontFamily: "inherit", fontSize: 13 }}>✕</button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <input
+              style={{ ...iStyle, flex: 1 }}
+              value={newApprover}
+              onChange={(e) => setNewApprover(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addApprover())}
+              placeholder="New approver name…"
+            />
+            <button onClick={addApprover} style={{ ...primaryBtn, width: "auto", padding: "9px 18px", fontSize: 13 }}>Add</button>
           </div>
         </div>
       </div>

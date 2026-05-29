@@ -1635,7 +1635,10 @@ function EmployeeHours({ isMobile: m, showToast }) {
     XLSX.writeFile(wb, `employee-hours_${label}.xlsx`);
   };
 
-  const liveEntries = timeEntries.filter(e => !e.clock_out).map(e => ({ ...e, employee: employees.find(x => x.id === e.employee_id) })).filter(e => e.employee);
+  const liveEntries = timeEntries
+    .filter(e => !e.clock_out && (new Date() - new Date(e.clock_in)) / 3600000 < AUTO_CLOCKOUT_HOURS)
+    .map(e => ({ ...e, employee: employees.find(x => x.id === e.employee_id) }))
+    .filter(e => e.employee);
 
   const tabBtn = (key, label) => (
     <button onClick={() => setTab(key)} style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: tab === key ? "#fff" : "transparent", color: tab === key ? "#111" : "#6b7280", boxShadow: tab === key ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>{label}</button>

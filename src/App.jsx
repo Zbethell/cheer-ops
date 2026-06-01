@@ -2243,7 +2243,7 @@ export default function App() {
         {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
         {view === "containers" && canViewContainers && <ContainersPage isMobile={m} containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} />}
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
+        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
@@ -2818,7 +2818,7 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 }
 
 // ─── Event Detail ─────────────────────────────────────────────────────────────
-function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, eventTrailers, setEventTrailers, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
+function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
   const [showDiagram, setShowDiagram] = useState(false);
   const [diagramView, setDiagramView] = useState("web"); // "web" | "imported"
@@ -2844,6 +2844,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [showPackingLists, setShowPackingLists] = useState(false);
   const [packingListTab, setPackingListTab] = useState("trailer");
   const [showScanMode, setShowScanMode] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [editForm, setEditForm] = useState({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
 
   useEffect(() => {
@@ -2871,6 +2872,30 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
       setEventTrailers(prev => prev.filter(e => e.id !== et.id));
       showToast("Trailer removed");
     } catch { showToast("Error removing trailer"); }
+  };
+
+  // Re-pull trailers and assignments whenever an event is opened, so changes made
+  // on another device/session appear without needing a hard refresh. On failure we
+  // keep the existing cached data, so this can never make the page worse.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [tr, et] = await Promise.all([api.getTrailers(), api.getEventTrailers()]);
+        if (!cancelled) { setTrailers(tr); setEventTrailers(et); }
+      } catch { /* keep cached data */ }
+    })();
+    return () => { cancelled = true; };
+  }, [event.id, setTrailers, setEventTrailers]);
+
+  const refreshNow = async () => {
+    setRefreshing(true);
+    try {
+      const [tr, et] = await Promise.all([api.getTrailers(), api.getEventTrailers()]);
+      setTrailers(tr); setEventTrailers(et);
+      showToast("Refreshed");
+    } catch { showToast("Couldn't refresh — check connection"); }
+    finally { setRefreshing(false); }
   };
 
   const saveEdit = async () => {
@@ -3071,6 +3096,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
+            <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px", opacity: refreshing ? 0.6 : 1 }} onClick={refreshNow} disabled={refreshing} title="Reload trailers & assignments">{refreshing ? "⟳ …" : "⟳ Refresh"}</button>
             <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => setShowEdit(true)}>Edit</button>
             <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => setShowTrailerManager(true)}>🚛 Trailers</button>
             {event.status !== "active" && <button style={{ ...ghostBtn, fontSize: 12, padding: m ? "7px 10px" : "6px 12px" }} onClick={() => updateStatus("active")}>Active</button>}

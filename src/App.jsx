@@ -53,6 +53,10 @@ const api = {
   updateEventTrailer: (id, patch) => sb(`event_trailers?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteEventTrailer: (id) => sb(`event_trailers?id=eq.${id}`, { method: "DELETE" }),
   deleteEventTrailersByEvent: (eventId) => sb(`event_trailers?event_id=eq.${eventId}`, { method: "DELETE" }),
+  getEventSignage: () => sb("event_signage"),
+  addEventSignage: (e) => sb("event_signage", { method: "POST", body: JSON.stringify(e) }),
+  updateEventSignage: (id, patch) => sb(`event_signage?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteEventSignage: (id) => sb(`event_signage?id=eq.${id}`, { method: "DELETE" }),
   getAreas: () => sb("areas?order=sort_order"),
   getAreaItems: () => sb("area_items"),
   addAreaItem: (ai) => sb("area_items", { method: "POST", body: JSON.stringify(ai) }),
@@ -629,6 +633,61 @@ function LogoUpload({ value, onChange, label, size = 64, storageKey }) {
         </div>
         <input ref={ref} type="file" accept="image/*" style={{ display: "none" }} onChange={handle} />
       </div>
+    </div>
+  );
+}
+
+// Resize an image File down to maxDim (longest edge) and return a PNG Blob.
+// PNG preserves crisp graphics / transparency for pin & sign art.
+const downscaleImage = (file, maxDim = 1000) => new Promise((resolve, reject) => {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    let { width, height } = img;
+    if (Math.max(width, height) > maxDim) {
+      const scale = maxDim / Math.max(width, height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error("Could not process image")), "image/png");
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not read image file")); };
+  img.src = url;
+});
+
+// Image picker with auto-downscaling — used for inventory item art (pins, signage).
+function ImageUpload({ value, onChange, pathPrefix = "img", maxDim = 1000 }) {
+  const ref = useRef();
+  const [uploading, setUploading] = useState(false);
+  const handle = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const blob = await downscaleImage(file, maxDim);
+      const url = await api.uploadLogo(blob, `${pathPrefix}-${Date.now()}.png`);
+      onChange(url + "?t=" + Date.now());
+    } catch (err) { alert("Upload failed: " + err.message); }
+    setUploading(false);
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      {value
+        ? <img src={value} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", flexShrink: 0 }} />
+        : <div style={{ width: 64, height: 64, borderRadius: 8, border: "2px dashed #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", color: "#d1d5db", fontSize: 24, flexShrink: 0 }}>🖼️</div>
+      }
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={{ ...ghostBtn, opacity: uploading ? 0.5 : 1 }} onClick={() => ref.current.click()} type="button" disabled={uploading}>
+          {uploading ? "Uploading..." : (value ? "Change" : "Upload")}
+        </button>
+        {value && !uploading && <button style={dangerBtn} onClick={() => onChange(null)} type="button">Remove</button>}
+      </div>
+      <input ref={ref} type="file" accept="image/*" style={{ display: "none" }} onChange={handle} />
     </div>
   );
 }
@@ -2049,6 +2108,7 @@ export default function App() {
   const [reports, setReports] = useState([]);
   const [reportItems, setReportItems] = useState([]);
   const [eventTrailers, setEventTrailers] = useState([]);
+  const [eventSignage, setEventSignage] = useState([]);
   const [containers, setContainers] = useState([]);
   const [containerItems, setContainerItems] = useState([]);
   const [eventContainerItems, setEventContainerItems] = useState([]);
@@ -2137,17 +2197,18 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [i, e, p, cats, tr, et, ar, ai, rp, ri, co, ci, eci, logoUrl] = await Promise.all([
+      const [i, e, p, cats, tr, et, ar, ai, rp, ri, co, ci, eci, es, logoUrl] = await Promise.all([
         api.getItems(), api.getEvents(), api.getAllPacking(),
         api.getCategories(), api.getTrailers(), api.getEventTrailers(),
         api.getAreas(), api.getAreaItems(), api.getReports(), api.getReportItems(),
         api.getContainers(), api.getContainerItems(), api.getEventContainerItems(),
+        api.getEventSignage().catch(() => []),
         checkOrgLogoExists()
       ]);
       setItems(i); setEvents(e); setPacking(p);
       setCategories(cats); setTrailers(tr); setEventTrailers(et);
       setAreas(ar); setAreaItems(ai); setReports(rp); setReportItems(ri);
-      setContainers(co); setContainerItems(ci); setEventContainerItems(eci);
+      setContainers(co); setContainerItems(ci); setEventContainerItems(eci); setEventSignage(es);
       setOrgLogo(logoUrl); setError(null);
     } catch { setError("Could not connect to database."); }
     finally { setLoading(false); }
@@ -2240,10 +2301,10 @@ export default function App() {
 
       <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
         {view === "dashboard" && canViewDashboard && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
-        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} packing={packing} showToast={showToast} />}
+        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} events={events} packing={packing} showToast={showToast} />}
         {view === "containers" && canViewContainers && <ContainersPage isMobile={m} containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} />}
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
+        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
@@ -2455,13 +2516,14 @@ function ContainersPage({ isMobile: m, containers, setContainers, containerItems
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-function Inventory({ isMobile: m, items, setItems, categories, packing, showToast }) {
+function Inventory({ isMobile: m, items, setItems, categories, events, packing, showToast }) {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("All");
   const [showWarehouse, setShowWarehouse] = useState(false);
+  const [viewMode, setViewMode] = useState("list"); // "list" | "gallery"
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [form, setForm] = useState({ name: "", category: categories[0] || "", qty: 1, notes: "" });
+  const [form, setForm] = useState({ name: "", category: categories[0] || "", qty: 1, notes: "", image_url: null, event_ids: [] });
   const [saving, setSaving] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [csvText, setCsvText] = useState("");
@@ -2479,8 +2541,8 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
   });
 
   const filtered = itemsWithAvailable.filter(i => (filterCat === "All" || i.category === filterCat) && i.name.toLowerCase().includes(search.toLowerCase()));
-  const openAdd = () => { setForm({ name: "", category: categories[0] || "", qty: 1, notes: "", dim_w_ft: "", dim_d_ft: "" }); setEditItem(null); setShowModal(true); };
-  const openEdit = (item) => { setForm({ name: item.name, category: item.category, qty: item.qty, notes: item.notes || "", dim_w_ft: item.dim_w_ft ?? "", dim_d_ft: item.dim_d_ft ?? "" }); setEditItem(item); setShowModal(true); };
+  const openAdd = () => { setForm({ name: "", category: categories[0] || "", qty: 1, notes: "", dim_w_ft: "", dim_d_ft: "", image_url: null, event_ids: [] }); setEditItem(null); setShowModal(true); };
+  const openEdit = (item) => { setForm({ name: item.name, category: item.category, qty: item.qty, notes: item.notes || "", dim_w_ft: item.dim_w_ft ?? "", dim_d_ft: item.dim_d_ft ?? "", image_url: item.image_url || null, event_ids: item.event_ids?.length ? item.event_ids : (item.event_id ? [item.event_id] : []) }); setEditItem(item); setShowModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) return;
@@ -2490,6 +2552,9 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
         ...form,
         dim_w_ft: form.dim_w_ft !== "" ? parseFloat(form.dim_w_ft) : null,
         dim_d_ft: form.dim_d_ft !== "" ? parseFloat(form.dim_d_ft) : null,
+        image_url: form.image_url || null,
+        event_ids: form.event_ids?.length ? form.event_ids : null,
+        event_id: null,
       };
       if (editItem) {
         await api.updateItem(editItem.id, payload);
@@ -2553,6 +2618,7 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
           <p style={{ color: "#6b7280", fontSize: 14 }}>{items.length} items tracked</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px", background: viewMode === "gallery" ? "#1a1a2e" : "none", color: viewMode === "gallery" ? "#fff" : "#374151" }} onClick={() => setViewMode(v => v === "gallery" ? "list" : "gallery")}>🖼️ {m ? "" : "Gallery"}</button>
           <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px", background: showWarehouse ? "#1a1a2e" : "none", color: showWarehouse ? "#fff" : "#374151" }} onClick={() => setShowWarehouse(w => !w)}>🏭 {m ? "" : "Warehouse"}</button>
           <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px" }} onClick={() => { setCsvText(""); setCsvPreview(null); setCsvError(""); setShowImport(true); }}>{m ? "Import" : "Import CSV"}</button>
           <button style={{ ...primaryBtn, padding: m ? "9px 13px" : "8px 16px" }} onClick={openAdd}>+ {m ? "Add" : "Add Item"}</button>
@@ -2577,7 +2643,50 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
         </div>
       )}
 
-      {m ? (
+      {viewMode === "gallery" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {Object.entries(grouped).map(([cat, catItems]) => {
+            const byEvent = {};
+            catItems.forEach(it => {
+              const evs = it.event_ids?.length ? it.event_ids : (it.event_id ? [it.event_id] : []);
+              const keys = evs.length ? evs : ["__general__"];
+              keys.forEach(k => { if (!byEvent[k]) byEvent[k] = []; byEvent[k].push(it); });
+            });
+            const evName = (id) => events.find(e => e.id === id)?.name || "Event";
+            const keys = Object.keys(byEvent).sort((a, b) => a === "__general__" ? 1 : b === "__general__" ? -1 : evName(a).localeCompare(evName(b)));
+            return (
+              <div key={cat}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 10 }}>{cat}</div>
+                {keys.map(k => (
+                  <div key={k} style={{ marginBottom: 14 }}>
+                    {(keys.length > 1 || k !== "__general__") && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{k === "__general__" ? "General" : evName(k)}</div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${m ? 130 : 160}px, 1fr))`, gap: 12 }}>
+                      {byEvent[k].map(item => (
+                        <div key={item.id} className="card" style={{ overflow: "hidden", cursor: "pointer" }} onClick={() => openEdit(item)}>
+                          <div style={{ aspectRatio: "1 / 1", background: "#f8f9fb", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "1px solid #f3f4f6" }}>
+                            {item.image_url
+                              ? <img src={item.image_url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                              : <span style={{ fontSize: 30, color: "#d1d5db" }}>🖼️</span>}
+                          </div>
+                          <div style={{ padding: "9px 11px" }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                            <div style={{ fontSize: 12, color: showWarehouse && item.available === 0 ? "#dc2626" : "#6b7280", marginTop: 2 }}>
+                              {showWarehouse ? `${item.available} in warehouse${item.out > 0 ? ` · ${item.out} out` : ""}` : `Qty: ${item.qty}`}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {filtered.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No items found</div>}
+        </div>
+      ) : m ? (
         <>
           {Object.entries(grouped).map(([cat, catItems]) => (
             <div key={cat}>
@@ -2644,6 +2753,23 @@ function Inventory({ isMobile: m, items, setItems, categories, packing, showToas
           <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="e.g. Wireless Microphone" autoFocus />
           <label style={labelStyle}>Category</label>
           <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={iStyle}>{categories.map(c => <option key={c}>{c}</option>)}</select>
+          <label style={labelStyle}>Image (optional)</label>
+          <ImageUpload value={form.image_url} onChange={url => setForm(f => ({ ...f, image_url: url }))} pathPrefix="item" />
+          <p style={{ fontSize: 12, color: "#9ca3af", margin: "0 0 4px" }}>Pin design or sign art — auto-resized for the gallery. Original files are fine.</p>
+          <label style={labelStyle}>Events (optional)</label>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 160, overflowY: "auto", padding: 4 }}>
+            {events.length === 0 && <div style={{ padding: 8, fontSize: 13, color: "#9ca3af" }}>No events yet</div>}
+            {events.map(ev => {
+              const checked = form.event_ids.includes(ev.id);
+              return (
+                <label key={ev.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", cursor: "pointer", fontSize: 14, borderRadius: 6, background: checked ? "#f0f4ff" : "transparent" }}>
+                  <input type="checkbox" checked={checked} onChange={() => setForm(f => ({ ...f, event_ids: checked ? f.event_ids.filter(id => id !== ev.id) : [...f.event_ids, ev.id] }))} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  <span>{ev.name}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: 12, color: "#9ca3af", margin: "0 0 4px" }}>Assign event-specific designs (e.g. Hit Zero pins) to one or more events. Leave all unchecked for general/reusable items.</p>
           <label style={labelStyle}>Quantity</label>
           <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: Number(e.target.value) }))} style={iStyle} min={1} />
           <label style={labelStyle}>Notes (optional)</label>
@@ -2818,7 +2944,7 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 }
 
 // ─── Event Detail ─────────────────────────────────────────────────────────────
-function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
+function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, eventSignage, setEventSignage, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
   const [showDiagram, setShowDiagram] = useState(false);
   const [diagramView, setDiagramView] = useState("web"); // "web" | "imported"
@@ -2845,6 +2971,8 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [packingListTab, setPackingListTab] = useState("trailer");
   const [showScanMode, setShowScanMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [addSignageId, setAddSignageId] = useState("");
+  const [signageSaving, setSignageSaving] = useState(false);
   const [editForm, setEditForm] = useState({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
 
   useEffect(() => {
@@ -2881,21 +3009,61 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
     let cancelled = false;
     (async () => {
       try {
-        const [tr, et] = await Promise.all([api.getTrailers(), api.getEventTrailers()]);
-        if (!cancelled) { setTrailers(tr); setEventTrailers(et); }
+        const [tr, et, sg] = await Promise.all([api.getTrailers(), api.getEventTrailers(), api.getEventSignage().catch(() => null)]);
+        if (!cancelled) { setTrailers(tr); setEventTrailers(et); if (sg) setEventSignage(sg); }
       } catch { /* keep cached data */ }
     })();
     return () => { cancelled = true; };
-  }, [event.id, setTrailers, setEventTrailers]);
+  }, [event.id, setTrailers, setEventTrailers, setEventSignage]);
 
   const refreshNow = async () => {
     setRefreshing(true);
     try {
-      const [tr, et] = await Promise.all([api.getTrailers(), api.getEventTrailers()]);
-      setTrailers(tr); setEventTrailers(et);
+      const [tr, et, sg] = await Promise.all([api.getTrailers(), api.getEventTrailers(), api.getEventSignage().catch(() => null)]);
+      setTrailers(tr); setEventTrailers(et); if (sg) setEventSignage(sg);
       showToast("Refreshed");
     } catch { showToast("Couldn't refresh — check connection"); }
     finally { setRefreshing(false); }
+  };
+
+  // ── Pins & Signage (event_signage allocations) ──
+  const isPinOrSign = (item) => !!item && /pin|sign/i.test(item.category || "");
+  const itemEvents = (item) => item?.event_ids?.length ? item.event_ids : (item?.event_id ? [item.event_id] : []);
+  const thisSignage = eventSignage
+    .filter(s => s.event_id === event.id)
+    .map(s => ({ ...s, item: items.find(i => i.id === s.item_id) }))
+    .filter(s => s.item)
+    .sort((a, b) => (a.item.category || "").localeCompare(b.item.category || "") || (a.item.name || "").localeCompare(b.item.name || ""));
+  const allocatedSignageIds = new Set(thisSignage.map(s => s.item_id));
+  const brandedSuggestions = items.filter(i => isPinOrSign(i) && itemEvents(i).includes(event.id) && !allocatedSignageIds.has(i.id));
+  const addableSignage = items.filter(i => isPinOrSign(i) && !allocatedSignageIds.has(i.id));
+
+  const addSignage = async (itemId, qty = 1) => {
+    if (!itemId || allocatedSignageIds.has(itemId)) return;
+    setSignageSaving(true);
+    try {
+      const created = await api.addEventSignage({ event_id: event.id, item_id: itemId, qty_needed: qty, packed: false, returned: false });
+      setEventSignage(prev => [...prev, created[0]]);
+    } catch { showToast("Error adding — is the signage table set up?"); }
+    setSignageSaving(false);
+  };
+  const updateSignageQty = async (s, newQty) => {
+    if (newQty < 1) return;
+    try {
+      await api.updateEventSignage(s.id, { qty_needed: newQty });
+      setEventSignage(prev => prev.map(x => x.id === s.id ? { ...x, qty_needed: newQty } : x));
+    } catch { showToast("Error updating qty"); }
+  };
+  const toggleSignageField = async (s, field) => {
+    const newVal = !s[field];
+    try {
+      await api.updateEventSignage(s.id, { [field]: newVal });
+      setEventSignage(prev => prev.map(x => x.id === s.id ? { ...x, [field]: newVal } : x));
+    } catch { showToast("Error updating"); }
+  };
+  const removeSignage = async (id) => {
+    try { await api.deleteEventSignage(id); setEventSignage(prev => prev.filter(x => x.id !== id)); }
+    catch { showToast("Error removing"); }
   };
 
   const saveEdit = async () => {
@@ -3115,6 +3283,75 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           </div>
         )}
       </div>
+
+      {/* Pins & Signage */}
+      {(thisSignage.length > 0 || brandedSuggestions.length > 0 || addableSignage.length > 0) && (
+        <div className="card" style={{ padding: m ? 14 : 18 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: (thisSignage.length || brandedSuggestions.length) ? 12 : 0, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 700, fontSize: m ? 15 : 16 }}>📌 Pins &amp; Signage</div>
+            {addableSignage.length > 0 && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select value={addSignageId} onChange={e => setAddSignageId(e.target.value)} style={{ ...(m ? inputStyleMobile : inputStyle), width: "auto", maxWidth: 220 }}>
+                  <option value="">Add pin/sign…</option>
+                  {addableSignage.map(i => <option key={i.id} value={i.id}>{i.name} ({i.category})</option>)}
+                </select>
+                <button style={{ ...primaryBtn, padding: "8px 14px", fontSize: 13, opacity: (!addSignageId || signageSaving) ? 0.5 : 1 }} disabled={!addSignageId || signageSaving} onClick={async () => { const id = addSignageId; setAddSignageId(""); await addSignage(id); }}>Add</button>
+              </div>
+            )}
+          </div>
+
+          {brandedSuggestions.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: thisSignage.length ? 14 : 0 }}>
+              <span style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>Designs for this event:</span>
+              {brandedSuggestions.map(i => (
+                <button key={i.id} onClick={() => addSignage(i.id)} disabled={signageSaving} style={{ ...ghostBtn, fontSize: 12, padding: "5px 10px", display: "inline-flex", alignItems: "center", gap: 6, borderColor: "#c7d2fe", color: "#3730a3" }}>
+                  {i.image_url && <img src={i.image_url} alt="" style={{ width: 18, height: 18, objectFit: "contain", borderRadius: 3 }} />}
+                  + {i.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {thisSignage.length === 0 && brandedSuggestions.length === 0 && (
+            <div style={{ fontSize: 13, color: "#9ca3af" }}>No pins or signage added to this event yet — add one above.</div>
+          )}
+
+          {thisSignage.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {thisSignage.map(s => {
+                const branded = itemEvents(s.item).includes(event.id);
+                const qtyBtn = { width: 28, height: 30, borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", fontSize: 16, lineHeight: 1, color: "#374151", cursor: "pointer", flexShrink: 0 };
+                return (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: m ? 8 : 12, padding: "8px 10px", background: "#f8f9fb", borderRadius: 8, border: "1px solid #eef0f3", flexWrap: m ? "wrap" : "nowrap" }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 6, background: "#fff", border: "1px solid #e5e7eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                      {s.item.image_url ? <img src={s.item.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 18, color: "#d1d5db" }}>🖼️</span>}
+                    </div>
+                    <div style={{ flex: 1, minWidth: m ? 110 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{s.item.name}</span>
+                        {branded && <span className="pill" style={{ background: "#eef2ff", color: "#4338ca", fontSize: 10 }}>This event</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#9ca3af" }}>{s.item.category}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button style={qtyBtn} onClick={() => updateSignageQty(s, s.qty_needed - 1)}>−</button>
+                      <input type="number" value={s.qty_needed} onChange={e => updateSignageQty(s, Number(e.target.value))} style={{ width: 52, textAlign: "center", padding: "6px 4px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 14 }} min={1} />
+                      <button style={qtyBtn} onClick={() => updateSignageQty(s, s.qty_needed + 1)}>+</button>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      <input type="checkbox" checked={!!s.packed} onChange={() => toggleSignageField(s, "packed")} style={{ width: 16, height: 16 }} /> Packed
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      <input type="checkbox" checked={!!s.returned} onChange={() => toggleSignageField(s, "returned")} style={{ width: 16, height: 16 }} /> Returned
+                    </label>
+                    <button style={{ ...dangerBtn, padding: "5px 9px" }} onClick={() => removeSignage(s.id)}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Trailer tabs */}
       {assignedTrailers.length > 0 && (

@@ -1163,7 +1163,7 @@ function ClockPage() {
   const [kioskInput, setKioskInput] = useState("");
   const [kioskError, setKioskError] = useState("");
 
-  const [screen, setScreen] = useState("code"); // code | company | resolve | dashboard | manual | success
+  const [screen, setScreen] = useState("code"); // code | company | switch | resolve | dashboard | manual | success
   const [employee, setEmployee] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1238,6 +1238,33 @@ function ClockPage() {
       setScreen("success");
       setTimeout(reset, 3500);
     } catch { setError("Error clocking out. Please try again."); }
+    setLoading(false);
+  };
+
+  const changeCompany = async (newCo) => {
+    if (!openEntry) return;
+    const prevCo = openEntry.company || selectedCompany;
+    if (newCo === prevCo) { setScreen("dashboard"); return; }
+    setLoading(true); setError("");
+    const tnow = new Date().toISOString();
+    try {
+      await api.updateTimeEntry(openEntry.id, { clock_out: tnow, notes: openEntry.notes ? `${openEntry.notes} · Switched to ${companyLabel(newCo)}` : `Switched to ${companyLabel(newCo)}` });
+    } catch {
+      setError("Error switching company. Please try again."); setScreen("dashboard"); setLoading(false); return;
+    }
+    // Prior segment is now safely closed. Open the new one for the new company.
+    try {
+      const rows = await api.addTimeEntry({ employee_id: employee.id, clock_in: tnow, company: newCo, notes: `Continued from ${companyLabel(prevCo)}` });
+      setOpenEntry(rows[0]);
+      setSelectedCompany(newCo);
+      setSuccessMsg(`Switched to ${companyLabel(newCo)}. You're still on the clock!`);
+      setScreen("success");
+      setTimeout(reset, 3500);
+    } catch {
+      setOpenEntry(null);
+      setError(`Your ${companyLabel(prevCo)} time was saved, but starting ${companyLabel(newCo)} failed. Please tap Clock In.`);
+      setScreen("dashboard");
+    }
     setLoading(false);
   };
 
@@ -1387,6 +1414,35 @@ function ClockPage() {
     </div>
   );
 
+  if (screen === "switch") {
+    const empCompanies = employee?.companies?.length ? employee.companies : [employee?.company];
+    const others = empCompanies.filter(c => c && c !== (openEntry?.company || selectedCompany));
+    return (
+      <div style={base}>
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+            <button onClick={() => { setError(""); setScreen("dashboard"); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 0, color: "#6b7280" }}>←</button>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>Change Company</div>
+              <div style={{ fontSize: 13, color: "#6b7280" }}>You'll stay on the clock — your <span style={{ color: companyColor, fontWeight: 600 }}>{companyLabel(openEntry?.company || selectedCompany)}</span> time is saved up to now.</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {others.map(co => {
+              const color = co === "progymservices" ? "#059669" : "#2563eb";
+              return (
+                <button key={co} onClick={() => changeCompany(co)} disabled={loading} style={{ width: "100%", background: color, color: "#fff", border: "none", borderRadius: 14, padding: "18px", fontSize: 20, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1 }}>
+                  {loading ? "..." : companyLabel(co)}
+                </button>
+              );
+            })}
+            {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (screen === "dashboard") return (
     <div style={base}>
       <div style={card}>
@@ -1408,6 +1464,9 @@ function ClockPage() {
           <button onClick={clockOut} disabled={loading} style={{ width: "100%", background: "#dc2626", color: "#fff", border: "none", borderRadius: 14, padding: "18px", fontSize: 20, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>{loading ? "..." : "Clock Out"}</button>
         ) : (
           <button onClick={clockIn} disabled={loading} style={{ width: "100%", background: "#059669", color: "#fff", border: "none", borderRadius: 14, padding: "18px", fontSize: 20, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>{loading ? "..." : "Clock In"}</button>
+        )}
+        {openEntry && (employee?.companies?.length > 1) && (
+          <button onClick={() => { setError(""); setScreen("switch"); }} disabled={loading} style={{ width: "100%", background: "#fff", color: "#1a1a2e", border: "2px solid #e5e7eb", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>Change Company</button>
         )}
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <button onClick={() => setScreen("manual")} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Manual entry</button>

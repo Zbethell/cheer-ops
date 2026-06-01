@@ -137,6 +137,7 @@ const api = {
   addTimeEntry: (e) => sb("time_entries", { method: "POST", body: JSON.stringify(e) }),
   updateTimeEntry: (id, patch) => sb(`time_entries?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   getOpenEntries: (employeeId) => sb(`time_entries?employee_id=eq.${employeeId}&clock_out=is.null&order=clock_in.desc`),
+  getEmployeeEntriesSince: (employeeId, sinceIso) => sb(`time_entries?employee_id=eq.${employeeId}&clock_in=gte.${encodeURIComponent(sinceIso)}&order=clock_in`),
 };
 
 const auth = {
@@ -1233,10 +1234,13 @@ function ClockPage() {
   const [resolveEntry, setResolveEntry] = useState(null);
   const [resolveForm, setResolveForm] = useState({ date: "", time: "", notes: "" });
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const [daySummary, setDaySummary] = useState(null);
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
-  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
+  const fmtMs = (ms) => { const h = Math.floor(ms / 3600000); const mn = Math.floor((ms % 3600000) / 60000); return `${h}h ${mn}m`; };
+
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
 
   const pressDigit = (d) => {
     if (digits.length >= 4 || loading) return;
@@ -1292,10 +1296,31 @@ function ClockPage() {
     try {
       const out = new Date().toISOString();
       await api.updateTimeEntry(openEntry.id, { clock_out: out });
+
+      // Build today's per-company summary for the goodbye screen.
+      let summary = null;
+      try {
+        const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+        const todays = await api.getEmployeeEntriesSince(employee.id, dayStart.toISOString());
+        const perCo = {};
+        let totalMs = 0;
+        todays.forEach(e => {
+          if (!e.clock_out) return;
+          const ms = new Date(e.clock_out) - new Date(e.clock_in);
+          if (ms <= 0) return;
+          const co = e.company || employee.company || "—";
+          perCo[co] = (perCo[co] || 0) + ms;
+          totalMs += ms;
+        });
+        const companies = Object.entries(perCo).map(([company, ms]) => ({ company, ms }));
+        if (companies.length) summary = { companies, totalMs };
+      } catch { /* fall back to single-segment message */ }
+
+      setDaySummary(summary);
       const dur = formatDuration(openEntry.clock_in, out);
-      setSuccessMsg(`Clocked out. You worked ${dur}. See you next time!`);
+      setSuccessMsg(summary ? "Clocked out. See you next time!" : `Clocked out. You worked ${dur}. See you next time!`);
       setScreen("success");
-      setTimeout(reset, 3500);
+      setTimeout(reset, summary && summary.companies.length > 1 ? 5500 : 3500);
     } catch { setError("Error clocking out. Please try again."); }
     setLoading(false);
   };
@@ -1398,6 +1423,18 @@ function ClockPage() {
         <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
         <div style={{ fontSize: 20, fontWeight: 700, color: "#111", marginBottom: 8 }}>{employee?.name}</div>
         <div style={{ fontSize: 15, color: "#374151" }}>{successMsg}</div>
+        {daySummary && (
+          <div style={{ marginTop: 18, textAlign: "left", background: "#f8f9fb", border: "1px solid #eef0f3", borderRadius: 12, padding: "14px 16px" }}>
+            {daySummary.companies.length > 1 && daySummary.companies.map(c => (
+              <div key={c.company} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 7 }}>
+                <span>{companyLabel(c.company)}</span><span style={{ fontWeight: 600 }}>{fmtMs(c.ms)}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: "#111", borderTop: daySummary.companies.length > 1 ? "1px solid #e5e7eb" : "none", paddingTop: daySummary.companies.length > 1 ? 9 : 0 }}>
+              <span style={{ fontWeight: 600 }}>Total today</span><span style={{ fontWeight: 800 }}>{fmtMs(daySummary.totalMs)}</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

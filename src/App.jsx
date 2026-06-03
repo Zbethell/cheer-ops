@@ -82,6 +82,10 @@ const api = {
   addUserPerm: (p) => sb("user_permissions", { method: "POST", body: JSON.stringify(p) }),
   updateUserPerm: (id, patch) => sb(`user_permissions?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUserPerm: (id) => sb(`user_permissions?id=eq.${id}`, { method: "DELETE" }),
+  getAwardCalcs: () => sb("award_calculations?order=created_at.desc"),
+  addAwardCalc: (a) => sb("award_calculations", { method: "POST", body: JSON.stringify(a) }),
+  updateAwardCalc: (id, patch) => sb(`award_calculations?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteAwardCalc: (id) => sb(`award_calculations?id=eq.${id}`, { method: "DELETE" }),
   uploadDiagram: async (file, eventId, trailerId) => {
     const path = `diagram-${eventId}-${trailerId}`;
     const token = authToken || SUPABASE_KEY;
@@ -2160,7 +2164,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -2277,6 +2281,7 @@ export default function App() {
   const canViewInventory = isAdmin || ok(userPerms.can_view_inventory);
   const canViewEvents    = isAdmin || ok(userPerms.can_view_events);
   const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
+  const canViewAwards    = isAdmin || ok(userPerms.can_view_awards);
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
   const canViewContainers = isAdmin || ok(userPerms.can_view_containers);
   const canViewEmployeeHours = isAdmin || !!userPerms.can_view_employee_hours;
@@ -2325,6 +2330,7 @@ export default function App() {
           {canViewContainers && <button className={`nav-btn ${view === "containers" ? "active" : ""}`} onClick={() => setView("containers")}>Containers</button>}
           {canViewEvents && <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>}
           {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
+          {canViewAwards && <button className={`nav-btn ${view === "awards" ? "active" : ""}`} onClick={() => setView("awards")}>Awards</button>}
           {canViewEmployeeHours && <button className={`nav-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}>Employee Hours</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
           {canViewExpenses && <button className={`nav-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}>Expenses</button>}
@@ -2343,6 +2349,7 @@ export default function App() {
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
         {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
+        {view === "awards" && canViewAwards && <Awards isMobile={m} events={events} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
         {view === "expenses" && canViewExpenses && <ExpensesAdmin isMobile={m} showToast={showToast} />}
@@ -2356,6 +2363,7 @@ export default function App() {
           {canViewContainers && <button className={`tab-btn ${view === "containers" ? "active" : ""}`} onClick={() => setView("containers")}><span className="tab-icon">🗃️</span>Containers</button>}
           {canViewEvents && <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>}
           {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
+          {canViewAwards && <button className={`tab-btn ${view === "awards" ? "active" : ""}`} onClick={() => setView("awards")}><span className="tab-icon">🏅</span>Awards</button>}
           {canViewEmployeeHours && <button className={`tab-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}><span className="tab-icon">⏱️</span>Hours</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
           {canViewExpenses && <button className={`tab-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}><span className="tab-icon">💳</span>Expenses</button>}
@@ -2878,6 +2886,497 @@ function EventFormFields({ form, setForm, isMobile: m }) {
 }
 
 // ─── Events List ──────────────────────────────────────────────────────────────
+// ─── Awards (Banners, Pins & Medals) ─────────────────────────────────────────
+// Rated divisions get Outstanding/Excellent/Superior pins instead of banners/medals.
+const RATED_KEYWORDS = ["Novice", "U6 Prep", "U8 Prep"];
+const AWARD_TYPES = {
+  competitive:   { label: "Banners + Medals",  color: "#2563eb", bg: "#eff6ff",
+    desc: "Standard placement awards: 1st–5th place banners (plus an Outstanding Performance banner for each team beyond the 5th), and enough medals for the largest team at each podium spot. Athletes also get a Hit Zero pin." },
+  rated:         { label: "Rated Pins",         color: "#7c3aed", bg: "#f5f3ff",
+    desc: "Rated/developmental divisions (Novice, U6/U8 Prep). Every athlete earns a rating pin — Outstanding, Excellent, or Superior — so enough of each type is brought for all athletes. No banners, medals, or Hit Zero pins." },
+  participation: { label: "Participation only", color: "#059669", bg: "#ecfdf5",
+    desc: "No placement or rating awards, but athletes still receive a Hit Zero participation pin. Counts toward Hit Zero pins only." },
+  excluded:      { label: "Excluded",           color: "#6b7280", bg: "#f3f4f6",
+    desc: "Left out of every count, including Hit Zero pins. Use for divisions that shouldn't receive anything (e.g. exhibition or guest teams)." },
+};
+
+const awardNum = (v) => {
+  const n = parseInt(String(v ?? "").replace(/[^0-9-]/g, ""), 10);
+  return isNaN(n) ? 0 : n;
+};
+
+const defaultClassification = (division) =>
+  RATED_KEYWORDS.some(k => division.includes(k)) ? "rated" : "competitive";
+
+// rows: [{ program, team, division, athletes, crossovers }] → one entry per division
+function aggregateDivisions(rows) {
+  const map = {};
+  for (const r of rows) {
+    const division = String(r.division || "").trim();
+    if (!division) continue;
+    const size = awardNum(r.athletes) + awardNum(r.crossovers);
+    if (!map[division]) map[division] = { division, teams: [] };
+    map[division].teams.push({ name: `${r.program || "?"} / ${r.team || "?"}`, size });
+  }
+  return Object.values(map).map(d => ({
+    division: d.division,
+    teams: d.teams,
+    teamCount: d.teams.length,
+    athletes: d.teams.reduce((s, t) => s + t.size, 0),       // athletes + crossovers
+    largest: d.teams.reduce((mx, t) => Math.max(mx, t.size), 0),
+  })).sort((a, b) => a.division.localeCompare(b.division));
+}
+
+// One banner per placement that has enough teams; (teams − 5) Outstanding-Performance banners beyond 5th.
+const bannersFor = (t) => ({
+  first: t >= 1 ? 1 : 0, second: t >= 2 ? 1 : 0, third: t >= 3 ? 1 : 0,
+  fourth: t >= 4 ? 1 : 0, fifth: t >= 5 ? 1 : 0, op: t > 5 ? t - 5 : 0,
+});
+// Enough medals for the largest team at each placement that exists.
+const medalsFor = (t, largest) => ({
+  first: largest, second: t >= 2 ? largest : 0, third: t >= 3 ? largest : 0,
+});
+const addInto = (target, src) => { Object.keys(src).forEach(k => target[k] = (target[k] || 0) + src[k]); };
+
+// Banner/medal/pin math.
+//   classifications: { [division]: "competitive"|"rated"|"participation"|"excluded" }
+//   splits: { [division]: [{ suffix, teamCount, largest }] } — competitive divisions broken into sub-divisions
+function computeAwards(divisions, classifications, splits = {}, days = 1) {
+  const banners = { first: 0, second: 0, third: 0, fourth: 0, fifth: 0, op: 0 };
+  const medals = { first: 0, second: 0, third: 0 };
+  let ratedPerType = 0, hitZeroPerDay = 0;
+  const detail = [];
+  for (const d of divisions) {
+    const cls = classifications[d.division] || defaultClassification(d.division);
+    const row = { ...d, classification: cls, banners: null, medals: null, ratedPerType: 0, splits: null };
+    if (cls === "competitive" || cls === "participation") hitZeroPerDay += d.athletes;  // Hit Zero pin per athlete (+crossovers); rated divisions get rating pins instead
+    if (cls === "competitive") {
+      row.banners = { first: 0, second: 0, third: 0, fourth: 0, fifth: 0, op: 0 };
+      row.medals = { first: 0, second: 0, third: 0 };
+      const parts = (splits[d.division] && splits[d.division].length >= 2) ? splits[d.division] : null;
+      if (parts) {
+        row.splits = parts.map(p => {
+          const t = awardNum(p.teamCount), lg = awardNum(p.largest);
+          const b = bannersFor(t), md = medalsFor(t, lg);
+          addInto(row.banners, b); addInto(row.medals, md);
+          return { suffix: p.suffix, teamCount: t, largest: lg, banners: b, medals: md };
+        });
+      } else {
+        addInto(row.banners, bannersFor(d.teamCount));
+        addInto(row.medals, medalsFor(d.teamCount, d.largest));
+      }
+      addInto(banners, row.banners); addInto(medals, row.medals);
+    } else if (cls === "rated") {
+      row.ratedPerType = d.athletes;                          // enough of EACH type for all athletes
+      ratedPerType += d.athletes;
+    }
+    detail.push(row);
+  }
+  return {
+    banners, medals, ratedPerType, ratedTotal: ratedPerType * 3,
+    hitZeroPerDay, days, hitZero: hitZeroPerDay * days,
+    bannerTotal: Object.values(banners).reduce((a, b) => a + b, 0),
+    medalTotal: Object.values(medals).reduce((a, b) => a + b, 0),
+    detail,
+  };
+}
+
+// Even split of team count; each split's largest defaults to the whole division's largest team
+// (a safe over-estimate for medals — a few extra beats a shortfall). Adjustable per split.
+function defaultSplit(division, n) {
+  const total = division.teamCount || 0;
+  const base = Math.floor(total / n), rem = total % n;
+  return Array.from({ length: n }, (_, i) => ({
+    suffix: String.fromCharCode(65 + i),
+    teamCount: base + (i < rem ? 1 : 0),
+    largest: division.largest || 0,
+  }));
+}
+
+// "1st, 2nd, 3rd + N OP" label for a banner breakdown.
+const bannerLabel = (b) => {
+  const parts = [];
+  ["first", "second", "third", "fourth", "fifth"].forEach((k, i) => { if (b[k]) parts.push(`${i + 1}${["st", "nd", "rd", "th", "th"][i]}`); });
+  if (b.op) parts.push(`${b.op} OP`);
+  return parts.join(", ") || "—";
+};
+
+function Awards({ isMobile: m, events, showToast }) {
+  const [divisions, setDivisions] = useState([]);
+  const [classifications, setClassifications] = useState({});
+  const [splits, setSplits] = useState({});
+  const [splitFor, setSplitFor] = useState(null);   // division being split in the modal
+  const [splitRows, setSplitRows] = useState([]);
+  const [twoDay, setTwoDay] = useState(false);      // 2-day event → Hit Zero pin per athlete per day
+  const [showHelp, setShowHelp] = useState(false);  // award-type guide above the division list
+  const [fileName, setFileName] = useState("");
+  const [eventId, setEventId] = useState("");
+  const [label, setLabel] = useState("");
+  const [saved, setSaved] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef();
+
+  useEffect(() => { api.getAwardCalcs().then(setSaved).catch(() => {}); }, []);
+
+  const result = computeAwards(divisions, classifications, splits, twoDay ? 2 : 1);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setError("");
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!json.length) { setError("No rows found in that file."); return; }
+      const keys = Object.keys(json[0]);
+      const find = (...names) =>
+        keys.find(k => names.some(n => k.trim().toLowerCase() === n)) ||
+        keys.find(k => names.some(n => k.trim().toLowerCase().includes(n)));
+      const kProgram = find("program", "gym"), kTeam = find("team"), kDivision = find("division");
+      const kAth = find("athletes", "athlete"), kCross = find("crossovers", "crossover");
+      if (!kDivision || !kAth) { setError("Couldn't find 'Division' and 'Athletes' columns. Is this the Themis export?"); return; }
+      const parsed = json.map(r => ({
+        program: r[kProgram], team: r[kTeam], division: r[kDivision],
+        athletes: r[kAth], crossovers: kCross ? r[kCross] : 0,
+      })).filter(r => String(r.division).trim());
+      const divs = aggregateDivisions(parsed);
+      const cls = {};
+      divs.forEach(d => { cls[d.division] = defaultClassification(d.division); });
+      setDivisions(divs); setClassifications(cls); setSplits({}); setTwoDay(false); setFileName(file.name); setLabel("");
+    } catch (e) {
+      setError("Could not read file: " + (e.message || e));
+    }
+  };
+
+  const setCls = (division, val) => setClassifications(c => ({ ...c, [division]: val }));
+
+  const openSplit = (d) => {
+    const existing = splits[d.division];
+    setSplitRows(existing && existing.length >= 2 ? existing.map(x => ({ ...x })) : defaultSplit(d, 2));
+    setSplitFor(d);
+  };
+  const changeSplitCount = (n) => { if (splitFor) setSplitRows(defaultSplit(splitFor, n)); };
+  const updateSplitRow = (i, key, val) => setSplitRows(rows => rows.map((r, j) => j === i ? { ...r, [key]: val } : r));
+  const saveSplit = () => {
+    setSplits(s => ({ ...s, [splitFor.division]: splitRows.map(r => ({ suffix: r.suffix, teamCount: awardNum(r.teamCount), largest: awardNum(r.largest) })) }));
+    setSplitFor(null);
+  };
+  const removeSplit = () => { setSplits(s => { const n = { ...s }; delete n[splitFor.division]; return n; }); setSplitFor(null); };
+
+  const save = async () => {
+    if (!divisions.length) return;
+    setSaving(true);
+    try {
+      const created = await api.addAwardCalc({
+        event_id: eventId ? String(eventId) : null,
+        label: label.trim() || fileName || "Untitled",
+        source_filename: fileName,
+        classifications,
+        splits,
+        results: result,
+      });
+      setSaved(s => [created[0], ...s]);
+      showToast("Calculation saved");
+    } catch (e) {
+      const msg = String(e?.message || e);
+      const hint = /column|schema cache/i.test(msg) ? "table schema is out of date — run the latest SQL"
+        : /relation|does not exist/i.test(msg) ? "award_calculations table not found — run the SQL"
+        : msg.slice(0, 120);
+      showToast("Save failed: " + hint);
+    }
+    setSaving(false);
+  };
+
+  const loadSaved = (s) => {
+    const divs = (s.results?.detail || []).map(d => ({
+      division: d.division, teams: d.teams || [], teamCount: d.teamCount,
+      athletes: d.athletes, largest: d.largest,
+    }));
+    setDivisions(divs);
+    setClassifications(s.classifications || {});
+    setSplits(s.splits || {});
+    setTwoDay(!!s.results?.days && s.results.days >= 2);
+    setFileName(s.source_filename || "");
+    setLabel(s.label || "");
+    setEventId(s.event_id || "");
+  };
+
+  const deleteSaved = async (id) => {
+    try { await api.deleteAwardCalc(id); setSaved(s => s.filter(x => x.id !== id)); showToast("Deleted"); }
+    catch { showToast("Delete failed"); }
+  };
+
+  const downloadSummary = () => {
+    const rows = [["Division", "Award Type", "Teams", "Largest Team", "Athletes",
+      "1st Banner", "2nd Banner", "3rd Banner", "4th Banner", "5th Banner", "OP Banners",
+      "Medals 1/2/3", "Rated pins (each type)"]];
+    const lineFor = (name, type, teamCount, largest, athletes, b, md, rated) => [
+      name, type, teamCount, largest, athletes,
+      b?.first || 0, b?.second || 0, b?.third || 0, b?.fourth || 0, b?.fifth || 0, b?.op || 0,
+      md ? `${md.first}/${md.second}/${md.third}` : "", rated || "",
+    ];
+    result.detail.forEach(d => {
+      if (d.splits) {
+        d.splits.forEach(sp => rows.push(lineFor(`${d.division} ${sp.suffix}`, "Banners + Medals (split)", sp.teamCount, sp.largest, "", sp.banners, sp.medals, "")));
+      } else {
+        rows.push(lineFor(d.division, AWARD_TYPES[d.classification].label, d.teamCount, d.largest, d.athletes, d.banners, d.medals, d.ratedPerType));
+      }
+    });
+    rows.push([]);
+    rows.push(["SUMMARY TOTALS", "Quantity"]);
+    rows.push(["Banner - 1st place", result.banners.first]);
+    rows.push(["Banner - 2nd place", result.banners.second]);
+    rows.push(["Banner - 3rd place", result.banners.third]);
+    rows.push(["Banner - 4th place", result.banners.fourth]);
+    rows.push(["Banner - 5th place", result.banners.fifth]);
+    rows.push(["Banner - Outstanding Performance", result.banners.op]);
+    rows.push(["Banner - TOTAL", result.bannerTotal]);
+    rows.push(["Medal - 1st place", result.medals.first]);
+    rows.push(["Medal - 2nd place", result.medals.second]);
+    rows.push(["Medal - 3rd place", result.medals.third]);
+    rows.push(["Medal - TOTAL", result.medalTotal]);
+    rows.push(["Rated pin - Outstanding", result.ratedPerType]);
+    rows.push(["Rated pin - Excellent", result.ratedPerType]);
+    rows.push(["Rated pin - Superior", result.ratedPerType]);
+    rows.push(["Rated pin - TOTAL", result.ratedTotal]);
+    rows.push([result.days >= 2 ? `Hit Zero pin (${result.hitZeroPerDay} athletes x ${result.days} days)` : "Hit Zero pin (1 per athlete)", result.hitZero]);
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `awards-${(label || fileName || "summary").replace(/\W+/g, "-")}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const stat = (title, big, sub, accent) => (
+    <div className="card" style={{ padding: m ? "14px 16px" : "16px 18px", flex: "1 1 180px", minWidth: 150 }}>
+      <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 500, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: m ? 26 : 30, fontWeight: 700, color: accent || "#1a1a2e", lineHeight: 1.1 }}>{big}</div>
+      {sub && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 1.5 }}>{sub}</div>}
+    </div>
+  );
+
+  const cell = (cLabel, value, accent) => (
+    <div key={cLabel} style={{ textAlign: "center", flex: "1 0 auto", minWidth: 38 }}>
+      <div style={{ fontSize: m ? 19 : 22, fontWeight: 700, color: value ? accent : "#d1d5db", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>{cLabel}</div>
+    </div>
+  );
+
+  const breakdownCard = (title, total, cells, accent) => (
+    <div className="card" style={{ padding: m ? "14px 16px" : "16px 18px", flex: "1 1 260px", minWidth: 220 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500 }}>{title}</span>
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>total <b style={{ color: accent, fontSize: 14 }}>{total}</b></span>
+      </div>
+      <div style={{ display: "flex", gap: m ? 4 : 8 }}>{cells}</div>
+    </div>
+  );
+
+  const clsSelect = (d) => (
+    <select value={d.classification} onChange={e => setCls(d.division, e.target.value)}
+      style={{ ...inputStyle, padding: "6px 8px", fontSize: 13, width: m ? "100%" : 168, background: AWARD_TYPES[d.classification].bg, color: AWARD_TYPES[d.classification].color, fontWeight: 500, border: `1px solid ${AWARD_TYPES[d.classification].color}33` }}>
+      {Object.entries(AWARD_TYPES).map(([k, v]) => <option key={k} value={k} style={{ color: "#111", background: "#fff" }}>{v.label}</option>)}
+    </select>
+  );
+
+  const outputText = (d) => {
+    if (d.classification === "competitive")
+      return `Banners: ${bannerLabel(d.banners)} · Medals — 1st ${d.medals.first}, 2nd ${d.medals.second}, 3rd ${d.medals.third}`;
+    if (d.classification === "rated") return `Rated: ${d.ratedPerType} × Outstanding/Excellent/Superior`;
+    if (d.classification === "participation") return `Participation: ${d.athletes} Hit Zero pins`;
+    return "Excluded — no awards";
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 16 }}>
+      <div>
+        <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Banners, Pins &amp; Medals</h1>
+        <p style={{ color: "#6b7280", fontSize: 14 }}>Upload a Themis registration export to calculate award quantities.</p>
+      </div>
+
+      {/* Upload */}
+      <div className="card" style={{ padding: m ? 16 : 20, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+          onChange={e => handleFile(e.target.files[0])} />
+        <button style={{ ...primaryBtn, padding: "10px 18px" }} onClick={() => fileRef.current?.click()}>
+          {fileName ? "Replace file" : "Upload Themis export"}
+        </button>
+        <div style={{ fontSize: 13, color: fileName ? "#374151" : "#9ca3af" }}>
+          {fileName ? `${fileName} · ${divisions.length} divisions` : "Accepts .csv or .xlsx"}
+        </div>
+        {error && <div style={{ fontSize: 13, color: "#dc2626", width: "100%" }}>{error}</div>}
+      </div>
+
+      {divisions.length > 0 && (
+        <>
+          {/* Event options */}
+          <div className="card" style={{ padding: m ? "12px 14px" : "12px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div onClick={() => setTwoDay(v => !v)}
+              style={{ width: 42, height: 24, borderRadius: 99, cursor: "pointer", flexShrink: 0, background: twoDay ? "#059669" : "#e5e7eb", position: "relative", transition: "background 0.2s" }}>
+              <div style={{ position: "absolute", top: 3, left: twoDay ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>2-day event</div>
+              <div style={{ fontSize: 12, color: "#9ca3af" }}>Athletes can Hit Zero each day — doubles Hit Zero pins only.</div>
+            </div>
+          </div>
+
+          {/* Totals */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: m ? 10 : 12 }}>
+            {breakdownCard("Banners", result.bannerTotal, [
+              cell("1st", result.banners.first, "#2563eb"), cell("2nd", result.banners.second, "#2563eb"),
+              cell("3rd", result.banners.third, "#2563eb"), cell("4th", result.banners.fourth, "#2563eb"),
+              cell("5th", result.banners.fifth, "#2563eb"), cell("OP", result.banners.op, "#2563eb"),
+            ], "#2563eb")}
+            {breakdownCard("Medals", result.medalTotal, [
+              cell("1st", result.medals.first, "#d97706"), cell("2nd", result.medals.second, "#d97706"),
+              cell("3rd", result.medals.third, "#d97706"),
+            ], "#d97706")}
+            {stat("Rated Pins", result.ratedTotal,
+              `${result.ratedPerType} each of Outstanding / Excellent / Superior`, "#7c3aed")}
+            {stat("Hit Zero Pins", result.hitZero,
+              twoDay ? `${result.hitZeroPerDay} athletes × 2 days (incl. crossovers)` : "1 per athlete (incl. crossovers)", "#059669")}
+          </div>
+
+          {/* Save bar */}
+          <div className="card" style={{ padding: m ? 14 : 16, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <select value={eventId} onChange={e => setEventId(e.target.value)} style={{ ...inputStyle, width: m ? "100%" : 200 }}>
+              <option value="">No event (just calculate)</option>
+              {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Label (optional)"
+              style={{ ...inputStyle, width: m ? "100%" : 200 }} />
+            <button style={{ ...primaryBtn, padding: "9px 16px" }} onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button style={{ ...ghostBtn }} onClick={downloadSummary}>Download CSV</button>
+          </div>
+
+          {/* Divisions */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 600 }}>Divisions <span style={{ color: "#9ca3af", fontWeight: 400 }}>({result.detail.length})</span></h2>
+            <button style={{ ...ghostBtn, fontSize: 12 }} onClick={() => setShowHelp(v => !v)}>{showHelp ? "Hide guide" : "ⓘ Award types"}</button>
+          </div>
+          {showHelp && (
+            <div className="card" style={{ padding: m ? 14 : 16, display: "flex", flexDirection: "column", gap: 12 }}>
+              {Object.entries(AWARD_TYPES).map(([k, v]) => (
+                <div key={k} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span className="pill" style={{ background: v.bg, color: v.color, fontSize: 11, flexShrink: 0, marginTop: 1, whiteSpace: "nowrap" }}>{v.label}</span>
+                  <span style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.5 }}>{v.desc}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Division table */}
+          <div className="card" style={{ overflow: "hidden" }}>
+            {result.detail.map((d, i) => (
+              <div key={d.division} style={{ padding: m ? "12px 14px" : "12px 18px", borderBottom: i < result.detail.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: m ? 8 : 12 }}>
+                  <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {d.division}
+                      {d.splits && <span className="pill" style={{ background: "#eef2ff", color: "#4338ca", fontSize: 11 }}>split ×{d.splits.length}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+                      {d.teamCount} team{d.teamCount !== 1 ? "s" : ""} · largest {d.largest} · {d.athletes} athletes
+                    </div>
+                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>{outputText(d)}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0, width: m ? "100%" : "auto" }}>
+                    {d.classification === "competitive" &&
+                      <button style={{ ...ghostBtn, fontSize: 12 }} onClick={() => openSplit(d)}>{d.splits ? "Edit split" : "Split"}</button>}
+                    {clsSelect(d)}
+                  </div>
+                </div>
+                {d.splits && (
+                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3, paddingLeft: m ? 0 : 4 }}>
+                    {d.splits.map(sp => (
+                      <div key={sp.suffix} style={{ fontSize: 12, color: "#6b7280" }}>
+                        <b style={{ color: "#374151" }}>{d.division} {sp.suffix}</b> — {sp.teamCount} team{sp.teamCount !== 1 ? "s" : ""}, largest {sp.largest} · Banners {bannerLabel(sp.banners)} · Medals {sp.medals.first}/{sp.medals.second}/{sp.medals.third}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Saved calculations */}
+      {saved.length > 0 && (
+        <div>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: "8px 0 10px" }}>Saved calculations</h2>
+          <div className="card" style={{ overflow: "hidden" }}>
+            {saved.map((s, i) => {
+              const evt = events.find(e => String(e.id) === String(s.event_id));
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: m ? "12px 14px" : "12px 18px",
+                  borderBottom: i < saved.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{evt ? evt.name : (s.label || "Untitled")}</div>
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+                      {evt && (s.source_filename || s.label) ? `${s.source_filename || s.label} · ` : ""}{s.results?.bannerTotal ?? 0} banners · {s.results?.medalTotal ?? 0} medals · {s.results?.hitZero ?? 0} pins
+                    </div>
+                  </div>
+                  <button style={{ ...ghostBtn, fontSize: 12 }} onClick={() => loadSaved(s)}>Load</button>
+                  <button style={dangerBtn} onClick={() => deleteSaved(s.id)}>Delete</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Split modal */}
+      {splitFor && (() => {
+        const assigned = splitRows.reduce((s, r) => s + awardNum(r.teamCount), 0);
+        const matches = assigned === splitFor.teamCount;
+        const numInput = { ...inputStyle, width: 84, padding: "7px 10px" };
+        const fieldLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#6b7280" };
+        return (
+          <Modal title={`Split: ${splitFor.division}`} onClose={() => setSplitFor(null)} onSave={saveSplit} saveLabel="Apply split" isMobile={m}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginTop: -4 }}>
+              {splitFor.teamCount} teams · largest {splitFor.largest}. Each split is awarded as its own division.
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#374151", fontWeight: 500, marginBottom: 6 }}>Number of splits</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[2, 3, 4, 5, 6].map(n => (
+                  <button key={n} onClick={() => changeSplitCount(n)}
+                    style={{ ...(splitRows.length === n ? primaryBtn : ghostBtn), padding: "8px 18px" }}>{n}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: matches ? "#059669" : "#dc2626", fontWeight: 500 }}>
+              {assigned} of {splitFor.teamCount} teams assigned{matches ? " ✓" : " — adjust so the totals match"}
+            </div>
+            {splitRows.map((r, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, minWidth: 56, paddingBottom: 8 }}>Split {r.suffix}</div>
+                <label style={fieldLabel}>Teams
+                  <input type="number" min="0" value={r.teamCount} onChange={e => updateSplitRow(i, "teamCount", e.target.value)} style={numInput} />
+                </label>
+                <label style={fieldLabel}>Largest team
+                  <input type="number" min="0" value={r.largest} onChange={e => updateSplitRow(i, "largest", e.target.value)} style={numInput} />
+                </label>
+              </div>
+            ))}
+            <div style={{ fontSize: 12, color: "#9ca3af", lineHeight: 1.5 }}>
+              "Largest team" sets the medal count for each split — pre-filled with the division's largest team so you never run short. Lower it for any split you know is smaller.
+            </div>
+            {splits[splitFor.division] &&
+              <button style={{ ...dangerBtn, alignSelf: "flex-start" }} onClick={removeSplit}>Remove split</button>}
+          </Modal>
+        );
+      })()}
+    </div>
+  );
+}
+
 function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrailers, setEventTrailers, setView, setSelectedEventId, showToast }) {
   const [showModal, setShowModal] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
@@ -6055,7 +6554,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false });
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -6066,13 +6565,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses, can_view_awards: user.can_view_awards !== false });
     setEditUser(user);
     setShowModal(true);
   };
@@ -6082,11 +6581,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -6116,6 +6615,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     { key: "can_view_employee_hours", label: "Employee Hours",         sub: "Time tracking and employee hours" },
     { key: "can_view_pro",            label: "PRO Sales CRM",          sub: "Access to the PRO Sales CRM" },
     { key: "can_view_expenses",       label: "Expenses",               sub: "Expense submission review and approval" },
+    { key: "can_view_awards",         label: "Awards",                 sub: "Banner, pin & medal calculator" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
@@ -6179,6 +6679,8 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
                 {user.can_view_tech && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Tech Setups</span>}
                 {user.can_view_employee_hours && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Employee Hours</span>}
                 {user.can_view_pro && <span className="pill" style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 11 }}>PRO Sales</span>}
+                {user.can_view_expenses && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Expenses</span>}
+                {user.can_view_awards !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Awards</span>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

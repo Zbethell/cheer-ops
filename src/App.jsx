@@ -3510,10 +3510,20 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [addSignageId, setAddSignageId] = useState("");
   const [signageSaving, setSignageSaving] = useState(false);
   const [editForm, setEditForm] = useState({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
+  const [awardCalc, setAwardCalc] = useState(null);   // most recent saved award calculation for this event
 
   useEffect(() => {
     setEditForm({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
   }, [event]);
+
+  // Pull the latest saved Awards calculation for this event (read-only "needed" reference for packing).
+  useEffect(() => {
+    let cancelled = false;
+    api.getAwardCalcs()
+      .then(rows => { if (!cancelled) setAwardCalc(rows.find(r => String(r.event_id) === String(event.id)) || null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [event.id]);
 
   // Trailers assigned to this event
   const assignedEventTrailers = eventTrailers.filter(et => et.event_id === event.id);
@@ -3819,6 +3829,22 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           </div>
         )}
       </div>
+
+      {/* Hit Zero pins to pack — read-only "needed" quantity from the saved Awards calculation */}
+      {awardCalc?.results && (() => {
+        const r = awardCalc.results;
+        return (
+          <div className="card" style={{ padding: m ? 14 : 18, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: m ? 15 : 16 }}>🏅 Hit Zero Pins to Pack</div>
+              <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>
+                from {awardCalc.source_filename || awardCalc.label || "saved calc"}{r.days >= 2 ? ` · ${r.hitZeroPerDay} × 2 days` : ""}
+              </div>
+            </div>
+            <div style={{ fontSize: m ? 32 : 38, fontWeight: 700, color: "#059669", lineHeight: 1 }}>{r.hitZero ?? 0}</div>
+          </div>
+        );
+      })()}
 
       {/* Pins & Signage */}
       {(thisSignage.length > 0 || brandedSuggestions.length > 0 || addableSignage.length > 0) && (

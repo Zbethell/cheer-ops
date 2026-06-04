@@ -875,6 +875,12 @@ const formatDuration = (start, end = new Date()) => {
 };
 const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
 const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "—";
+// Semi-monthly pay periods: the 1st–15th, then the 16th–end of month.
+const payPeriodRange = (d = new Date()) => {
+  const y = d.getFullYear(), m = d.getMonth();
+  if (d.getDate() <= 15) return { start: new Date(y, m, 1, 0, 0, 0, 0), end: new Date(y, m, 15, 23, 59, 59, 999) };
+  return { start: new Date(y, m, 16, 0, 0, 0, 0), end: new Date(y, m + 1, 0, 23, 59, 59, 999) };
+};
 
 function ItemSearchInput({ items, value, onChange, placeholder = "Search items...", style = {} }) {
   const [query, setQuery] = useState("");
@@ -1239,12 +1245,13 @@ function ClockPage() {
   const [resolveForm, setResolveForm] = useState({ date: "", time: "", notes: "" });
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [daySummary, setDaySummary] = useState(null);
+  const [timesheet, setTimesheet] = useState(null);
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
   const fmtMs = (ms) => { const h = Math.floor(ms / 3600000); const mn = Math.floor((ms % 3600000) / 60000); return `${h}h ${mn}m`; };
 
-  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setTimesheet(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
 
   const pressDigit = (d) => {
     if (digits.length >= 4 || loading) return;
@@ -1392,6 +1399,43 @@ function ClockPage() {
     setLoading(false);
   };
 
+  const viewHours = async () => {
+    if (!employee) return;
+    setLoading(true); setError("");
+    try {
+      const { start, end } = payPeriodRange();
+      const rows = await api.getEmployeeEntriesSince(employee.id, start.toISOString());
+      const entries = rows
+        .filter(e => { const ci = new Date(e.clock_in); return ci >= start && ci <= end; })
+        .sort((a, b) => new Date(a.clock_in) - new Date(b.clock_in));
+      const perCo = {};
+      let totalMs = 0;
+      entries.forEach(e => {
+        const endTs = e.clock_out ? new Date(e.clock_out) : new Date();
+        const ms = Math.max(0, endTs - new Date(e.clock_in));
+        const co = e.company || employee.company || "—";
+        perCo[co] = (perCo[co] || 0) + ms;
+        totalMs += ms;
+      });
+      setTimesheet({
+        entries,
+        perCo: Object.entries(perCo).map(([company, ms]) => ({ company, ms })),
+        totalMs,
+        label: `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric" })}`,
+      });
+      setScreen("hours");
+    } catch { setError("Couldn't load your hours. Please try again."); }
+    setLoading(false);
+  };
+
+  // Return from the hours view to wherever the employee came from. If they're a
+  // multi-company employee who hasn't picked a company yet, send them back to that step.
+  const backFromHours = () => {
+    setError("");
+    const multi = (employee?.companies?.length || 0) > 1;
+    setScreen(openEntry || selectedCompany || !multi ? "dashboard" : "company");
+  };
+
   const numPad = [1,2,3,4,5,6,7,8,9,"←",0,"✓"];
   const companyColor = (selectedCompany || employee?.company) === "progymservices" ? "#059669" : "#2563eb";
 
@@ -1460,7 +1504,8 @@ function ClockPage() {
             );
           })}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
+          <button onClick={viewHours} disabled={loading} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline", opacity: loading ? 0.6 : 1 }}>📋 View my hours</button>
           <button onClick={reset} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Not you?</button>
         </div>
       </div>
@@ -1543,6 +1588,57 @@ function ClockPage() {
     );
   }
 
+  if (screen === "hours") return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <button onClick={backFromHours} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 0, color: "#6b7280" }}>←</button>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 17 }}>My Hours</div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name} · Pay period {timesheet?.label}</div>
+          </div>
+        </div>
+        {(!timesheet || timesheet.entries.length === 0) ? (
+          <div style={{ textAlign: "center", color: "#6b7280", fontSize: 14, padding: "28px 0" }}>No time entries this pay period yet.</div>
+        ) : (
+          <>
+            <div style={{ maxHeight: 320, overflowY: "auto", margin: "0 -4px 16px", padding: "0 4px" }}>
+              {timesheet.entries.map(e => {
+                const open = !e.clock_out;
+                const co = e.company || employee?.company;
+                const color = co === "progymservices" ? "#059669" : co === "evo" ? "#7c3aed" : "#2563eb";
+                return (
+                  <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f1f4" }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#111" }}>{fmtDate(e.clock_in)}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                        <span style={{ color, fontWeight: 600 }}>{companyLabel(co)}</span> · {fmtTime(e.clock_in)} → {open ? "now" : fmtTime(e.clock_out)}
+                        {e.needs_review && <span style={{ color: "#b45309", fontWeight: 600 }}> · pending review</span>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: open ? "#059669" : "#111", whiteSpace: "nowrap", marginLeft: 10 }}>{open ? formatDuration(e.clock_in, now) : formatDuration(e.clock_in, e.clock_out)}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ background: "#f8f9fb", border: "1px solid #eef0f3", borderRadius: 12, padding: "14px 16px" }}>
+              {timesheet.perCo.length > 1 && timesheet.perCo.map(c => (
+                <div key={c.company} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 7 }}>
+                  <span>{companyLabel(c.company)}</span><span style={{ fontWeight: 600 }}>{fmtMs(c.ms)}</span>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: "#111", borderTop: timesheet.perCo.length > 1 ? "1px solid #e5e7eb" : "none", paddingTop: timesheet.perCo.length > 1 ? 9 : 0 }}>
+                <span style={{ fontWeight: 600 }}>Total this period</span><span style={{ fontWeight: 800 }}>{fmtMs(timesheet.totalMs)}</span>
+              </div>
+            </div>
+          </>
+        )}
+        {error && <div style={{ color: "#dc2626", fontSize: 13, textAlign: "center", marginTop: 12 }}>{error}</div>}
+        <button onClick={backFromHours} style={{ width: "100%", marginTop: 16, background: "#fff", color: "#1a1a2e", border: "2px solid #e5e7eb", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Back</button>
+      </div>
+    </div>
+  );
+
   if (screen === "dashboard") return (
     <div style={base}>
       <div style={card}>
@@ -1568,6 +1664,7 @@ function ClockPage() {
         {openEntry && (employee?.companies?.length > 1) && (
           <button onClick={() => { setError(""); setScreen("switch"); }} disabled={loading} style={{ width: "100%", background: "#fff", color: "#1a1a2e", border: "2px solid #e5e7eb", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>Change Company</button>
         )}
+        <button onClick={viewHours} disabled={loading} style={{ width: "100%", background: "#fff", color: "#1a1a2e", border: "2px solid #e5e7eb", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>📋 View My Hours</button>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <button onClick={() => setScreen("manual")} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Manual entry</button>
           <button onClick={reset} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Not you?</button>

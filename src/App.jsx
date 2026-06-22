@@ -2453,10 +2453,10 @@ export default function App() {
 
       <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
         {view === "dashboard" && canViewDashboard && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
-        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} events={events} packing={packing} kits={kits} setKits={setKits} kitItems={kitItems} setKitItems={setKitItems} showToast={showToast} />}
+        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} events={events} packing={packing} kits={kits} setKits={setKits} kitItems={kitItems} setKitItems={setKitItems} containers={containers} containerItems={containerItems} showToast={showToast} />}
         {view === "containers" && canViewContainers && <ContainersPage isMobile={m} containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} />}
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} kits={kits} kitItems={kitItems} setView={setView} showToast={showToast} />}
+        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} setContainerItems={setContainerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} kits={kits} kitItems={kitItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "awards" && canViewAwards && <Awards isMobile={m} events={events} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
@@ -2670,7 +2670,7 @@ function ContainersPage({ isMobile: m, containers, setContainers, containerItems
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-function Inventory({ isMobile: m, items, setItems, categories, events, packing, kits, setKits, kitItems, setKitItems, showToast }) {
+function Inventory({ isMobile: m, items, setItems, categories, events, packing, kits, setKits, kitItems, setKitItems, containers, containerItems, showToast }) {
   const [search, setSearch] = useState("");
   const [showPresets, setShowPresets] = useState(false);
   const [filterCat, setFilterCat] = useState("All");
@@ -2971,7 +2971,7 @@ function Inventory({ isMobile: m, items, setItems, categories, events, packing, 
       )}
 
       {showPresets && (
-        <PresetsManager isMobile={m} items={items} categories={categories} kits={kits} setKits={setKits} kitItems={kitItems} setKitItems={setKitItems} onClose={() => setShowPresets(false)} showToast={showToast} />
+        <PresetsManager isMobile={m} items={items} categories={categories} kits={kits} setKits={setKits} kitItems={kitItems} setKitItems={setKitItems} containers={containers} containerItems={containerItems} onClose={() => setShowPresets(false)} showToast={showToast} />
       )}
     </div>
   );
@@ -2980,20 +2980,24 @@ function Inventory({ isMobile: m, items, setItems, categories, events, packing, 
 // ─── Presets (item groupings / kits) ──────────────────────────────────────────
 // A kit is a named bundle of inventory items + quantities (e.g. "Full Sprung Floor").
 // Used to add a whole group of items to an event's packing list in one click.
-function PresetsManager({ isMobile: m, items, categories, kits, setKits, kitItems, setKitItems, onClose, showToast }) {
+function PresetsManager({ isMobile: m, items, categories, kits, setKits, kitItems, setKitItems, containers = [], containerItems = [], onClose, showToast }) {
   const [editingKit, setEditingKit] = useState(null); // null = list view; kit object (or {id:null}) = editor
   const [name, setName] = useState("");
   const [rows, setRows] = useState({}); // { [itemId]: qty }
+  const [containerRows, setContainerRows] = useState({}); // { [containerId]: qty }
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("All");
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
-  const startNew = () => { setName(""); setRows({}); setSearch(""); setFilterCat("All"); setEditingKit({ id: null }); };
+  const startNew = () => { setName(""); setRows({}); setContainerRows({}); setSearch(""); setFilterCat("All"); setEditingKit({ id: null }); };
   const startEdit = (kit) => {
-    const r = {};
-    kitItems.filter(ki => ki.kit_id === kit.id).forEach(ki => { r[ki.item_id] = ki.qty || 1; });
-    setName(kit.name); setRows(r); setSearch(""); setFilterCat("All"); setEditingKit(kit);
+    const r = {}, cr = {};
+    kitItems.filter(ki => ki.kit_id === kit.id).forEach(ki => {
+      if (ki.container_id) cr[ki.container_id] = ki.qty || 1;
+      else if (ki.item_id) r[ki.item_id] = ki.qty || 1;
+    });
+    setName(kit.name); setRows(r); setContainerRows(cr); setSearch(""); setFilterCat("All"); setEditingKit(kit);
   };
 
   const toggle = (itemId) => setRows(prev => {
@@ -3002,11 +3006,18 @@ function PresetsManager({ isMobile: m, items, categories, kits, setKits, kitItem
     return next;
   });
   const setQty = (itemId, qty) => setRows(prev => ({ ...prev, [itemId]: Math.max(1, qty || 1) }));
+  const toggleContainer = (cid) => setContainerRows(prev => {
+    const next = { ...prev };
+    if (next[cid] != null) delete next[cid]; else next[cid] = 1;
+    return next;
+  });
+  const setContainerQty = (cid, qty) => setContainerRows(prev => ({ ...prev, [cid]: Math.max(1, qty || 1) }));
 
   const saveKit = async () => {
     if (!name.trim()) { showToast("Name the preset first"); return; }
     const selected = Object.entries(rows).filter(([, q]) => q >= 1);
-    if (selected.length === 0) { showToast("Pick at least one item"); return; }
+    const selectedContainers = Object.entries(containerRows).filter(([, q]) => q >= 1);
+    if (selected.length === 0 && selectedContainers.length === 0) { showToast("Pick at least one item or container"); return; }
     setSaving(true);
     try {
       let kitId = editingKit.id;
@@ -3019,7 +3030,10 @@ function PresetsManager({ isMobile: m, items, categories, kits, setKits, kitItem
         kitId = created[0].id;
         setKits(prev => [...prev, created[0]]);
       }
-      const createdItems = await Promise.all(selected.map(([item_id, qty]) => api.addKitItem({ kit_id: kitId, item_id, qty })));
+      const createdItems = await Promise.all([
+        ...selected.map(([item_id, qty]) => api.addKitItem({ kit_id: kitId, item_id, qty })),
+        ...selectedContainers.map(([container_id, qty]) => api.addKitItem({ kit_id: kitId, container_id, qty })),
+      ]);
       setKitItems(prev => [...prev.filter(ki => ki.kit_id !== kitId), ...createdItems.map(r => r[0])]);
       showToast(editingKit.id ? "Preset updated" : "Preset created");
       setEditingKit(null);
@@ -3070,6 +3084,32 @@ function PresetsManager({ isMobile: m, items, categories, kits, setKits, kitItem
           })}
         </div>
         <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Check items and set how many of each this preset includes.</p>
+
+        {containers.length > 0 && (
+          <>
+            <label style={labelStyle}>Containers in this preset ({Object.keys(containerRows).length} selected)</label>
+            <p style={{ fontSize: 12, color: "#9ca3af", margin: "0 0 6px" }}>Add a whole case (e.g. the H-Clips Travel Case) instead of its loose contents — applying the preset adds the container and everything it holds.</p>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 240, overflowY: "auto" }}>
+              {containers.map(c => {
+                const checked = containerRows[c.id] != null;
+                const contentCount = containerItems.filter(ci => ci.container_id === c.id).length;
+                return (
+                  <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f3f4f6", background: checked ? "#f0f4ff" : "transparent" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, cursor: "pointer", minWidth: 0 }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleContainer(c.id)} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                      <span style={{ fontSize: 14 }}>{ctIcon(c.type)}</span>
+                      <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                      <span style={{ fontSize: 11, color: "#9ca3af", flexShrink: 0 }}>{contentCount} item{contentCount !== 1 ? "s" : ""}</span>
+                    </label>
+                    {checked && (
+                      <input type="number" value={containerRows[c.id]} onChange={e => setContainerQty(c.id, Number(e.target.value))} style={{ ...iStyle, width: 64, flexShrink: 0, padding: "6px 8px" }} min={1} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </Modal>
     );
   }
@@ -3715,7 +3755,7 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 }
 
 // ─── Event Detail ─────────────────────────────────────────────────────────────
-function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, eventSignage, setEventSignage, containers, containerItems, eventContainerItems, setEventContainerItems, kits, kitItems, setView, showToast }) {
+function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, eventSignage, setEventSignage, containers, containerItems, setContainerItems, eventContainerItems, setEventContainerItems, kits, kitItems, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
   const [showDiagram, setShowDiagram] = useState(false);
   const [diagramView, setDiagramView] = useState("web"); // "web" | "imported"
@@ -3915,11 +3955,16 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         showToast("Temp item added");
       } else if (addMode === "preset") {
         if (!addKitId) { setSaving(false); return; }
-        // Apply preset: add each kit item, bumping qty on any that are already on the list.
-        const lines = kitItems
-          .filter(ki => ki.kit_id === addKitId && items.find(i => i.id === ki.item_id))
+        // Apply preset: add each kit item (bumping qty on dupes) and each whole container it includes.
+        const presetLines = kitItems.filter(ki => ki.kit_id === addKitId);
+        const lines = presetLines
+          .filter(ki => ki.item_id && items.find(i => i.id === ki.item_id))
           .map(ki => ({ item_id: ki.item_id, qty: ki.qty || 1 }));
-        if (lines.length === 0) { showToast("Preset has no valid items"); setSaving(false); return; }
+        // Container lines: add the case if it isn't already on the packing list (its contents travel with it).
+        const containerLines = presetLines
+          .filter(ki => ki.container_id && containers.find(c => c.id === ki.container_id))
+          .filter(ki => !eventPacking.find(p => p.container_id === ki.container_id));
+        if (lines.length === 0 && containerLines.length === 0) { showToast("Preset has nothing to add"); setSaving(false); return; }
         const toInsert = [], toBump = [];
         for (const line of lines) {
           const existing = eventPacking.find(p => p.item_id === line.item_id);
@@ -3931,6 +3976,11 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           if (addTrailerId) entry.trailer_id = addTrailerId;
           return api.addPacking(entry);
         }));
+        const insertedContainers = await Promise.all(containerLines.map(ki => {
+          const entry = { event_id: event.id, container_id: ki.container_id, item_id: null, qty_needed: 1, packed: false, returned: false };
+          if (addTrailerId) entry.trailer_id = addTrailerId;
+          return api.addPacking(entry);
+        }));
         const bumped = await Promise.all(toBump.map(b => {
           const newQty = (b.existing.qty_needed || 1) + b.qty;
           return api.updatePacking(b.existing.id, { qty_needed: newQty }).then(() => ({ id: b.existing.id, newQty }));
@@ -3938,9 +3988,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         setPacking(prev => {
           const bumpMap = Object.fromEntries(bumped.map(b => [b.id, b.newQty]));
           const updated = prev.map(p => bumpMap[p.id] != null ? { ...p, qty_needed: bumpMap[p.id] } : p);
-          return [...updated, ...inserted.map(r => r[0])];
+          return [...updated, ...inserted.map(r => r[0]), ...insertedContainers.map(r => r[0])];
         });
-        showToast(`Added ${lines.length} item${lines.length !== 1 ? "s" : ""} from preset`);
+        const total = lines.length + containerLines.length;
+        showToast(`Added ${total} line${total !== 1 ? "s" : ""} from preset`);
       } else {
         // Multi-add checklist: add every checked item with its qty.
         const selected = Object.entries(multiRows).filter(([, q]) => q >= 1);
@@ -3959,27 +4010,40 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
     setSaving(false);
   };
 
-  const addMiscItem = async (entry) => {
+  // Container contents handlers — route by isMisc:
+  //  misc      → event_container_items (per-event, this event only)
+  //  non-misc  → container_items (master/permanent, affects this case in ALL events)
+  const addContainerContents = async (entry, isMisc) => {
     if (!miscItemForm.item_id) return;
     setMiscSaving(true);
     try {
-      const created = await api.addEventContainerItem({ event_id: event.id, container_id: entry.container_id, item_id: miscItemForm.item_id, qty: miscItemForm.qty || 1 });
-      setEventContainerItems(prev => [...prev, created[0]]);
+      if (isMisc) {
+        const created = await api.addEventContainerItem({ event_id: event.id, container_id: entry.container_id, item_id: miscItemForm.item_id, qty: miscItemForm.qty || 1 });
+        setEventContainerItems(prev => [...prev, created[0]]);
+        showToast("Item added");
+      } else {
+        const created = await api.addContainerItem({ container_id: entry.container_id, item_id: miscItemForm.item_id, qty: miscItemForm.qty || 1 });
+        setContainerItems(prev => [...prev, created[0]]);
+        showToast("Added to case contents (all events)");
+      }
       setMiscItemForm({ item_id: "", qty: 1 });
-      showToast("Item added");
     } catch { showToast("Error adding item"); }
     setMiscSaving(false);
   };
 
-  const removeMiscItem = async (id) => {
-    try { await api.deleteEventContainerItem(id); setEventContainerItems(prev => prev.filter(e => e.id !== id)); }
-    catch { showToast("Error removing item"); }
+  const removeContents = async (ci, isMisc) => {
+    try {
+      if (isMisc) { await api.deleteEventContainerItem(ci.id); setEventContainerItems(prev => prev.filter(e => e.id !== ci.id)); }
+      else { await api.deleteContainerItem(ci.id); setContainerItems(prev => prev.filter(e => e.id !== ci.id)); }
+    } catch { showToast("Error removing item"); }
   };
 
-  const updateMiscItemQty = async (id, qty) => {
+  const updateContentsQty = async (ci, qty, isMisc) => {
     if (qty < 1) return;
-    try { await api.updateEventContainerItem(id, { qty }); setEventContainerItems(prev => prev.map(e => e.id === id ? { ...e, qty } : e)); }
-    catch { showToast("Error updating qty"); }
+    try {
+      if (isMisc) { await api.updateEventContainerItem(ci.id, { qty }); setEventContainerItems(prev => prev.map(e => e.id === ci.id ? { ...e, qty } : e)); }
+      else { await api.updateContainerItem(ci.id, { qty }); setContainerItems(prev => prev.map(e => e.id === ci.id ? { ...e, qty } : e)); }
+    } catch { showToast("Error updating qty"); }
   };
 
   const copyFromEvent = async () => {
@@ -4330,16 +4394,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             return (
                               <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
                                 <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{it.name}</span>
-                                {isMisc ? (
-                                  <>
-                                    <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty - 1)}>−</button>
-                                    <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
-                                    <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty + 1)}>+</button>
-                                    <button style={{ ...dangerBtn, padding: "3px 8px" }} onClick={() => removeMiscItem(ci.id)}>✕</button>
-                                  </>
-                                ) : (
-                                  <span style={{ fontSize: 13, color: "#9ca3af" }}>×{ci.qty}</span>
-                                )}
+                                <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContentsQty(ci, ci.qty - 1, isMisc)}>−</button>
+                                <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
+                                <button style={{ ...ghostBtn, padding: "2px 7px", fontSize: 13, lineHeight: 1 }} onClick={() => updateContentsQty(ci, ci.qty + 1, isMisc)}>+</button>
+                                <button style={{ ...dangerBtn, padding: "3px 8px" }} onClick={() => removeContents(ci, isMisc)}>✕</button>
                               </div>
                             );
                           })}
@@ -4369,16 +4427,17 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                               </div>
                             );
                           })}
-                          {isMisc && (
-                            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4, paddingTop: 8, borderTop: "1px solid #f3f4f6" }}>
+                          <div style={{ marginTop: 4, paddingTop: 8, borderTop: "1px solid #f3f4f6" }}>
+                            {!isMisc && <div style={{ fontSize: 11, color: "#b45309", marginBottom: 6 }}>Editing here changes this case's standard contents for all events.</div>}
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                               <select value={miscItemForm.item_id} onChange={e => setMiscItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyleMobile, flex: 1, fontSize: 14 }}>
                                 <option value="">Select item...</option>
                                 {items.filter(it => !ciList.find(ci => ci.item_id === it.id)).map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
                               </select>
                               <input type="number" value={miscItemForm.qty} onChange={e => setMiscItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyleMobile, width: 64, fontSize: 14 }} min={1} />
-                              <button style={{ ...primaryBtn, padding: "11px 14px" }} onClick={() => addMiscItem(entry)} disabled={miscSaving || !miscItemForm.item_id}>Add</button>
+                              <button style={{ ...primaryBtn, padding: "11px 14px" }} onClick={() => addContainerContents(entry, isMisc)} disabled={miscSaving || !miscItemForm.item_id}>Add</button>
                             </div>
-                          )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -4418,16 +4477,10 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             return (
                               <div key={ci.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{it.name}</span>
-                                {isMisc ? (
-                                  <>
-                                    <button style={{ ...ghostBtn, padding: "1px 6px", fontSize: 12, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty - 1)}>−</button>
-                                    <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
-                                    <button style={{ ...ghostBtn, padding: "1px 6px", fontSize: 12, lineHeight: 1 }} onClick={() => updateMiscItemQty(ci.id, ci.qty + 1)}>+</button>
-                                    <button style={{ ...dangerBtn, padding: "2px 7px", fontSize: 11 }} onClick={() => removeMiscItem(ci.id)}>✕</button>
-                                  </>
-                                ) : (
-                                  <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ci.qty}</span>
-                                )}
+                                <button style={{ ...ghostBtn, padding: "1px 6px", fontSize: 12, lineHeight: 1 }} onClick={() => updateContentsQty(ci, ci.qty - 1, isMisc)}>−</button>
+                                <span style={{ fontSize: 13, minWidth: 20, textAlign: "center" }}>{ci.qty}</span>
+                                <button style={{ ...ghostBtn, padding: "1px 6px", fontSize: 12, lineHeight: 1 }} onClick={() => updateContentsQty(ci, ci.qty + 1, isMisc)}>+</button>
+                                <button style={{ ...dangerBtn, padding: "2px 7px", fontSize: 11 }} onClick={() => removeContents(ci, isMisc)}>✕</button>
                               </div>
                             );
                           })}
@@ -4457,16 +4510,17 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                               </div>
                             );
                           })}
-                          {isMisc && (
-                            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: "1px solid #f3f4f6" }}>
+                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #f3f4f6" }}>
+                            {!isMisc && <div style={{ fontSize: 11, color: "#b45309", marginBottom: 5 }}>Editing here changes this case's standard contents for all events.</div>}
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                               <select value={miscItemForm.item_id} onChange={e => setMiscItemForm(f => ({ ...f, item_id: e.target.value }))} style={{ ...inputStyle, flex: 1, fontSize: 13, padding: "6px 10px" }}>
                                 <option value="">Select item...</option>
                                 {items.filter(it => !ciList.find(ci => ci.item_id === it.id)).map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
                               </select>
                               <input type="number" value={miscItemForm.qty} onChange={e => setMiscItemForm(f => ({ ...f, qty: Number(e.target.value) }))} style={{ ...inputStyle, width: 58, fontSize: 13, padding: "6px 8px" }} min={1} />
-                              <button style={{ ...primaryBtn, padding: "7px 12px", fontSize: 12 }} onClick={() => addMiscItem(entry)} disabled={miscSaving || !miscItemForm.item_id}>Add</button>
+                              <button style={{ ...primaryBtn, padding: "7px 12px", fontSize: 12 }} onClick={() => addContainerContents(entry, isMisc)} disabled={miscSaving || !miscItemForm.item_id}>Add</button>
                             </div>
-                          )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -4695,6 +4749,16 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                       <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 240, overflowY: "auto" }}>
                         {lines.length === 0 && <div style={{ padding: 12, fontSize: 13, color: "#9ca3af" }}>This preset has no items.</div>}
                         {lines.map(ki => {
+                          if (ki.container_id) {
+                            const cont = containers.find(c => c.id === ki.container_id);
+                            return (
+                              <div key={ki.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
+                                <span style={{ fontSize: 14 }}>{cont ? ctIcon(cont.type) : "📦"}</span>
+                                <span style={{ flex: 1, fontSize: 14, color: cont ? "#111" : "#dc2626" }}>{cont ? cont.name : "(deleted container)"}</span>
+                                <span style={{ background: "#eef2ff", color: "#4338ca", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>whole case</span>
+                              </div>
+                            );
+                          }
                           const item = items.find(i => i.id === ki.item_id);
                           return (
                             <div key={ki.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f3f4f6" }}>
@@ -4706,7 +4770,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                       </div>
                     );
                   })()}
-                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Adds all items in the preset. Items already on the list have their quantity increased.</p>
+                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Adds all items and whole cases in the preset. Items already on the list have their quantity increased; cases already on the list are skipped.</p>
                 </>
               )}
             </>
@@ -5135,6 +5199,7 @@ function KioskPack() {
   const [scanInput, setScanInput] = useState("");
   const [lastScan, setLastScan] = useState(null); // { name, status, time }
   const [busy, setBusy] = useState(false);
+  const [previewItem, setPreviewItem] = useState(null); // item whose photo is shown in the lightbox
   const inputRef = useRef();
 
   useEffect(() => {
@@ -5159,6 +5224,9 @@ function KioskPack() {
   const labelFor = (entry) => entry.container_id
     ? (containers.find(c => c.id === entry.container_id)?.name || "Container")
     : (entry.item_id ? (items.find(i => i.id === entry.item_id)?.name || "Item") : (entry.ad_hoc_name || "Item"));
+
+  // The inventory item behind a loose packing entry (null for containers / ad-hoc rows).
+  const itemFor = (entry) => entry.item_id ? items.find(i => i.id === entry.item_id) : null;
 
   const packedCount = eventPacking.filter(p => p.packed).length;
   const totalCount = eventPacking.length;
@@ -5206,13 +5274,13 @@ function KioskPack() {
       }
     } catch { showToast("Error processing scan"); }
     setBusy(false);
-    setTimeout(() => inputRef.current?.focus(), 50);
+    setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50);
   };
 
   // Keep the input focused on the pack screen so the handheld scanner works.
   useEffect(() => {
     if (screen !== "pack") return;
-    setTimeout(() => inputRef.current?.focus(), 150);
+    setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 150);
   }, [screen]);
 
   const STATUS = {
@@ -5329,7 +5397,7 @@ function KioskPack() {
             value={scanInput}
             onChange={e => setScanInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") { const v = scanInput.trim(); if (v) processScan(v); setScanInput(""); } }}
-            onBlur={() => { if (screen === "pack") setTimeout(() => inputRef.current?.focus(), 200); }}
+            onBlur={() => { if (screen === "pack") setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 200); }}
             placeholder="Scan with the handheld, or type a code…"
             autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
             style={{ width: "100%", boxSizing: "border-box", padding: "16px 18px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 17, fontFamily: "inherit", outline: "none" }} />
@@ -5348,12 +5416,29 @@ function KioskPack() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {remaining.map(entry => {
                 const isContainer = !!entry.container_id;
+                const it = itemFor(entry);
+                const hasPhoto = !!it?.image_url;
                 return (
                   <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 22 }}>{isContainer ? "📦" : "🧰"}</span>
+                    {it ? (
+                      <button onClick={() => setPreviewItem(it)} title={hasPhoto ? "Show photo" : "No photo on file"}
+                        style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 10, overflow: "hidden", border: BORDER, background: hasPhoto ? "#fff" : "rgba(255,255,255,0.05)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {hasPhoto ? <img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 20 }}>🧰</span>}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 22 }}>{isContainer ? "📦" : "🧰"}</span>
+                    )}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}</div>
-                      <div style={{ fontSize: 12, color: DIM }}>{isContainer ? "Scan its QR code" : "Tap when loaded"}</div>
+                      {it ? (
+                        <button onClick={() => setPreviewItem(it)}
+                          style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#f1f5f9", fontSize: 16, fontWeight: 600, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
+                          {labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}
+                          {hasPhoto && <span style={{ fontSize: 13, color: "#60a5fa" }}>🔍</span>}
+                        </button>
+                      ) : (
+                        <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}</div>
+                      )}
+                      <div style={{ fontSize: 12, color: DIM }}>{isContainer ? "Scan its QR code" : it ? "Tap the name to see a photo · tap ✓ when loaded" : "Tap when loaded"}</div>
                     </div>
                     <button onClick={() => togglePacked(entry)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓ Packed</button>
                   </div>
@@ -5368,17 +5453,47 @@ function KioskPack() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: DIM, marginBottom: 10 }}>Packed ({done.length})</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {done.map(entry => (
-                <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 16 }}>✅</span>
-                  <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>
-                  <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
-                </div>
-              ))}
+              {done.map(entry => {
+                const it = itemFor(entry);
+                return (
+                  <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 16 }}>✅</span>
+                    {it ? (
+                      <button onClick={() => setPreviewItem(it)}
+                        style={{ flex: 1, background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: MUTED, textDecoration: "line-through", cursor: "pointer", textAlign: "left" }}>
+                        {labelFor(entry)}{it.image_url ? " 🔍" : ""}
+                      </button>
+                    ) : (
+                      <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>
+                    )}
+                    <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
       </div>
+
+      {/* Item photo lightbox — tap anywhere to close */}
+      {previewItem && (
+        <div onClick={() => setPreviewItem(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(0,0,0,0.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 16, maxWidth: 560, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, boxSizing: "border-box" }}>
+            {previewItem.image_url ? (
+              <img src={previewItem.image_url} alt={previewItem.name} style={{ maxWidth: "100%", maxHeight: "65vh", objectFit: "contain", borderRadius: 8 }} />
+            ) : (
+              <div style={{ width: "100%", height: 220, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "#9ca3af", background: "#f3f4f6", borderRadius: 8 }}>
+                <span style={{ fontSize: 44 }}>🖼️</span>
+                <span style={{ fontSize: 14 }}>No photo on file for this item yet</span>
+              </div>
+            )}
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#111", textAlign: "center" }}>{previewItem.name}</div>
+            <button onClick={() => setPreviewItem(null)} style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+          </div>
+        </div>
+      )}
+
       {toast && <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#334155", color: "#fff", padding: "12px 22px", borderRadius: 99, fontSize: 14, zIndex: 500 }}>{toast}</div>}
     </div>
   );

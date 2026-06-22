@@ -133,6 +133,13 @@ const api = {
   updateEventContainerItem: (id, patch) => sb(`event_container_items?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteEventContainerItem: (id) => sb(`event_container_items?id=eq.${id}`, { method: "DELETE" }),
   deleteEventContainerItemsByEvent: (eventId) => sb(`event_container_items?event_id=eq.${eventId}`, { method: "DELETE" }),
+  getKits: () => sb("kits?order=name"),
+  addKit: (k) => sb("kits", { method: "POST", body: JSON.stringify(k) }),
+  updateKit: (id, patch) => sb(`kits?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteKit: (id) => sb(`kits?id=eq.${id}`, { method: "DELETE" }),
+  getKitItems: () => sb("kit_items"),
+  addKitItem: (ki) => sb("kit_items", { method: "POST", body: JSON.stringify(ki) }),
+  deleteKitItemsByKit: (kitId) => sb(`kit_items?kit_id=eq.${kitId}`, { method: "DELETE" }),
   getEmployees: () => sb("employees?order=name"),
   addEmployee: (e) => sb("employees", { method: "POST", body: JSON.stringify(e) }),
   updateEmployee: (id, patch) => sb(`employees?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -2250,6 +2257,8 @@ export default function App() {
   const [containers, setContainers] = useState([]);
   const [containerItems, setContainerItems] = useState([]);
   const [eventContainerItems, setEventContainerItems] = useState([]);
+  const [kits, setKits] = useState([]);
+  const [kitItems, setKitItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [view, setView] = useState("dashboard");
@@ -2335,18 +2344,20 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [i, e, p, cats, tr, et, ar, ai, rp, ri, co, ci, eci, es, logoUrl] = await Promise.all([
+      const [i, e, p, cats, tr, et, ar, ai, rp, ri, co, ci, eci, es, kt, kti, logoUrl] = await Promise.all([
         api.getItems(), api.getEvents(), api.getAllPacking(),
         api.getCategories(), api.getTrailers(), api.getEventTrailers(),
         api.getAreas(), api.getAreaItems(), api.getReports(), api.getReportItems(),
         api.getContainers(), api.getContainerItems(), api.getEventContainerItems(),
         api.getEventSignage().catch(() => []),
+        api.getKits().catch(() => []), api.getKitItems().catch(() => []),
         checkOrgLogoExists()
       ]);
       setItems(i); setEvents(e); setPacking(p);
       setCategories(cats); setTrailers(tr); setEventTrailers(et);
       setAreas(ar); setAreaItems(ai); setReports(rp); setReportItems(ri);
       setContainers(co); setContainerItems(ci); setEventContainerItems(eci); setEventSignage(es);
+      setKits(kt); setKitItems(kti);
       setOrgLogo(logoUrl); setError(null);
     } catch { setError("Could not connect to database."); }
     finally { setLoading(false); }
@@ -2441,10 +2452,10 @@ export default function App() {
 
       <div style={{ padding: m ? "16px 16px 90px" : "28px 24px", maxWidth: m ? "100%" : 960, margin: "0 auto" }}>
         {view === "dashboard" && canViewDashboard && <Dashboard isMobile={m} items={items} events={events} packing={packing} trailers={trailers} setView={setView} setSelectedEventId={setSelectedEventId} />}
-        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} events={events} packing={packing} showToast={showToast} />}
+        {view === "inventory" && canViewInventory && <Inventory isMobile={m} items={items} setItems={setItems} categories={categoryNames} events={events} packing={packing} kits={kits} setKits={setKits} kitItems={kitItems} setKitItems={setKitItems} showToast={showToast} />}
         {view === "containers" && canViewContainers && <ContainersPage isMobile={m} containers={containers} setContainers={setContainers} containerItems={containerItems} setContainerItems={setContainerItems} items={items} areas={areas} showToast={showToast} />}
         {view === "events" && canViewEvents && <Events isMobile={m} events={events} setEvents={setEvents} packing={packing} setPacking={setPacking} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} setView={setView} setSelectedEventId={setSelectedEventId} showToast={showToast} />}
-        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} setView={setView} showToast={showToast} />}
+        {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} kits={kits} kitItems={kitItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "awards" && canViewAwards && <Awards isMobile={m} events={events} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
@@ -2658,8 +2669,9 @@ function ContainersPage({ isMobile: m, containers, setContainers, containerItems
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-function Inventory({ isMobile: m, items, setItems, categories, events, packing, showToast }) {
+function Inventory({ isMobile: m, items, setItems, categories, events, packing, kits, setKits, kitItems, setKitItems, showToast }) {
   const [search, setSearch] = useState("");
+  const [showPresets, setShowPresets] = useState(false);
   const [filterCat, setFilterCat] = useState("All");
   const [showWarehouse, setShowWarehouse] = useState(false);
   const [viewMode, setViewMode] = useState("list"); // "list" | "gallery"
@@ -2762,6 +2774,7 @@ function Inventory({ isMobile: m, items, setItems, categories, events, packing, 
         <div style={{ display: "flex", gap: 8 }}>
           <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px", background: viewMode === "gallery" ? "#1a1a2e" : "none", color: viewMode === "gallery" ? "#fff" : "#374151" }} onClick={() => setViewMode(v => v === "gallery" ? "list" : "gallery")}>🖼️ {m ? "" : "Gallery"}</button>
           <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px", background: showWarehouse ? "#1a1a2e" : "none", color: showWarehouse ? "#fff" : "#374151" }} onClick={() => setShowWarehouse(w => !w)}>🏭 {m ? "" : "Warehouse"}</button>
+          <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px" }} onClick={() => setShowPresets(true)}>🧩 {m ? "" : "Presets"}</button>
           <button style={{ ...ghostBtn, padding: m ? "9px 13px" : "7px 14px" }} onClick={() => { setCsvText(""); setCsvPreview(null); setCsvError(""); setShowImport(true); }}>{m ? "Import" : "Import CSV"}</button>
           <button style={{ ...primaryBtn, padding: m ? "9px 13px" : "8px 16px" }} onClick={openAdd}>+ {m ? "Add" : "Add Item"}</button>
         </div>
@@ -2955,7 +2968,131 @@ function Inventory({ isMobile: m, items, setItems, categories, events, packing, 
           )}
         </Modal>
       )}
+
+      {showPresets && (
+        <PresetsManager isMobile={m} items={items} categories={categories} kits={kits} setKits={setKits} kitItems={kitItems} setKitItems={setKitItems} onClose={() => setShowPresets(false)} showToast={showToast} />
+      )}
     </div>
+  );
+}
+
+// ─── Presets (item groupings / kits) ──────────────────────────────────────────
+// A kit is a named bundle of inventory items + quantities (e.g. "Full Sprung Floor").
+// Used to add a whole group of items to an event's packing list in one click.
+function PresetsManager({ isMobile: m, items, categories, kits, setKits, kitItems, setKitItems, onClose, showToast }) {
+  const [editingKit, setEditingKit] = useState(null); // null = list view; kit object (or {id:null}) = editor
+  const [name, setName] = useState("");
+  const [rows, setRows] = useState({}); // { [itemId]: qty }
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("All");
+  const [saving, setSaving] = useState(false);
+  const iStyle = m ? inputStyleMobile : inputStyle;
+
+  const startNew = () => { setName(""); setRows({}); setSearch(""); setFilterCat("All"); setEditingKit({ id: null }); };
+  const startEdit = (kit) => {
+    const r = {};
+    kitItems.filter(ki => ki.kit_id === kit.id).forEach(ki => { r[ki.item_id] = ki.qty || 1; });
+    setName(kit.name); setRows(r); setSearch(""); setFilterCat("All"); setEditingKit(kit);
+  };
+
+  const toggle = (itemId) => setRows(prev => {
+    const next = { ...prev };
+    if (next[itemId] != null) delete next[itemId]; else next[itemId] = 1;
+    return next;
+  });
+  const setQty = (itemId, qty) => setRows(prev => ({ ...prev, [itemId]: Math.max(1, qty || 1) }));
+
+  const saveKit = async () => {
+    if (!name.trim()) { showToast("Name the preset first"); return; }
+    const selected = Object.entries(rows).filter(([, q]) => q >= 1);
+    if (selected.length === 0) { showToast("Pick at least one item"); return; }
+    setSaving(true);
+    try {
+      let kitId = editingKit.id;
+      if (kitId) {
+        await api.updateKit(kitId, { name: name.trim() });
+        await api.deleteKitItemsByKit(kitId);
+        setKits(prev => prev.map(k => k.id === kitId ? { ...k, name: name.trim() } : k));
+      } else {
+        const created = await api.addKit({ name: name.trim() });
+        kitId = created[0].id;
+        setKits(prev => [...prev, created[0]]);
+      }
+      const createdItems = await Promise.all(selected.map(([item_id, qty]) => api.addKitItem({ kit_id: kitId, item_id, qty })));
+      setKitItems(prev => [...prev.filter(ki => ki.kit_id !== kitId), ...createdItems.map(r => r[0])]);
+      showToast(editingKit.id ? "Preset updated" : "Preset created");
+      setEditingKit(null);
+    } catch { showToast("Error saving preset — has the kits table been created?"); }
+    setSaving(false);
+  };
+
+  const removeKit = async (kit) => {
+    try {
+      await api.deleteKit(kit.id);
+      setKits(prev => prev.filter(k => k.id !== kit.id));
+      setKitItems(prev => prev.filter(ki => ki.kit_id !== kit.id));
+      showToast("Preset deleted");
+    } catch { showToast("Error deleting preset"); }
+  };
+
+  // ── Editor view ──
+  if (editingKit) {
+    const filtered = items.filter(i => (filterCat === "All" || i.category === filterCat) && i.name.toLowerCase().includes(search.toLowerCase()));
+    const selectedCount = Object.keys(rows).length;
+    return (
+      <Modal title={editingKit.id ? "Edit Preset" : "New Preset"} onClose={() => setEditingKit(null)} onSave={saveKit} saveLabel="Save Preset" saving={saving} wide isMobile={m}>
+        <label style={labelStyle}>Preset Name</label>
+        <input value={name} onChange={e => setName(e.target.value)} style={iStyle} placeholder="e.g. Full Sprung Floor" autoFocus />
+        <label style={labelStyle}>Items in this preset ({selectedCount} selected)</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items..." style={{ ...iStyle, flex: 2 }} />
+          <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ ...iStyle, flex: 1 }}>
+            {["All", ...categories].map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 320, overflowY: "auto" }}>
+          {filtered.length === 0 && <div style={{ padding: 12, fontSize: 13, color: "#9ca3af" }}>No matching items</div>}
+          {filtered.map(item => {
+            const checked = rows[item.id] != null;
+            return (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f3f4f6", background: checked ? "#f0f4ff" : "transparent" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, cursor: "pointer", minWidth: 0 }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(item.id)} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                  <span style={{ fontSize: 11, color: "#9ca3af", flexShrink: 0 }}>{item.category}</span>
+                </label>
+                {checked && (
+                  <input type="number" value={rows[item.id]} onChange={e => setQty(item.id, Number(e.target.value))} style={{ ...iStyle, width: 64, flexShrink: 0, padding: "6px 8px" }} min={1} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Check items and set how many of each this preset includes.</p>
+      </Modal>
+    );
+  }
+
+  // ── List view ──
+  return (
+    <Modal title="Presets" onClose={onClose} onSave={onClose} saveLabel="Done" saving={false} wide isMobile={m}>
+      <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>Preset groupings of items (e.g. a full sprung floor). Add a whole preset to an event's packing list in one click from the event's Add menu.</p>
+      <button style={{ ...primaryBtn, width: "100%", padding: "11px" }} onClick={startNew}>+ New Preset</button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {kits.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 16 }}>No presets yet</div>}
+        {kits.map(kit => {
+          const count = kitItems.filter(ki => ki.kit_id === kit.id).length;
+          return (
+            <div key={kit.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+              <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>🧩 {kit.name}</span>
+              <span style={{ fontSize: 12, color: "#9ca3af" }}>{count} item{count !== 1 ? "s" : ""}</span>
+              <button style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px" }} onClick={() => startEdit(kit)}>Edit</button>
+              <button style={dangerBtn} onClick={() => removeKit(kit)}>Delete</button>
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }
 
@@ -3577,7 +3714,7 @@ function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrai
 }
 
 // ─── Event Detail ─────────────────────────────────────────────────────────────
-function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, eventSignage, setEventSignage, containers, containerItems, eventContainerItems, setEventContainerItems, setView, showToast }) {
+function EventDetail({ isMobile: m, event, events, setEvents, items, eventPacking, packing, setPacking, trailers, setTrailers, eventTrailers, setEventTrailers, eventSignage, setEventSignage, containers, containerItems, eventContainerItems, setEventContainerItems, kits, kitItems, setView, showToast }) {
   const [activeTab, setActiveTab] = useState("all"); // "all" | trailer id
   const [showDiagram, setShowDiagram] = useState(false);
   const [diagramView, setDiagramView] = useState("web"); // "web" | "imported"
@@ -3588,6 +3725,9 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [addQty, setAddQty] = useState(1);
   const [addTrailerId, setAddTrailerId] = useState("");
   const [addMode, setAddMode] = useState("inventory");
+  const [multiRows, setMultiRows] = useState({}); // multi-add checklist: { [itemId]: qty }
+  const [addItemSearch, setAddItemSearch] = useState("");
+  const [addKitId, setAddKitId] = useState("");
   const [adHocName, setAdHocName] = useState("");
   const [adHocDimW, setAdHocDimW] = useState("");
   const [adHocDimD, setAdHocDimD] = useState("");
@@ -3772,14 +3912,46 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         const created = await api.addPacking(entry);
         setPacking(prev => [...prev, created[0]]);
         showToast("Temp item added");
+      } else if (addMode === "preset") {
+        if (!addKitId) { setSaving(false); return; }
+        // Apply preset: add each kit item, bumping qty on any that are already on the list.
+        const lines = kitItems
+          .filter(ki => ki.kit_id === addKitId && items.find(i => i.id === ki.item_id))
+          .map(ki => ({ item_id: ki.item_id, qty: ki.qty || 1 }));
+        if (lines.length === 0) { showToast("Preset has no valid items"); setSaving(false); return; }
+        const toInsert = [], toBump = [];
+        for (const line of lines) {
+          const existing = eventPacking.find(p => p.item_id === line.item_id);
+          if (existing) toBump.push({ existing, qty: line.qty });
+          else toInsert.push(line);
+        }
+        const inserted = await Promise.all(toInsert.map(line => {
+          const entry = { event_id: event.id, item_id: line.item_id, qty_needed: line.qty, packed: false, returned: false };
+          if (addTrailerId) entry.trailer_id = addTrailerId;
+          return api.addPacking(entry);
+        }));
+        const bumped = await Promise.all(toBump.map(b => {
+          const newQty = (b.existing.qty_needed || 1) + b.qty;
+          return api.updatePacking(b.existing.id, { qty_needed: newQty }).then(() => ({ id: b.existing.id, newQty }));
+        }));
+        setPacking(prev => {
+          const bumpMap = Object.fromEntries(bumped.map(b => [b.id, b.newQty]));
+          const updated = prev.map(p => bumpMap[p.id] != null ? { ...p, qty_needed: bumpMap[p.id] } : p);
+          return [...updated, ...inserted.map(r => r[0])];
+        });
+        showToast(`Added ${lines.length} item${lines.length !== 1 ? "s" : ""} from preset`);
       } else {
-        if (!addItemId) { setSaving(false); return; }
-        if (eventPacking.find(p => p.item_id === addItemId)) { showToast("Already in list"); setSaving(false); return; }
-        const entry = { event_id: event.id, item_id: addItemId, qty_needed: addQty, packed: false, returned: false };
-        if (addTrailerId) entry.trailer_id = addTrailerId;
-        const created = await api.addPacking(entry);
-        setPacking(prev => [...prev, created[0]]);
-        showToast("Item added");
+        // Multi-add checklist: add every checked item with its qty.
+        const selected = Object.entries(multiRows).filter(([, q]) => q >= 1);
+        if (selected.length === 0) { showToast("Pick at least one item"); setSaving(false); return; }
+        const created = await Promise.all(selected.map(([item_id, qty]) => {
+          const entry = { event_id: event.id, item_id, qty_needed: qty, packed: false, returned: false };
+          if (addTrailerId) entry.trailer_id = addTrailerId;
+          return api.addPacking(entry);
+        }));
+        setPacking(prev => [...prev, ...created.map(r => r[0])]);
+        setMultiRows({});
+        showToast(`Added ${selected.length} item${selected.length !== 1 ? "s" : ""}`);
       }
       setShowAddItem(false);
     } catch { showToast("Error adding item"); }
@@ -4087,7 +4259,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         <div style={{ display: "flex", gap: 8 }}>
           {otherEvents.length > 0 && <button style={{ ...ghostBtn, fontSize: m ? 13 : 12, padding: m ? "8px 12px" : "7px 14px" }} onClick={() => { setCopyEventId(otherEvents[0].id); setShowCopy(true); }}>Copy</button>}
           <button style={{ ...ghostBtn, padding: m ? "8px 12px" : "7px 14px", fontSize: m ? 13 : 12 }} onClick={() => { setPackingListTab("trailer"); setShowPackingLists(true); }}>📋 Lists</button>
-          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddContainerId(availableContainers[0]?.id || ""); setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setAddTrailerId(activeTab !== "all" && activeTab !== "unassigned" ? activeTab : ""); setAddMode("container"); setAdHocName(""); setAdHocDimW(""); setAdHocDimD(""); setShowAddItem(true); }}>+ Add</button>
+          <button style={{ ...primaryBtn, padding: m ? "8px 14px" : "8px 16px" }} onClick={() => { setAddContainerId(availableContainers[0]?.id || ""); setAddItemId(availableToAdd[0]?.id || ""); setAddQty(1); setAddTrailerId(activeTab !== "all" && activeTab !== "unassigned" ? activeTab : ""); setAddMode("inventory"); setMultiRows({}); setAddItemSearch(""); setAddKitId(""); setAdHocName(""); setAdHocDimW(""); setAdHocDimD(""); setShowAddItem(true); }}>+ Add</button>
         </div>
       </div>
 
@@ -4437,11 +4609,16 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         </Modal>
       )}
 
-      {showAddItem && (
-        <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel="Add to List" saving={saving} isMobile={m}>
+      {showAddItem && (() => {
+        const multiCount = Object.values(multiRows).filter(q => q >= 1).length;
+        const addSaveLabel = addMode === "inventory" ? (multiCount > 0 ? `Add ${multiCount} item${multiCount !== 1 ? "s" : ""}` : "Add Items")
+          : addMode === "preset" ? "Apply Preset" : "Add to List";
+        return (
+        <Modal title="Add to Packing List" onClose={() => setShowAddItem(false)} onSave={addToList} saveLabel={addSaveLabel} saving={saving} wide={addMode === "inventory"} isMobile={m}>
           <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 8, padding: 4 }}>
             <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "container" ? "#fff" : "transparent", color: addMode === "container" ? "#2563eb" : "#6b7280", boxShadow: addMode === "container" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("container")}>📦 Container</button>
-            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "inventory" ? "#fff" : "transparent", color: addMode === "inventory" ? "#111" : "#6b7280", boxShadow: addMode === "inventory" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("inventory")}>Item</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "inventory" ? "#fff" : "transparent", color: addMode === "inventory" ? "#111" : "#6b7280", boxShadow: addMode === "inventory" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("inventory")}>Items</button>
+            <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "preset" ? "#fff" : "transparent", color: addMode === "preset" ? "#0d9488" : "#6b7280", boxShadow: addMode === "preset" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("preset")}>🧩 Preset</button>
             <button style={{ flex: 1, padding: "7px", border: "none", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500, background: addMode === "temp" ? "#fff" : "transparent", color: addMode === "temp" ? "#7c3aed" : "#6b7280", boxShadow: addMode === "temp" ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }} onClick={() => setAddMode("temp")}>Temp</button>
           </div>
           {addMode === "container" ? (
@@ -4468,11 +4645,69 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
             </>
           ) : addMode === "inventory" ? (
             <>
-              <label style={labelStyle}>Select Item</label>
-              {availableToAdd.length === 0
-                ? <div style={{ fontSize: 13, color: "#9ca3af", padding: "8px 0" }}>All items already added</div>
-                : <ItemSearchInput items={availableToAdd} value={addItemId} onChange={setAddItemId} placeholder="Search items..." style={{ flex: "none", width: "100%" }} />
-              }
+              <label style={labelStyle}>Check items to add ({Object.values(multiRows).filter(q => q >= 1).length} selected)</label>
+              {availableToAdd.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#9ca3af", padding: "8px 0" }}>All items already added</div>
+              ) : (
+                <>
+                  <input value={addItemSearch} onChange={e => setAddItemSearch(e.target.value)} placeholder="Search items..." style={iStyle} />
+                  {(() => {
+                    const shown = availableToAdd.filter(i => i.name.toLowerCase().includes(addItemSearch.toLowerCase()));
+                    return (
+                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 340, overflowY: "auto" }}>
+                        {shown.length === 0 && <div style={{ padding: 12, fontSize: 13, color: "#9ca3af" }}>No matching items</div>}
+                        {shown.map(item => {
+                          const checked = multiRows[item.id] != null;
+                          return (
+                            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f3f4f6", background: checked ? "#f0f4ff" : "transparent" }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, cursor: "pointer", minWidth: 0 }}>
+                                <input type="checkbox" checked={checked} onChange={() => setMultiRows(prev => { const n = { ...prev }; if (n[item.id] != null) delete n[item.id]; else n[item.id] = 1; return n; })} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                                <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                                <span style={{ fontSize: 11, color: "#9ca3af", flexShrink: 0 }}>{item.category}</span>
+                              </label>
+                              {checked && (
+                                <input type="number" value={multiRows[item.id]} onChange={e => setMultiRows(prev => ({ ...prev, [item.id]: Math.max(1, Number(e.target.value) || 1) }))} style={{ ...iStyle, width: 64, flexShrink: 0, padding: "6px 8px" }} min={1} />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </>
+          ) : addMode === "preset" ? (
+            <>
+              <label style={labelStyle}>Select Preset</label>
+              {kits.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#9ca3af", padding: "8px 0" }}>No presets yet — create them under Inventory → Presets.</div>
+              ) : (
+                <>
+                  <select value={addKitId} onChange={e => setAddKitId(e.target.value)} style={iStyle}>
+                    <option value="">Choose a preset...</option>
+                    {kits.map(k => <option key={k.id} value={k.id}>🧩 {k.name}</option>)}
+                  </select>
+                  {addKitId && (() => {
+                    const lines = kitItems.filter(ki => ki.kit_id === addKitId);
+                    return (
+                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 240, overflowY: "auto" }}>
+                        {lines.length === 0 && <div style={{ padding: 12, fontSize: 13, color: "#9ca3af" }}>This preset has no items.</div>}
+                        {lines.map(ki => {
+                          const item = items.find(i => i.id === ki.item_id);
+                          return (
+                            <div key={ki.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f3f4f6" }}>
+                              <span style={{ flex: 1, fontSize: 14, color: item ? "#111" : "#dc2626" }}>{item ? item.name : "(deleted item)"}</span>
+                              <span style={{ fontSize: 12, color: "#9ca3af" }}>×{ki.qty || 1}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Adds all items in the preset. Items already on the list have their quantity increased.</p>
+                </>
+              )}
             </>
           ) : (
             <>
@@ -4487,7 +4722,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
               <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Event-specific — won't affect master inventory.</p>
             </>
           )}
-          {addMode !== "container" && (
+          {addMode === "temp" && (
             <>
               <label style={labelStyle}>Qty Needed</label>
               <input type="number" value={addQty} onChange={e => setAddQty(Number(e.target.value))} style={iStyle} min={1} />
@@ -4503,7 +4738,8 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
             </>
           )}
         </Modal>
-      )}
+        );
+      })()}
 
       {showPackingLists && (
         <Modal title="Packing Lists" onClose={() => setShowPackingLists(false)} onSave={() => setShowPackingLists(false)} saveLabel="Done" saving={false} isMobile={m} wide>

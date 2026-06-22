@@ -4511,7 +4511,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                             <button style={{ ...ghostBtn, padding: "2px 10px", fontSize: 16, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed - 1)}>−</button>
                             <input type="number" value={entry.qty_needed} min={1}
                               onChange={e => updateQty(entry, Number(e.target.value))}
-                              style={{ width: 52, textAlign: "center", padding: "5px 6px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit" }} />
+                              style={{ width: 64, textAlign: "center", padding: "5px 6px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 15, fontFamily: "inherit" }} />
                             <button style={{ ...ghostBtn, padding: "2px 10px", fontSize: 16, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed + 1)}>+</button>
                             <span style={{ fontSize: 12, color: "#9ca3af" }}>needed</span>
                           </div>
@@ -4559,7 +4559,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
                         <button style={{ ...ghostBtn, padding: "2px 8px", fontSize: 14, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed - 1)}>−</button>
                         <input type="number" value={entry.qty_needed} min={1}
                           onChange={e => updateQty(entry, Number(e.target.value))}
-                          style={{ width: 46, textAlign: "center", padding: "3px 6px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 13, fontFamily: "inherit" }} />
+                          style={{ width: 64, textAlign: "center", padding: "3px 6px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 13, fontFamily: "inherit" }} />
                         <button style={{ ...ghostBtn, padding: "2px 8px", fontSize: 14, lineHeight: 1 }} onClick={() => updateQty(entry, entry.qty_needed + 1)}>+</button>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

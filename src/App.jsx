@@ -2369,6 +2369,7 @@ export default function App() {
   const categoryNames = categories.map(c => c.name);
 
   if (window.location.pathname === "/clock") return <ClockPage />;
+  if (window.location.pathname === "/pack") return <KioskPack />;
 
   if (!authChecked) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading...</div>;
   if (!session) return <LoginScreen onLogin={handleLogin} />;
@@ -5107,6 +5108,278 @@ function ScanMode({ event, trailer, packing, setPacking, containers, onClose, sh
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Kiosk Packing (warehouse laptop + scanner, route: /pack) ─────────────────
+// Open route, no admin login. Pick an upcoming event → a trailer → a scan-first
+// pack screen: scan container QR codes onto the truck, tap loose items to check off.
+function KioskPack() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [events, setEvents] = useState([]);
+  const [packing, setPacking] = useState([]);
+  const [containers, setContainers] = useState([]);
+  const [items, setItems] = useState([]);
+  const [trailers, setTrailers] = useState([]);
+  const [eventTrailers, setEventTrailers] = useState([]);
+
+  const [screen, setScreen] = useState("events"); // events | trailer | pack
+  const [eventId, setEventId] = useState(null);
+  const [trailerId, setTrailerId] = useState(null);
+  const [toast, setToast] = useState(null);
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
+
+  // Scan-screen state
+  const [scanInput, setScanInput] = useState("");
+  const [lastScan, setLastScan] = useState(null); // { name, status, time }
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [e, p, c, it, tr, et] = await Promise.all([
+          api.getEvents(), api.getAllPacking(), api.getContainers(),
+          api.getItems(), api.getTrailers(), api.getEventTrailers(),
+        ]);
+        setEvents(e); setPacking(p); setContainers(c); setItems(it); setTrailers(tr); setEventTrailers(et);
+      } catch { setError("Could not connect to the database."); }
+      setLoading(false);
+    })();
+  }, []);
+
+  const event = events.find(e => e.id === eventId) || null;
+  const trailer = trailers.find(t => t.id === trailerId) || null;
+  const upcoming = events.filter(e => e.status !== "completed").sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const eventPacking = packing.filter(p => p.event_id === eventId);
+  const assignedTrailers = eventTrailers.filter(et => et.event_id === eventId).map(et => trailers.find(t => t.id === et.trailer_id)).filter(Boolean);
+
+  const labelFor = (entry) => entry.container_id
+    ? (containers.find(c => c.id === entry.container_id)?.name || "Container")
+    : (entry.item_id ? (items.find(i => i.id === entry.item_id)?.name || "Item") : (entry.ad_hoc_name || "Item"));
+
+  const packedCount = eventPacking.filter(p => p.packed).length;
+  const totalCount = eventPacking.length;
+  const remaining = eventPacking.filter(p => !p.packed);
+  const done = eventPacking.filter(p => p.packed);
+
+  const openEvent = (id) => {
+    setEventId(id);
+    const ats = eventTrailers.filter(et => et.event_id === id).map(et => trailers.find(t => t.id === et.trailer_id)).filter(Boolean);
+    if (ats.length === 1) { setTrailerId(ats[0].id); setScreen("pack"); }
+    else { setTrailerId(null); setScreen("trailer"); }
+  };
+
+  const backToEvents = () => { setScreen("events"); setEventId(null); setTrailerId(null); setLastScan(null); };
+
+  // Toggle a loose / ad-hoc item (or any entry) packed by tapping.
+  const togglePacked = async (entry) => {
+    const next = !entry.packed;
+    try {
+      const patch = next ? { packed: true, trailer_id: trailerId } : { packed: false };
+      await api.updatePacking(entry.id, patch);
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, ...patch } : p));
+    } catch { showToast("Couldn't update — try again"); }
+  };
+
+  const processScan = async (raw) => {
+    if (busy || !raw) return;
+    const parsed = raw.startsWith("CO:") ? raw.slice(3)
+      : raw.includes("/container/") ? raw.split("/container/")[1].split("?")[0]
+      : raw.trim();
+    if (!parsed) return;
+    const container = containers.find(c => c.id === parsed || c.id.startsWith(parsed));
+    if (!container) { setLastScan({ name: parsed, status: "unknown", time: Date.now() }); showToast("Unknown code"); return; }
+    const entry = eventPacking.find(p => p.container_id === container.id);
+    setBusy(true);
+    try {
+      if (!entry) {
+        setLastScan({ name: container.name, status: "not_needed", time: Date.now() });
+      } else if (entry.packed && entry.trailer_id === trailerId) {
+        setLastScan({ name: container.name, status: "already", time: Date.now() });
+      } else {
+        await api.updatePacking(entry.id, { packed: true, trailer_id: trailerId });
+        setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, packed: true, trailer_id: trailerId } : p));
+        setLastScan({ name: container.name, status: "loaded", time: Date.now() });
+      }
+    } catch { showToast("Error processing scan"); }
+    setBusy(false);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  // Keep the input focused on the pack screen so the handheld scanner works.
+  useEffect(() => {
+    if (screen !== "pack") return;
+    setTimeout(() => inputRef.current?.focus(), 150);
+  }, [screen]);
+
+  const STATUS = {
+    loaded:     { icon: "✅", bg: "rgba(34,197,94,0.18)",   color: "#86efac", text: "Loaded onto the truck" },
+    already:    { icon: "ℹ️", bg: "rgba(148,163,184,0.16)", color: "#cbd5e1", text: "Already loaded" },
+    not_needed: { icon: "⚠️", bg: "rgba(245,158,11,0.18)",  color: "#fcd34d", text: "Not on this event's list" },
+    unknown:    { icon: "❌", bg: "rgba(239,68,68,0.18)",   color: "#fca5a5", text: "Unknown code — check the label" },
+  };
+
+  // Dark-mode palette (warehouse-friendly)
+  const BG = "#0f172a", PANEL = "#1e293b", PANEL2 = "#172033", BORDER = "1px solid rgba(255,255,255,0.08)", MUTED = "#94a3b8", DIM = "#64748b";
+  const headBtn = { background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 15, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, color: "#e2e8f0" };
+  const wrap = { position: "fixed", inset: 0, background: BG, zIndex: 400, fontFamily: "'DM Sans','Segoe UI',sans-serif", color: "#f1f5f9", display: "flex", flexDirection: "column", overflow: "hidden" };
+
+  if (loading) return <div style={{ ...wrap, alignItems: "center", justifyContent: "center", color: MUTED, fontSize: 18 }}>Loading…</div>;
+  if (error) return <div style={{ ...wrap, alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 14 }}><div style={{ fontSize: 40 }}>⚠️</div><div style={{ color: MUTED }}>{error}</div></div>;
+
+  // ── Event picker ──
+  if (screen === "events") {
+    return (
+      <div style={wrap}>
+        <div style={{ padding: "22px 28px", borderBottom: BORDER, background: PANEL, flexShrink: 0 }}>
+          <div style={{ fontSize: 13, color: MUTED, fontWeight: 500 }}>Warehouse Packing</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>Pick an event to pack</div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 28 }}>
+          {upcoming.length === 0 ? (
+            <div style={{ textAlign: "center", color: DIM, marginTop: 60, fontSize: 16 }}>No upcoming events to pack.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 20 }}>
+              {upcoming.map(e => {
+                const ep = packing.filter(p => p.event_id === e.id);
+                const pk = ep.filter(p => p.packed).length;
+                const pct = ep.length ? Math.round((pk / ep.length) * 100) : 0;
+                return (
+                  <button key={e.id} onClick={() => openEvent(e.id)} style={{ background: PANEL, border: BORDER, borderRadius: 16, padding: 22, cursor: "pointer", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, fontFamily: "inherit", color: "#f1f5f9" }}>
+                    <div style={{ width: 96, height: 96, borderRadius: 14, background: "#fff", border: BORDER, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                      {e.logo_url ? <img src={e.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 40 }}>📦</span>}
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>{e.name}</div>
+                    <div style={{ fontSize: 13, color: MUTED }}>{[e.location, e.date].filter(Boolean).join(" · ")}</div>
+                    <div style={{ width: "100%", marginTop: 4 }}>
+                      <div style={{ height: 8, background: "rgba(255,255,255,0.1)", borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: pct === 100 ? "#16a34a" : "#3b82f6" }} />
+                      </div>
+                      <div style={{ fontSize: 12, color: DIM, marginTop: 5 }}>{ep.length ? `${pk} / ${ep.length} packed` : "Nothing on the list yet"}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {toast && <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#334155", color: "#fff", padding: "12px 22px", borderRadius: 99, fontSize: 14, zIndex: 500 }}>{toast}</div>}
+      </div>
+    );
+  }
+
+  // ── Trailer picker ──
+  if (screen === "trailer") {
+    return (
+      <div style={wrap}>
+        <div style={{ padding: "20px 28px", borderBottom: BORDER, background: PANEL, flexShrink: 0, display: "flex", alignItems: "center", gap: 16 }}>
+          <button onClick={backToEvents} style={headBtn}>← Events</button>
+          <div>
+            <div style={{ fontSize: 13, color: MUTED, fontWeight: 500 }}>{event?.name}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>Which trailer are you loading?</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 28 }}>
+          {assignedTrailers.length === 0 ? (
+            <div style={{ textAlign: "center", color: DIM, marginTop: 60, fontSize: 16 }}>No trailers are assigned to this event yet.<br />Ask an admin to assign one in the event screen.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 18 }}>
+              {assignedTrailers.map(t => (
+                <button key={t.id} onClick={() => { setTrailerId(t.id); setScreen("pack"); }} style={{ background: PANEL, border: BORDER, borderRadius: 16, padding: "28px 20px", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, color: "#f1f5f9" }}>
+                  <span style={{ fontSize: 44 }}>🚛</span>
+                  <span style={{ fontSize: 20, fontWeight: 700 }}>Trailer {t.number}</span>
+                  <span style={{ fontSize: 13, color: DIM }}>{t.door_type === "barn" ? "Barn doors" : "Roll-up"}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Pack screen (scan-first) ──
+  const st = lastScan ? STATUS[lastScan.status] : null;
+  return (
+    <div style={wrap}>
+      <div style={{ padding: "16px 24px", borderBottom: BORDER, background: PANEL, flexShrink: 0, display: "flex", alignItems: "center", gap: 14 }}>
+        <button onClick={assignedTrailers.length > 1 ? () => { setScreen("trailer"); setLastScan(null); } : backToEvents} style={headBtn}>←</button>
+        {event?.logo_url && <img src={event.logo_url} alt="" style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 8, border: BORDER, background: "#fff" }} />}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event?.name}</div>
+          <div style={{ fontSize: 13, color: MUTED }}>🚛 Trailer {trailer?.number} · {packedCount} / {totalCount} packed</div>
+        </div>
+        <button onClick={backToEvents} style={headBtn}>Done</button>
+      </div>
+
+      {/* progress bar */}
+      <div style={{ height: 6, background: "rgba(255,255,255,0.08)", flexShrink: 0 }}>
+        <div style={{ width: `${totalCount ? (packedCount / totalCount) * 100 : 0}%`, height: "100%", background: packedCount === totalCount && totalCount ? "#16a34a" : "#3b82f6", transition: "width 0.3s" }} />
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 18, maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        {/* Scan box */}
+        <div style={{ background: PANEL, border: BORDER, borderRadius: 16, padding: 20, boxSizing: "border-box" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Scan a container onto the truck</div>
+          <input
+            ref={inputRef}
+            value={scanInput}
+            onChange={e => setScanInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { const v = scanInput.trim(); if (v) processScan(v); setScanInput(""); } }}
+            onBlur={() => { if (screen === "pack") setTimeout(() => inputRef.current?.focus(), 200); }}
+            placeholder="Scan with the handheld, or type a code…"
+            autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            style={{ width: "100%", boxSizing: "border-box", padding: "16px 18px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 17, fontFamily: "inherit", outline: "none" }} />
+          <div style={{ marginTop: 12, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, background: st ? st.bg : "rgba(255,255,255,0.03)", border: st ? "none" : "1px dashed rgba(255,255,255,0.12)" }}>
+            {st ? <><span style={{ fontSize: 26 }}>{st.icon}</span><div><div style={{ fontWeight: 700, fontSize: 16, color: st.color }}>{lastScan.name}</div><div style={{ fontSize: 13, color: st.color }}>{st.text}</div></div></>
+              : <div style={{ color: DIM, fontSize: 14, textAlign: "center", width: "100%" }}>Ready — scan a container QR code</div>}
+          </div>
+        </div>
+
+        {/* Remaining to pack */}
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", marginBottom: 10 }}>Still to pack ({remaining.length})</div>
+          {remaining.length === 0 ? (
+            <div style={{ background: "rgba(34,197,94,0.16)", color: "#86efac", borderRadius: 12, padding: "18px 16px", textAlign: "center", fontWeight: 600 }}>🎉 Everything is packed!</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {remaining.map(entry => {
+                const isContainer = !!entry.container_id;
+                return (
+                  <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 22 }}>{isContainer ? "📦" : "🧰"}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}</div>
+                      <div style={{ fontSize: 12, color: DIM }}>{isContainer ? "Scan its QR code" : "Tap when loaded"}</div>
+                    </div>
+                    <button onClick={() => togglePacked(entry)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓ Packed</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Packed (undo) */}
+        {done.length > 0 && (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: DIM, marginBottom: 10 }}>Packed ({done.length})</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {done.map(entry => (
+                <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 16 }}>✅</span>
+                  <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>
+                  <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {toast && <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#334155", color: "#fff", padding: "12px 22px", borderRadius: 99, fontSize: 14, zIndex: 500 }}>{toast}</div>}
     </div>
   );
 }

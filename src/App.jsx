@@ -2471,7 +2471,7 @@ export default function App() {
           {isAdmin && <button className={`nav-btn ${view === "users" ? "active" : ""}`} onClick={() => setView("users")}>Users</button>}
         </>}
         <div style={{ flex: 1 }} />
-        {!m && <button onClick={() => setShowTrailers(true)} style={{ background: "#fff", color: "#374151", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 500 }}>🚛 Trailers</button>}
+        <button onClick={() => setShowTrailers(true)} style={{ background: "#fff", color: "#374151", border: "1px solid #e5e7eb", borderRadius: 6, padding: m ? "6px 10px" : "6px 14px", cursor: "pointer", fontSize: m ? 16 : 13, fontFamily: "inherit", fontWeight: 500, lineHeight: 1 }}>{m ? "🚛" : "🚛 Trailers"}</button>
         {!m && canViewPro && <a href="https://pro-crm-topaz.vercel.app" target="_blank" rel="noreferrer" style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", textDecoration: "none", fontWeight: 500 }}>PRO Sales</a>}
         {!m && <button style={{ background: "none", border: "none", fontSize: 13, padding: "6px 10px", color: "#9ca3af", cursor: "pointer", fontFamily: "inherit" }} onClick={handleLogout}>Sign out</button>}
         <button style={{ background: "none", border: "none", fontSize: 20, padding: "8px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }} onClick={() => { setPendingLogo(orgLogo); setShowSettings(true); }}>⚙️</button>

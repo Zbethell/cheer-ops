@@ -5421,7 +5421,13 @@ function KioskPack() {
         {event?.logo_url && <img src={event.logo_url} alt="" style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 8, border: BORDER, background: "#fff" }} />}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event?.name}</div>
-          <div style={{ fontSize: 13, color: MUTED }}>🚛 Trailer {trailer?.number} · {packedCount} / {totalCount} packed</div>
+          <div style={{ fontSize: 13, color: MUTED }}>{packedCount} / {totalCount} packed</div>
+        </div>
+        {/* Big, obvious badge so the packer always knows which trailer they're loading */}
+        <div onClick={assignedTrailers.length > 1 ? () => { setScreen("trailer"); setLastScan(null); } : undefined}
+          style={{ flexShrink: 0, background: "#2563eb", borderRadius: 12, padding: "8px 18px", display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.1, cursor: assignedTrailers.length > 1 ? "pointer" : "default", boxShadow: "0 2px 10px rgba(37,99,235,0.4)" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: 0.6 }}>🚛 Loading Trailer</span>
+          <span style={{ fontSize: 26, fontWeight: 800, color: "#fff", whiteSpace: "nowrap" }}>{trailer?.number}</span>
         </div>
         <button onClick={backToEvents} style={headBtn}>Done</button>
       </div>
@@ -5437,7 +5443,7 @@ function KioskPack() {
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           {/* Scan box */}
           <div style={{ background: PANEL, border: BORDER, borderRadius: 16, padding: 18, boxSizing: "border-box" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>📷 Scan a container onto the truck</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>📷 Scan a container onto <span style={{ color: "#60a5fa" }}>Trailer {trailer?.number}</span></div>
             <input
               ref={inputRef}
               value={scanInput}

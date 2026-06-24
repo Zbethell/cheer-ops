@@ -40,6 +40,7 @@ const api = {
   updatePacking: (id, patch) => sb(`packing_list?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePacking: (id) => sb(`packing_list?id=eq.${id}`, { method: "DELETE" }),
   deletePackingByEvent: (eventId) => sb(`packing_list?event_id=eq.${eventId}`, { method: "DELETE" }),
+  getContainerItems: () => sb("container_items"),
   getCategories: () => sb("categories?order=sort_order,name"),
   addCategory: (cat) => sb("categories", { method: "POST", body: JSON.stringify(cat) }),
   updateCategory: (id, patch) => sb(`categories?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -5188,6 +5189,7 @@ function KioskPack() {
   const [items, setItems] = useState([]);
   const [trailers, setTrailers] = useState([]);
   const [eventTrailers, setEventTrailers] = useState([]);
+  const [containerItems, setContainerItems] = useState([]); // expected contents per container
 
   const [screen, setScreen] = useState("events"); // events | trailer | pack
   const [eventId, setEventId] = useState(null);
@@ -5200,16 +5202,17 @@ function KioskPack() {
   const [lastScan, setLastScan] = useState(null); // { name, status, time }
   const [busy, setBusy] = useState(false);
   const [previewItem, setPreviewItem] = useState(null); // item whose photo is shown in the lightbox
+  const [verify, setVerify] = useState(null); // { entry, container, contents:[{name,qty,image_url}] } pending content check
   const inputRef = useRef();
 
   useEffect(() => {
     (async () => {
       try {
-        const [e, p, c, it, tr, et] = await Promise.all([
+        const [e, p, c, it, tr, et, ci] = await Promise.all([
           api.getEvents(), api.getAllPacking(), api.getContainers(),
-          api.getItems(), api.getTrailers(), api.getEventTrailers(),
+          api.getItems(), api.getTrailers(), api.getEventTrailers(), api.getContainerItems(),
         ]);
-        setEvents(e); setPacking(p); setContainers(c); setItems(it); setTrailers(tr); setEventTrailers(et);
+        setEvents(e); setPacking(p); setContainers(c); setItems(it); setTrailers(tr); setEventTrailers(et); setContainerItems(ci);
       } catch { setError("Could not connect to the database."); }
       setLoading(false);
     })();
@@ -5228,10 +5231,21 @@ function KioskPack() {
   // The inventory item behind a loose packing entry (null for containers / ad-hoc rows).
   const itemFor = (entry) => entry.item_id ? items.find(i => i.id === entry.item_id) : null;
 
+  // Expected contents of a container, resolved to item names/qtys (empty if none defined).
+  const contentsFor = (containerId) => containerItems
+    .filter(ci => ci.container_id === containerId)
+    .map(ci => { const it = items.find(i => i.id === ci.item_id); return { id: ci.id, name: it?.name || "Unknown item", qty: ci.qty, image_url: it?.image_url || null }; });
+
   const packedCount = eventPacking.filter(p => p.packed).length;
   const totalCount = eventPacking.length;
-  const remaining = eventPacking.filter(p => !p.packed);
-  const done = eventPacking.filter(p => p.packed);
+
+  // Split the list into the two pack methods: scannable containers vs. hand-checked loose/ad-hoc items.
+  const scanEntries = eventPacking.filter(p => p.container_id);
+  const handEntries = eventPacking.filter(p => !p.container_id);
+  const scanRemaining = scanEntries.filter(p => !p.packed);
+  const scanDone = scanEntries.filter(p => p.packed);
+  const handRemaining = handEntries.filter(p => !p.packed);
+  const handDone = handEntries.filter(p => p.packed);
 
   const openEvent = (id) => {
     setEventId(id);
@@ -5261,21 +5275,36 @@ function KioskPack() {
     const container = containers.find(c => c.id === parsed || c.id.startsWith(parsed));
     if (!container) { setLastScan({ name: parsed, status: "unknown", time: Date.now() }); showToast("Unknown code"); return; }
     const entry = eventPacking.find(p => p.container_id === container.id);
+    if (!entry) { setLastScan({ name: container.name, status: "not_needed", time: Date.now() }); showToast("Not on this list"); refocus(); return; }
+    if (entry.packed && entry.trailer_id === trailerId) { setLastScan({ name: container.name, status: "already", time: Date.now() }); refocus(); return; }
+    // If this container has expected contents, pause for a quick visual check before loading.
+    const contents = contentsFor(container.id);
+    if (contents.length) { setVerify({ entry, container, contents }); return; }
+    await loadEntry(entry, container.name);
+  };
+
+  // Mark a scanned container loaded onto the current trailer.
+  const loadEntry = async (entry, name) => {
     setBusy(true);
     try {
-      if (!entry) {
-        setLastScan({ name: container.name, status: "not_needed", time: Date.now() });
-      } else if (entry.packed && entry.trailer_id === trailerId) {
-        setLastScan({ name: container.name, status: "already", time: Date.now() });
-      } else {
-        await api.updatePacking(entry.id, { packed: true, trailer_id: trailerId });
-        setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, packed: true, trailer_id: trailerId } : p));
-        setLastScan({ name: container.name, status: "loaded", time: Date.now() });
-      }
+      await api.updatePacking(entry.id, { packed: true, trailer_id: trailerId });
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, packed: true, trailer_id: trailerId } : p));
+      setLastScan({ name, status: "loaded", time: Date.now() });
     } catch { showToast("Error processing scan"); }
     setBusy(false);
-    setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50);
+    refocus();
   };
+
+  const confirmVerify = async () => {
+    if (!verify) return;
+    const { entry, container } = verify;
+    setVerify(null);
+    await loadEntry(entry, container.name);
+  };
+
+  const cancelVerify = () => { setVerify(null); refocus(); };
+
+  const refocus = () => setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50);
 
   // Keep the input focused on the pack screen so the handheld scanner works.
   useEffect(() => {
@@ -5388,92 +5417,163 @@ function KioskPack() {
         <div style={{ width: `${totalCount ? (packedCount / totalCount) * 100 : 0}%`, height: "100%", background: packedCount === totalCount && totalCount ? "#16a34a" : "#3b82f6", transition: "width 0.3s" }} />
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 18, maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        {/* Scan box */}
-        <div style={{ background: PANEL, border: BORDER, borderRadius: 16, padding: 20, boxSizing: "border-box" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Scan a container onto the truck</div>
-          <input
-            ref={inputRef}
-            value={scanInput}
-            onChange={e => setScanInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") { const v = scanInput.trim(); if (v) processScan(v); setScanInput(""); } }}
-            onBlur={() => { if (screen === "pack") setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 200); }}
-            placeholder="Scan with the handheld, or type a code…"
-            autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-            style={{ width: "100%", boxSizing: "border-box", padding: "16px 18px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 17, fontFamily: "inherit", outline: "none" }} />
-          <div style={{ marginTop: 12, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, background: st ? st.bg : "rgba(255,255,255,0.03)", border: st ? "none" : "1px dashed rgba(255,255,255,0.12)" }}>
-            {st ? <><span style={{ fontSize: 26 }}>{st.icon}</span><div><div style={{ fontWeight: 700, fontSize: 16, color: st.color }}>{lastScan.name}</div><div style={{ fontSize: 13, color: st.color }}>{st.text}</div></div></>
-              : <div style={{ color: DIM, fontSize: 14, textAlign: "center", width: "100%" }}>Ready — scan a container QR code</div>}
-          </div>
-        </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18, alignContent: "start", maxWidth: 1100, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
 
-        {/* Remaining to pack */}
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", marginBottom: 10 }}>Still to pack ({remaining.length})</div>
-          {remaining.length === 0 ? (
-            <div style={{ background: "rgba(34,197,94,0.16)", color: "#86efac", borderRadius: 12, padding: "18px 16px", textAlign: "center", fontWeight: 600 }}>🎉 Everything is packed!</div>
+        {/* ── LEFT: scan containers onto the truck ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+          {/* Scan box */}
+          <div style={{ background: PANEL, border: BORDER, borderRadius: 16, padding: 18, boxSizing: "border-box" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>📷 Scan a container onto the truck</div>
+            <input
+              ref={inputRef}
+              value={scanInput}
+              onChange={e => setScanInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { const v = scanInput.trim(); if (v) processScan(v); setScanInput(""); } }}
+              onBlur={() => { if (screen === "pack" && !verify && !previewItem) setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 200); }}
+              placeholder="Scan with the handheld, or type a code…"
+              autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              style={{ width: "100%", boxSizing: "border-box", padding: "15px 16px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 17, fontFamily: "inherit", outline: "none" }} />
+            <div style={{ marginTop: 10, borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, background: st ? st.bg : "rgba(255,255,255,0.03)", border: st ? "none" : "1px dashed rgba(255,255,255,0.12)" }}>
+              {st ? <><span style={{ fontSize: 24 }}>{st.icon}</span><div><div style={{ fontWeight: 700, fontSize: 15, color: st.color }}>{lastScan.name}</div><div style={{ fontSize: 13, color: st.color }}>{st.text}</div></div></>
+                : <div style={{ color: DIM, fontSize: 14, textAlign: "center", width: "100%" }}>Ready — scan a container QR code</div>}
+            </div>
+          </div>
+
+          {/* Containers still to scan */}
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", display: "flex", alignItems: "center", gap: 8 }}>
+            🚛 Scan onto the truck
+            <span style={{ fontSize: 12, fontWeight: 600, color: DIM, background: "rgba(255,255,255,0.06)", borderRadius: 99, padding: "2px 9px" }}>{scanDone.length}/{scanEntries.length}</span>
+          </div>
+          {scanEntries.length === 0 ? (
+            <div style={{ color: DIM, fontSize: 13, padding: "8px 2px" }}>No containers to scan for this event.</div>
+          ) : scanRemaining.length === 0 ? (
+            <div style={{ background: "rgba(34,197,94,0.16)", color: "#86efac", borderRadius: 12, padding: "14px 16px", textAlign: "center", fontWeight: 600 }}>✅ All containers loaded</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {remaining.map(entry => {
-                const isContainer = !!entry.container_id;
+              {scanRemaining.map(entry => {
+                const container = containers.find(c => c.id === entry.container_id);
+                const contents = contentsFor(entry.container_id);
+                return (
+                  <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "13px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 22 }}>📦</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}</div>
+                      <div style={{ fontSize: 12, color: DIM }}>{contents.length ? `Scan its QR · ${contents.length} item type${contents.length !== 1 ? "s" : ""} inside` : "Scan its QR code"}</div>
+                    </div>
+                    {contents.length > 0
+                      ? <button onClick={() => setVerify({ entry, container, contents })} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "9px 13px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>📋 Check &amp; load</button>
+                      : <button onClick={() => togglePacked(entry)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>✓ Load</button>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Loaded containers (undo) */}
+          {scanDone.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: DIM }}>Loaded ({scanDone.length})</div>
+              {scanDone.map(entry => (
+                <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 15 }}>✅</span>
+                  <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>
+                  <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "5px 11px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── RIGHT: check off loose items by hand ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", display: "flex", alignItems: "center", gap: 8 }}>
+            ✋ Check off by hand
+            <span style={{ fontSize: 12, fontWeight: 600, color: DIM, background: "rgba(255,255,255,0.06)", borderRadius: 99, padding: "2px 9px" }}>{handDone.length}/{handEntries.length}</span>
+          </div>
+          {handEntries.length === 0 ? (
+            <div style={{ color: DIM, fontSize: 13, padding: "8px 2px" }}>No loose items to check off for this event.</div>
+          ) : handRemaining.length === 0 ? (
+            <div style={{ background: "rgba(34,197,94,0.16)", color: "#86efac", borderRadius: 12, padding: "14px 16px", textAlign: "center", fontWeight: 600 }}>✅ All items checked off</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {handRemaining.map(entry => {
                 const it = itemFor(entry);
                 const hasPhoto = !!it?.image_url;
                 return (
-                  <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                  <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "13px 14px", display: "flex", alignItems: "center", gap: 12 }}>
                     {it ? (
                       <button onClick={() => setPreviewItem(it)} title={hasPhoto ? "Show photo" : "No photo on file"}
                         style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 10, overflow: "hidden", border: BORDER, background: hasPhoto ? "#fff" : "rgba(255,255,255,0.05)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                         {hasPhoto ? <img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 20 }}>🧰</span>}
                       </button>
-                    ) : (
-                      <span style={{ fontSize: 22 }}>{isContainer ? "📦" : "🧰"}</span>
-                    )}
+                    ) : <span style={{ fontSize: 22 }}>🧰</span>}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {it ? (
-                        <button onClick={() => setPreviewItem(it)}
-                          style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#f1f5f9", fontSize: 16, fontWeight: 600, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
-                          {labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}
-                          {hasPhoto && <span style={{ fontSize: 13, color: "#60a5fa" }}>🔍</span>}
+                        <button onClick={() => setPreviewItem(it)} style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#f1f5f9", fontSize: 16, fontWeight: 600, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
+                          {labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}{hasPhoto && <span style={{ fontSize: 13, color: "#60a5fa" }}>🔍</span>}
                         </button>
-                      ) : (
-                        <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}</div>
-                      )}
-                      <div style={{ fontSize: 12, color: DIM }}>{isContainer ? "Scan its QR code" : it ? "Tap the name to see a photo · tap ✓ when loaded" : "Tap when loaded"}</div>
+                      ) : <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}{(entry.qty_needed || 1) > 1 ? ` ×${entry.qty_needed}` : ""}</div>}
+                      <div style={{ fontSize: 12, color: DIM }}>{it ? "Tap name for photo · ✓ when packed" : "Tap when packed"}</div>
                     </div>
-                    <button onClick={() => togglePacked(entry)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓ Packed</button>
+                    <button onClick={() => togglePacked(entry)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>✓ Packed</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Checked-off items (undo) */}
+          {handDone.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: DIM }}>Packed ({handDone.length})</div>
+              {handDone.map(entry => {
+                const it = itemFor(entry);
+                return (
+                  <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 15 }}>✅</span>
+                    {it ? (
+                      <button onClick={() => setPreviewItem(it)} style={{ flex: 1, background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: MUTED, textDecoration: "line-through", cursor: "pointer", textAlign: "left" }}>{labelFor(entry)}{it.image_url ? " 🔍" : ""}</button>
+                    ) : <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>}
+                    <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "5px 11px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
                   </div>
                 );
               })}
             </div>
           )}
         </div>
+      </div>
 
-        {/* Packed (undo) */}
-        {done.length > 0 && (
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: DIM, marginBottom: 10 }}>Packed ({done.length})</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {done.map(entry => {
-                const it = itemFor(entry);
-                return (
-                  <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 16 }}>✅</span>
-                    {it ? (
-                      <button onClick={() => setPreviewItem(it)}
-                        style={{ flex: 1, background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: MUTED, textDecoration: "line-through", cursor: "pointer", textAlign: "left" }}>
-                        {labelFor(entry)}{it.image_url ? " 🔍" : ""}
-                      </button>
-                    ) : (
-                      <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>
-                    )}
-                    <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
-                  </div>
-                );
-              })}
+      {/* Container contents verification — quick glance before loading */}
+      {verify && (
+        <div onClick={cancelVerify}
+          style={{ position: "fixed", inset: 0, zIndex: 650, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: PANEL, border: BORDER, borderRadius: 18, padding: 22, maxWidth: 460, width: "100%", maxHeight: "88vh", display: "flex", flexDirection: "column", gap: 14, boxSizing: "border-box" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 32 }}>📦</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: MUTED, fontWeight: 500 }}>Confirm contents before loading</div>
+                <div style={{ fontSize: 20, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{verify.container?.name}</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1" }}>Should contain</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
+              {verify.contents.map(c => (
+                <div key={c.id} style={{ background: PANEL2, border: BORDER, borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                  {c.image_url
+                    ? <img src={c.image_url} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "contain", background: "#fff", flexShrink: 0 }} />
+                    : <span style={{ fontSize: 22, width: 40, textAlign: "center", flexShrink: 0 }}>🧰</span>}
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 600 }}>{c.name}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#86efac", whiteSpace: "nowrap" }}>×{c.qty}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+              <button onClick={cancelVerify} style={{ flex: "0 0 auto", background: "rgba(255,255,255,0.08)", color: "#e2e8f0", border: "none", borderRadius: 12, padding: "14px 18px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={confirmVerify} disabled={busy} style={{ flex: 1, background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, padding: "14px 18px", fontSize: 16, fontWeight: 800, cursor: busy ? "default" : "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>✓ Confirm &amp; load</button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Item photo lightbox — tap anywhere to close */}
       {previewItem && (

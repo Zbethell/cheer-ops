@@ -783,23 +783,35 @@ function CategoryManager({ categories, setCategories, showToast, isMobile: m }) 
 function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
   const [showModal, setShowModal] = useState(false);
   const [editTrailer, setEditTrailer] = useState(null);
-  const [form, setForm] = useState({ number: "", door_type: "rollup", notes: "" });
+  const [form, setForm] = useState({ number: "", door_type: "rollup", notes: "", safety_inspection_expiry: "" });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
-  const openAdd = () => { setForm({ number: "", door_type: "rollup", notes: "", length_ft: 53, width_ft: 8 }); setEditTrailer(null); setShowModal(true); };
-  const openEdit = (t) => { setForm({ number: t.number, door_type: t.door_type, notes: t.notes || "", length_ft: t.length_ft || 53, width_ft: t.width_ft || 8 }); setEditTrailer(t); setShowModal(true); };
+  const openAdd = () => { setForm({ number: "", door_type: "rollup", notes: "", length_ft: 53, width_ft: 8, safety_inspection_expiry: "" }); setEditTrailer(null); setShowModal(true); };
+  const openEdit = (t) => { setForm({ number: t.number, door_type: t.door_type, notes: t.notes || "", length_ft: t.length_ft || 53, width_ft: t.width_ft || 8, safety_inspection_expiry: t.safety_inspection_expiry || "" }); setEditTrailer(t); setShowModal(true); };
+
+  // A blank date must go to the DB as null, not "" (which a `date` column rejects).
+  const inspStatus = (dateStr) => {
+    if (!dateStr) return null;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = Math.round((new Date(dateStr + "T00:00:00") - today) / 86400000);
+    const nice = new Date(dateStr + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    if (days < 0) return { color: "#dc2626", label: `Expired ${Math.abs(days)}d ago`, nice };
+    if (days <= 30) return { color: "#d97706", label: `Expires in ${days}d`, nice };
+    return { color: "#059669", label: `Valid · ${days}d left`, nice };
+  };
 
   const save = async () => {
     if (!form.number.trim()) return;
     setSaving(true);
+    const payload = { ...form, safety_inspection_expiry: form.safety_inspection_expiry || null };
     try {
       if (editTrailer) {
-        await api.updateTrailer(editTrailer.id, form);
-        setTrailers(prev => prev.map(t => t.id === editTrailer.id ? { ...t, ...form } : t));
+        await api.updateTrailer(editTrailer.id, payload);
+        setTrailers(prev => prev.map(t => t.id === editTrailer.id ? { ...t, ...payload } : t));
         showToast("Trailer updated");
       } else {
-        const created = await api.addTrailer(form);
+        const created = await api.addTrailer(payload);
         setTrailers(prev => [...prev, created[0]]);
         showToast("Trailer added");
       }
@@ -825,6 +837,13 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 500, fontSize: 14 }}>🚛 Trailer {t.number}</div>
               <div style={{ fontSize: 12, color: "#9ca3af" }}>{t.door_type === "barn" ? "Barn doors" : "Roll-up door"} · {t.length_ft || 53}ft × {t.width_ft || 8}ft{t.notes ? ` · ${t.notes}` : ""}</div>
+              {(() => { const s = inspStatus(t.safety_inspection_expiry); return (
+                <div style={{ fontSize: 12, marginTop: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ color: "#6b7280" }}>🛡️ Safety insp:</span>
+                  {s ? <><span style={{ color: "#374151", fontWeight: 500 }}>{s.nice}</span><span style={{ color: s.color, fontWeight: 600, background: `${s.color}1a`, borderRadius: 99, padding: "1px 8px" }}>{s.label}</span></>
+                    : <span style={{ color: "#d1d5db", fontStyle: "italic" }}>not set</span>}
+                </div>
+              ); })()}
             </div>
             <button style={{ ...ghostBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => openEdit(t)}>Edit</button>
             <button style={{ ...dangerBtn, padding: "5px 10px" }} onClick={() => remove(t.id)}>Remove</button>
@@ -848,6 +867,8 @@ function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
             <span style={{ color: "#9ca3af", fontSize: 13 }}>×</span>
             <input type="number" value={form.width_ft} onChange={e => setForm(f => ({ ...f, width_ft: e.target.value }))} style={{ ...iStyle, flex: 1 }} placeholder="Width (ft)" min="1" step="0.5" />
           </div>
+          <label style={labelStyle}>Safety Inspection Expiry</label>
+          <input type="date" value={form.safety_inspection_expiry} onChange={e => setForm(f => ({ ...f, safety_inspection_expiry: e.target.value }))} style={iStyle} />
           <label style={labelStyle}>Notes (optional)</label>
           <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Any details..." />
         </Modal>

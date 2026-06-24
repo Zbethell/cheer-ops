@@ -980,7 +980,7 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
   const [expandedId, setExpandedId] = useState(null);
   const [expandedParentIds, setExpandedParentIds] = useState(new Set());
   const [childFilter, setChildFilter] = useState(false);
-  const [form, setForm] = useState({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "" });
+  const [form, setForm] = useState({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "", image_url: null });
   const [saving, setSaving] = useState(false);
   const [addItemForm, setAddItemForm] = useState({ item_id: "", qty: 1 });
   const [addingItem, setAddingItem] = useState(false);
@@ -994,8 +994,8 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
   });
   const iStyle = m ? inputStyleMobile : inputStyle;
 
-  const openAdd = () => { setForm({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "" }); setEditContainer(null); setShowModal(true); };
-  const openEdit = (c) => { setForm({ name: c.name, type: c.type, color: c.color || "", notes: c.notes || "", area_id: c.area_id || "", dim_w_ft: c.dim_w_ft || "", dim_d_ft: c.dim_d_ft || "", parent_container_id: c.parent_container_id || "" }); setEditContainer(c); setShowModal(true); };
+  const openAdd = () => { setForm({ name: "", type: "tote", color: "", notes: "", area_id: "", dim_w_ft: "", dim_d_ft: "", parent_container_id: "", image_url: null }); setEditContainer(null); setShowModal(true); };
+  const openEdit = (c) => { setForm({ name: c.name, type: c.type, color: c.color || "", notes: c.notes || "", area_id: c.area_id || "", dim_w_ft: c.dim_w_ft || "", dim_d_ft: c.dim_d_ft || "", parent_container_id: c.parent_container_id || "", image_url: c.image_url || null }); setEditContainer(c); setShowModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) return;
@@ -1220,6 +1220,8 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
               <option key={c.id} value={c.id}>{ctIcon(c.type)} {c.name}</option>
             ))}
           </select>
+          <label style={labelStyle}>Photo (optional)</label>
+          <ImageUpload value={form.image_url} onChange={url => setForm(f => ({ ...f, image_url: url }))} pathPrefix="container" />
           <label style={labelStyle}>Notes (optional)</label>
           <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Any details..." />
         </Modal>
@@ -5455,9 +5457,14 @@ function KioskPack() {
                 return (
                   <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "13px 14px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ fontSize: 22 }}>📦</span>
+                      {container?.image_url ? (
+                        <button onClick={() => setPreviewItem({ name: container.name, image_url: container.image_url })} title="Show photo"
+                          style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 10, overflow: "hidden", border: BORDER, background: "#fff", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <img src={container.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                        </button>
+                      ) : <span style={{ fontSize: 22, width: 44, textAlign: "center" }}>📦</span>}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>{labelFor(entry)}{container?.image_url && <span style={{ fontSize: 13, color: "#60a5fa" }}>🔍</span>}</div>
                         <div style={{ fontSize: 12, color: DIM }}>Scan its QR code{contents.length ? ` · ${contents.length} item type${contents.length !== 1 ? "s" : ""} inside` : ""}</div>
                       </div>
                       <button onClick={() => loadEntry(entry, container, contents)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>✓ Load</button>
@@ -5483,13 +5490,19 @@ function KioskPack() {
           {scanDone.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: DIM }}>Loaded ({scanDone.length})</div>
-              {scanDone.map(entry => (
-                <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 15 }}>✅</span>
-                  <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>
-                  <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "5px 11px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
-                </div>
-              ))}
+              {scanDone.map(entry => {
+                const container = containers.find(c => c.id === entry.container_id);
+                return (
+                  <div key={entry.id} style={{ background: PANEL2, border: BORDER, borderRadius: 10, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 15 }}>✅</span>
+                    {container?.image_url ? (
+                      <button onClick={() => setPreviewItem({ name: container.name, image_url: container.image_url })}
+                        style={{ flex: 1, background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: MUTED, textDecoration: "line-through", cursor: "pointer", textAlign: "left" }}>{labelFor(entry)} 🔍</button>
+                    ) : <span style={{ flex: 1, fontSize: 14, color: MUTED, textDecoration: "line-through" }}>{labelFor(entry)}</span>}
+                    <button onClick={() => togglePacked(entry)} style={{ background: "none", border: BORDER, borderRadius: 8, padding: "5px 11px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: MUTED }}>Undo</button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

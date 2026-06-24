@@ -5199,10 +5199,8 @@ function KioskPack() {
 
   // Scan-screen state
   const [scanInput, setScanInput] = useState("");
-  const [lastScan, setLastScan] = useState(null); // { name, status, time }
-  const [busy, setBusy] = useState(false);
+  const [lastScan, setLastScan] = useState(null); // { name, status, time, contents:[{name,qty,image_url}] }
   const [previewItem, setPreviewItem] = useState(null); // item whose photo is shown in the lightbox
-  const [verify, setVerify] = useState(null); // { entry, container, contents:[{name,qty,image_url}] } pending content check
   const inputRef = useRef();
 
   useEffect(() => {
@@ -5266,45 +5264,30 @@ function KioskPack() {
     } catch { showToast("Couldn't update — try again"); }
   };
 
-  const processScan = async (raw) => {
-    if (busy || !raw) return;
+  // Scanning never blocks: the container loads instantly and its expected
+  // contents are shown on screen so the packer can glance-verify and keep scanning.
+  const processScan = (raw) => {
+    if (!raw) return;
     const parsed = raw.startsWith("CO:") ? raw.slice(3)
       : raw.includes("/container/") ? raw.split("/container/")[1].split("?")[0]
       : raw.trim();
     if (!parsed) return;
     const container = containers.find(c => c.id === parsed || c.id.startsWith(parsed));
-    if (!container) { setLastScan({ name: parsed, status: "unknown", time: Date.now() }); showToast("Unknown code"); return; }
-    const entry = eventPacking.find(p => p.container_id === container.id);
-    if (!entry) { setLastScan({ name: container.name, status: "not_needed", time: Date.now() }); showToast("Not on this list"); refocus(); return; }
-    if (entry.packed && entry.trailer_id === trailerId) { setLastScan({ name: container.name, status: "already", time: Date.now() }); refocus(); return; }
-    // If this container has expected contents, pause for a quick visual check before loading.
+    if (!container) { setLastScan({ name: parsed, status: "unknown", time: Date.now() }); return; }
     const contents = contentsFor(container.id);
-    if (contents.length) { setVerify({ entry, container, contents }); return; }
-    await loadEntry(entry, container.name);
+    const entry = eventPacking.find(p => p.container_id === container.id);
+    if (!entry) { setLastScan({ name: container.name, status: "not_needed", time: Date.now(), contents }); return; }
+    if (entry.packed && entry.trailer_id === trailerId) { setLastScan({ name: container.name, status: "already", time: Date.now(), contents }); return; }
+    loadEntry(entry, container, contents);
   };
 
-  // Mark a scanned container loaded onto the current trailer.
-  const loadEntry = async (entry, name) => {
-    setBusy(true);
-    try {
-      await api.updatePacking(entry.id, { packed: true, trailer_id: trailerId });
-      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, packed: true, trailer_id: trailerId } : p));
-      setLastScan({ name, status: "loaded", time: Date.now() });
-    } catch { showToast("Error processing scan"); }
-    setBusy(false);
-    refocus();
+  // Optimistically mark a container loaded; fire the save without blocking the next scan.
+  const loadEntry = (entry, container, contents) => {
+    setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, packed: true, trailer_id: trailerId } : p));
+    setLastScan({ name: container.name, status: "loaded", time: Date.now(), contents: contents ?? contentsFor(container.id) });
+    api.updatePacking(entry.id, { packed: true, trailer_id: trailerId })
+      .catch(() => { showToast("Couldn't save that scan — try again"); setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, packed: false } : p)); });
   };
-
-  const confirmVerify = async () => {
-    if (!verify) return;
-    const { entry, container } = verify;
-    setVerify(null);
-    await loadEntry(entry, container.name);
-  };
-
-  const cancelVerify = () => { setVerify(null); refocus(); };
-
-  const refocus = () => setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50);
 
   // Keep the input focused on the pack screen so the handheld scanner works.
   useEffect(() => {
@@ -5429,13 +5412,29 @@ function KioskPack() {
               value={scanInput}
               onChange={e => setScanInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { const v = scanInput.trim(); if (v) processScan(v); setScanInput(""); } }}
-              onBlur={() => { if (screen === "pack" && !verify && !previewItem) setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 200); }}
+              onBlur={() => { if (screen === "pack" && !previewItem) setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 200); }}
               placeholder="Scan with the handheld, or type a code…"
               autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
               style={{ width: "100%", boxSizing: "border-box", padding: "15px 16px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 17, fontFamily: "inherit", outline: "none" }} />
-            <div style={{ marginTop: 10, borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, background: st ? st.bg : "rgba(255,255,255,0.03)", border: st ? "none" : "1px dashed rgba(255,255,255,0.12)" }}>
-              {st ? <><span style={{ fontSize: 24 }}>{st.icon}</span><div><div style={{ fontWeight: 700, fontSize: 15, color: st.color }}>{lastScan.name}</div><div style={{ fontSize: 13, color: st.color }}>{st.text}</div></div></>
-                : <div style={{ color: DIM, fontSize: 14, textAlign: "center", width: "100%" }}>Ready — scan a container QR code</div>}
+            <div style={{ marginTop: 10, borderRadius: 12, padding: "12px 14px", background: st ? st.bg : "rgba(255,255,255,0.03)", border: st ? "none" : "1px dashed rgba(255,255,255,0.12)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {st ? <><span style={{ fontSize: 24 }}>{st.icon}</span><div><div style={{ fontWeight: 700, fontSize: 15, color: st.color }}>{lastScan.name}</div><div style={{ fontSize: 13, color: st.color }}>{st.text}</div></div></>
+                  : <div style={{ color: DIM, fontSize: 14, textAlign: "center", width: "100%" }}>Ready — scan a container QR code</div>}
+              </div>
+              {/* Show what the just-scanned container should hold — verify without stopping to tap. */}
+              {st && lastScan.contents?.length > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Should contain</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {lastScan.contents.map(c => (
+                      <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <span style={{ fontSize: 14, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                        <span style={{ fontSize: 15, fontWeight: 800, color: "#86efac", whiteSpace: "nowrap" }}>×{c.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -5454,15 +5453,26 @@ function KioskPack() {
                 const container = containers.find(c => c.id === entry.container_id);
                 const contents = contentsFor(entry.container_id);
                 return (
-                  <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "13px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 22 }}>📦</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}</div>
-                      <div style={{ fontSize: 12, color: DIM }}>{contents.length ? `Scan its QR · ${contents.length} item type${contents.length !== 1 ? "s" : ""} inside` : "Scan its QR code"}</div>
+                  <div key={entry.id} style={{ background: PANEL, border: BORDER, borderRadius: 12, padding: "13px 14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 22 }}>📦</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 16, fontWeight: 600 }}>{labelFor(entry)}</div>
+                        <div style={{ fontSize: 12, color: DIM }}>Scan its QR code{contents.length ? ` · ${contents.length} item type${contents.length !== 1 ? "s" : ""} inside` : ""}</div>
+                      </div>
+                      <button onClick={() => loadEntry(entry, container, contents)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>✓ Load</button>
                     </div>
-                    {contents.length > 0
-                      ? <button onClick={() => setVerify({ entry, container, contents })} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "9px 13px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>📋 Check &amp; load</button>
-                      : <button onClick={() => togglePacked(entry)} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>✓ Load</button>}
+                    {/* Expected contents shown inline so they're on screen before/while scanning */}
+                    {contents.length > 0 && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", gap: 3 }}>
+                        {contents.map(c => (
+                          <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                            <span style={{ fontSize: 13, color: MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1", whiteSpace: "nowrap" }}>×{c.qty}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -5542,38 +5552,6 @@ function KioskPack() {
           )}
         </div>
       </div>
-
-      {/* Container contents verification — quick glance before loading */}
-      {verify && (
-        <div onClick={cancelVerify}
-          style={{ position: "fixed", inset: 0, zIndex: 650, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: PANEL, border: BORDER, borderRadius: 18, padding: 22, maxWidth: 460, width: "100%", maxHeight: "88vh", display: "flex", flexDirection: "column", gap: 14, boxSizing: "border-box" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 32 }}>📦</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: MUTED, fontWeight: 500 }}>Confirm contents before loading</div>
-                <div style={{ fontSize: 20, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{verify.container?.name}</div>
-              </div>
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1" }}>Should contain</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
-              {verify.contents.map(c => (
-                <div key={c.id} style={{ background: PANEL2, border: BORDER, borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-                  {c.image_url
-                    ? <img src={c.image_url} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "contain", background: "#fff", flexShrink: 0 }} />
-                    : <span style={{ fontSize: 22, width: 40, textAlign: "center", flexShrink: 0 }}>🧰</span>}
-                  <div style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 600 }}>{c.name}</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#86efac", whiteSpace: "nowrap" }}>×{c.qty}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
-              <button onClick={cancelVerify} style={{ flex: "0 0 auto", background: "rgba(255,255,255,0.08)", color: "#e2e8f0", border: "none", borderRadius: 12, padding: "14px 18px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-              <button onClick={confirmVerify} disabled={busy} style={{ flex: 1, background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, padding: "14px 18px", fontSize: 16, fontWeight: 800, cursor: busy ? "default" : "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>✓ Confirm &amp; load</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Item photo lightbox — tap anywhere to close */}
       {previewItem && (

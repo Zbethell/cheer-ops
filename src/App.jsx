@@ -911,6 +911,18 @@ const payPeriodRange = (d = new Date()) => {
   return { start: new Date(y, m, 16, 0, 0, 0, 0), end: new Date(y, m + 1, 0, 23, 59, 59, 999) };
 };
 
+// The pay period |offset| steps away from the current one (offset < 0 = earlier,
+// offset > 0 = later). Walks one half-month at a time so month lengths and year
+// boundaries are handled for free.
+const periodByOffset = (offset) => {
+  let range = payPeriodRange();
+  for (let i = 0; i < Math.abs(offset); i++) {
+    const anchor = offset < 0 ? new Date(range.start.getTime() - 1) : new Date(range.end.getTime() + 1);
+    range = payPeriodRange(anchor);
+  }
+  return range;
+};
+
 function ItemSearchInput({ items, value, onChange, placeholder = "Search items...", style = {} }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -1264,7 +1276,7 @@ function ClockPage() {
   const [kioskInput, setKioskInput] = useState("");
   const [kioskError, setKioskError] = useState("");
 
-  const [screen, setScreen] = useState("code"); // code | company | switch | resolve | dashboard | manual | success
+  const [screen, setScreen] = useState("code"); // code | company | switch | resolve | dashboard | manual | stat | success
   const [employee, setEmployee] = useState(null);
   const [openEntry, setOpenEntry] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1277,12 +1289,15 @@ function ClockPage() {
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [daySummary, setDaySummary] = useState(null);
   const [timesheet, setTimesheet] = useState(null);
+  const [statForm, setStatForm] = useState({ date: "", note: "" });
+  const [statCalc, setStatCalc] = useState(null); // { loading } | { error } | { totalMs, totalHours, statHours, monthLabel, dateLabel }
+  const [periodOffset, setPeriodOffset] = useState(0); // 0 = current pay period, negative = earlier
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
   const fmtMs = (ms) => { const h = Math.floor(ms / 3600000); const mn = Math.floor((ms % 3600000) / 60000); return `${h}h ${mn}m`; };
 
-  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setTimesheet(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); };
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setTimesheet(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); setStatForm({ date: "", note: "" }); setStatCalc(null); setPeriodOffset(0); };
 
   const pressDigit = (d) => {
     if (digits.length >= 4 || loading) return;
@@ -1408,6 +1423,63 @@ function ClockPage() {
     setLoading(false);
   };
 
+  const openStat = () => { setError(""); setStatForm({ date: "", note: "" }); setStatCalc(null); setScreen("stat"); };
+
+  // Stat pay = total hours worked the previous calendar month (relative to the
+  // selected stat date), combined across all companies, divided by 20. Completed
+  // shifts only; prior stat-pay entries are excluded so you don't earn stat on stat.
+  const recalcStat = async (dateStr) => {
+    if (!dateStr || !employee) { setStatCalc(null); return; }
+    setStatCalc({ loading: true });
+    try {
+      const d = new Date(`${dateStr}T00:00:00`);
+      const windowStart = new Date(d.getFullYear(), d.getMonth() - 1, 1, 0, 0, 0, 0);
+      const windowEnd = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999);
+      const rows = await api.getEmployeeEntriesSince(employee.id, windowStart.toISOString());
+      let totalMs = 0;
+      rows.forEach(e => {
+        if (!e.clock_out || e.is_stat) return;
+        const ci = new Date(e.clock_in);
+        if (ci < windowStart || ci > windowEnd) return;
+        const ms = new Date(e.clock_out) - ci;
+        if (ms > 0) totalMs += ms;
+      });
+      const totalHours = totalMs / 3600000;
+      setStatCalc({
+        totalMs,
+        totalHours,
+        statHours: totalHours / 20,
+        monthLabel: windowStart.toLocaleDateString([], { month: "long", year: "numeric" }),
+        dateLabel: d.toLocaleDateString([], { weekday: "short", month: "long", day: "numeric", year: "numeric" }),
+      });
+    } catch { setStatCalc({ error: "Couldn't calculate. Please try again." }); }
+  };
+
+  const submitStat = async () => {
+    if (!statForm.date) { setError("Please select the stat holiday date."); return; }
+    if (!statCalc || statCalc.loading || statCalc.error) { setError("Please wait for the calculation."); return; }
+    if (statCalc.totalMs <= 0) { setError(`No hours found in ${statCalc.monthLabel} to calculate stat pay.`); return; }
+    setLoading(true); setError("");
+    try {
+      const ci = new Date(`${statForm.date}T00:00:00`);
+      const co = new Date(ci.getTime() + Math.round(statCalc.statHours * 3600000));
+      await api.addTimeEntry({
+        employee_id: employee.id,
+        clock_in: ci.toISOString(),
+        clock_out: co.toISOString(),
+        company: employee.company || employee.companies?.[0] || null,
+        is_manual: true,
+        needs_review: true,
+        is_stat: true,
+        notes: `Stat pay${statForm.note.trim() ? ` — ${statForm.note.trim()}` : ""} · ${statCalc.dateLabel} · ${statCalc.monthLabel} (${statCalc.totalHours.toFixed(1)}h ÷ 20 = ${statCalc.statHours.toFixed(2)}h)`,
+      });
+      setSuccessMsg(`Stat pay of ${statCalc.statHours.toFixed(2)}h submitted for admin review.`);
+      setScreen("success");
+      setTimeout(reset, 4000);
+    } catch { setError("Error submitting stat pay."); }
+    setLoading(false);
+  };
+
   const submitKioskCode = () => {
     if (kioskInput === KIOSK_CODE) {
       localStorage.setItem("cheerops_kiosk", KIOSK_CODE);
@@ -1430,11 +1502,11 @@ function ClockPage() {
     setLoading(false);
   };
 
-  const viewHours = async () => {
+  const loadHours = async (offset = 0) => {
     if (!employee) return;
     setLoading(true); setError("");
     try {
-      const { start, end } = payPeriodRange();
+      const { start, end } = periodByOffset(offset);
       const rows = await api.getEmployeeEntriesSince(employee.id, start.toISOString());
       const entries = rows
         .filter(e => { const ci = new Date(e.clock_in); return ci >= start && ci <= end; })
@@ -1442,27 +1514,34 @@ function ClockPage() {
       const perCo = {};
       let totalMs = 0;
       entries.forEach(e => {
-        const endTs = e.clock_out ? new Date(e.clock_out) : new Date();
+        // Open entries count up to now, but never past the period's end (for old periods).
+        const endTs = e.clock_out ? new Date(e.clock_out) : new Date(Math.min(Date.now(), end.getTime()));
         const ms = Math.max(0, endTs - new Date(e.clock_in));
         const co = e.company || employee.company || "—";
         perCo[co] = (perCo[co] || 0) + ms;
         totalMs += ms;
       });
+      const sameYear = start.getFullYear() === new Date().getFullYear();
+      const endFmt = sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" };
       setTimesheet({
         entries,
         perCo: Object.entries(perCo).map(([company, ms]) => ({ company, ms })),
         totalMs,
-        label: `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric" })}`,
+        label: `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], endFmt)}`,
       });
+      setPeriodOffset(offset);
       setScreen("hours");
     } catch { setError("Couldn't load your hours. Please try again."); }
     setLoading(false);
   };
 
+  const viewHours = () => loadHours(0);
+
   // Return from the hours view to wherever the employee came from. If they're a
   // multi-company employee who hasn't picked a company yet, send them back to that step.
   const backFromHours = () => {
     setError("");
+    setPeriodOffset(0);
     const multi = (employee?.companies?.length || 0) > 1;
     setScreen(openEntry || selectedCompany || !multi ? "dashboard" : "company");
   };
@@ -1590,6 +1669,39 @@ function ClockPage() {
     </div>
   );
 
+  if (screen === "stat") {
+    const canSubmit = !loading && statForm.date && statCalc && !statCalc.loading && !statCalc.error;
+    return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          <button onClick={() => { setError(""); setScreen("dashboard"); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 0, color: "#6b7280" }}>←</button>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 17 }}>Submit Stat Pay</div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Stat holiday date</div><input type="date" value={statForm.date} onChange={e => { const v = e.target.value; setError(""); setStatForm(f => ({ ...f, date: v })); recalcStat(v); }} style={{ ...inputStyle, fontSize: 15 }} /></div>
+          <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Holiday name (optional)</div><input value={statForm.note} onChange={e => setStatForm(f => ({ ...f, note: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} placeholder="e.g. Canada Day" /></div>
+          {statForm.date && statCalc?.loading && <div style={{ color: "#6b7280", fontSize: 14, textAlign: "center", padding: "8px 0" }}>Calculating…</div>}
+          {statCalc && !statCalc.loading && !statCalc.error && (
+            <div style={{ background: "#f8f9fb", border: "1px solid #eef0f3", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 8 }}><span>Hours worked in {statCalc.monthLabel}</span><span style={{ fontWeight: 600 }}>{statCalc.totalHours.toFixed(1)} h</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 8 }}><span>Divided by</span><span style={{ fontWeight: 600 }}>20</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, color: "#111", borderTop: "1px solid #e5e7eb", paddingTop: 9 }}><span style={{ fontWeight: 700 }}>Stat pay</span><span style={{ fontWeight: 800, color: "#059669" }}>{statCalc.statHours.toFixed(2)} h</span></div>
+            </div>
+          )}
+          {statCalc?.error && <div style={{ color: "#dc2626", fontSize: 13 }}>{statCalc.error}</div>}
+          {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
+          <button onClick={submitStat} disabled={!canSubmit} style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: canSubmit ? 1 : 0.6 }}>{loading ? "Submitting..." : "Submit for Approval"}</button>
+          <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: 0 }}>Based on your total hours the previous calendar month across all companies. Flagged for admin review.</p>
+        </div>
+      </div>
+    </div>
+    );
+  }
+
   if (screen === "switch") {
     const empCompanies = employee?.companies?.length ? employee.companies : [employee?.company];
     const others = empCompanies.filter(c => c && c !== (openEntry?.company || selectedCompany));
@@ -1626,11 +1738,19 @@ function ClockPage() {
           <button onClick={backFromHours} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 0, color: "#6b7280" }}>←</button>
           <div>
             <div style={{ fontWeight: 700, fontSize: 17 }}>My Hours</div>
-            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name} · Pay period {timesheet?.label}</div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name}</div>
           </div>
         </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 16, background: "#f8f9fb", border: "1px solid #eef0f3", borderRadius: 12, padding: "8px 10px" }}>
+          <button onClick={() => loadHours(periodOffset - 1)} disabled={loading} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, width: 36, height: 36, fontSize: 20, cursor: loading ? "default" : "pointer", color: "#374151", fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>‹</button>
+          <div style={{ textAlign: "center", lineHeight: 1.25 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{timesheet?.label}</div>
+            <div style={{ fontSize: 11, color: "#9ca3af" }}>{periodOffset === 0 ? "Current pay period" : `${Math.abs(periodOffset)} period${Math.abs(periodOffset) === 1 ? "" : "s"} ago`}</div>
+          </div>
+          <button onClick={() => loadHours(periodOffset + 1)} disabled={loading || periodOffset >= 0} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, width: 36, height: 36, fontSize: 20, cursor: (loading || periodOffset >= 0) ? "default" : "pointer", color: "#374151", fontFamily: "inherit", opacity: (loading || periodOffset >= 0) ? 0.35 : 1 }}>›</button>
+        </div>
         {(!timesheet || timesheet.entries.length === 0) ? (
-          <div style={{ textAlign: "center", color: "#6b7280", fontSize: 14, padding: "28px 0" }}>No time entries this pay period yet.</div>
+          <div style={{ textAlign: "center", color: "#6b7280", fontSize: 14, padding: "28px 0" }}>No time entries in this pay period.</div>
         ) : (
           <>
             <div style={{ maxHeight: 320, overflowY: "auto", margin: "0 -4px 16px", padding: "0 4px" }}>
@@ -1698,6 +1818,7 @@ function ClockPage() {
         <button onClick={viewHours} disabled={loading} style={{ width: "100%", background: "#fff", color: "#1a1a2e", border: "2px solid #e5e7eb", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>📋 View My Hours</button>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <button onClick={() => setScreen("manual")} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Manual entry</button>
+          <button onClick={openStat} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Stat pay</button>
           <button onClick={reset} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Not you?</button>
         </div>
       </div>
@@ -2072,7 +2193,8 @@ function EmployeeHours({ isMobile: m, showToast }) {
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, fontSize: 13 }}>{emp?.name || "Unknown"}</span>
                         <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(entry.company || emp?.company)}</span>
-                        {entry.is_manual && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
+                        {entry.is_stat && <span style={{ background: "#dcfce7", color: "#15803d", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Stat Pay</span>}
+                        {entry.is_manual && !entry.is_stat && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
                         {entry.is_auto_clocked_out && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Auto Clock-Out</span>}
                         {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
                       </div>

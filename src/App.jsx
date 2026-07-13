@@ -254,21 +254,34 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
   const VH = width;
 
   const svgRef = useRef();
-  const [dragging, setDragging] = useState(null);
-  const [localPos, setLocalPos] = useState({});
-  const [selected, setSelected] = useState(null);
-  const [zOrder, setZOrder] = useState([]);
+  const [dragging, setDragging] = useState(null);   // { key, entryId, idx, sx, sy, ox, oy }
+  const [localPos, setLocalPos] = useState({});      // key -> { x, y }
+  const [selected, setSelected] = useState(null);    // key
+  const [zOrder, setZOrder] = useState([]);          // [key]
+  const [placeCounts, setPlaceCounts] = useState({}); // entryId -> how many to place
 
-  const bringToFront = id => setZOrder(prev => [...prev.filter(z => z !== id), id]);
+  const bringToFront = key => setZOrder(prev => [...prev.filter(z => z !== key), key]);
+  const unitKey = (entryId, idx) => `${entryId}:${idx}`;
 
   const snap = v => Math.round(v * 2) / 2;
   const clampX = (x, iw) => Math.max(0, Math.min(length - iw, x));
   const clampY = (y, ih) => Math.max(0, Math.min(width - ih, y));
 
-  const getItemDims = entry => {
+  const getBaseDims = entry => {
     const w = entry.container?.dim_w_ft || entry.item?.dim_w_ft || entry.ad_hoc_dim_w_ft || 2;
     const d = entry.container?.dim_d_ft || entry.item?.dim_d_ft || entry.ad_hoc_dim_d_ft || 2;
-    return entry.diag_rotated ? [d, w] : [w, d];
+    return [w, d];
+  };
+  const getUnitDims = (entry, rotated) => {
+    const [w, d] = getBaseDims(entry);
+    return rotated ? [d, w] : [w, d];
+  };
+  // Per-unit positions. New source of truth: diag_positions = [{x,y,rotated}, ...].
+  // Falls back to the legacy single diag_x/diag_y so existing layouts keep working.
+  const getPositions = entry => {
+    if (Array.isArray(entry.diag_positions)) return entry.diag_positions;
+    if (entry.diag_x != null && entry.diag_y != null) return [{ x: entry.diag_x, y: entry.diag_y, rotated: !!entry.diag_rotated }];
+    return [];
   };
 
   const getSvgPt = e => {
@@ -284,75 +297,111 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
     return getSvgPt({ clientX: t.clientX, clientY: t.clientY });
   };
 
-  const startDrag = (e, entry) => {
+  // Single writer for an entry's positions. Also nulls the legacy fields so
+  // diag_positions becomes the sole source of truth once an entry is touched.
+  const savePositions = async (entry, positions) => {
+    try {
+      await api.updatePacking(entry.id, { diag_positions: positions, diag_x: null, diag_y: null, diag_rotated: false });
+      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_positions: positions, diag_x: null, diag_y: null, diag_rotated: false } : p));
+    } catch { showToast("Error saving diagram"); }
+  };
+
+  // Removing a unit shifts later indices, so drop this entry's transient state.
+  const clearTransient = entryId => {
+    const prefix = entryId + ":";
+    setLocalPos(prev => { const n = { ...prev }; Object.keys(n).forEach(k => k.startsWith(prefix) && delete n[k]); return n; });
+    setZOrder(prev => prev.filter(k => !k.startsWith(prefix)));
+  };
+
+  const startDrag = (e, entry, idx, pos) => {
     e.preventDefault();
     e.stopPropagation();
-    setSelected(entry.id);
-    bringToFront(entry.id);
+    const key = unitKey(entry.id, idx);
+    setSelected(key);
+    bringToFront(key);
     const pt = e.touches ? getTouchPt(e) : getSvgPt(e);
-    const cx = localPos[entry.id]?.x ?? entry.diag_x ?? 0;
-    const cy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
-    setDragging({ id: entry.id, sx: pt.x, sy: pt.y, ox: cx, oy: cy });
+    const cur = localPos[key] || pos;
+    setDragging({ key, entryId: entry.id, idx, sx: pt.x, sy: pt.y, ox: cur.x, oy: cur.y });
   };
 
   const onMove = e => {
     if (!dragging) return;
     const pt = e.touches ? getTouchPt(e) : getSvgPt(e);
-    const entry = packingEntries.find(p => p.id === dragging.id);
+    const entry = packingEntries.find(p => p.id === dragging.entryId);
     if (!entry) return;
-    const [iw, ih] = getItemDims(entry);
+    const pos = getPositions(entry)[dragging.idx];
+    const [iw, ih] = getUnitDims(entry, pos?.rotated);
     const nx = clampX(snap(dragging.ox + (pt.x - dragging.sx)), iw);
     const ny = clampY(snap(dragging.oy + (pt.y - dragging.sy)), ih);
-    setLocalPos(prev => ({ ...prev, [dragging.id]: { x: nx, y: ny } }));
+    setLocalPos(prev => ({ ...prev, [dragging.key]: { x: nx, y: ny } }));
   };
 
   const onUp = async () => {
     if (!dragging) return;
-    const id = dragging.id;
-    const pos = localPos[id];
+    const { key, entryId, idx } = dragging;
+    const lp = localPos[key];
     setDragging(null);
-    if (pos) {
-      try {
-        await api.updatePacking(id, { diag_x: pos.x, diag_y: pos.y });
-        setPacking(prev => prev.map(p => p.id === id ? { ...p, diag_x: pos.x, diag_y: pos.y } : p));
-      } catch { showToast("Error saving position"); }
-      setLocalPos(prev => { const n = { ...prev }; delete n[id]; return n; });
+    if (lp) {
+      const entry = packingEntries.find(p => p.id === entryId);
+      if (entry) {
+        const positions = getPositions(entry).map((p, i) => i === idx ? { ...p, x: lp.x, y: lp.y } : p);
+        await savePositions(entry, positions);
+      }
+      setLocalPos(prev => { const n = { ...prev }; delete n[key]; return n; });
     }
   };
 
-  const placeItem = async entry => {
-    try {
-      await api.updatePacking(entry.id, { diag_x: 0, diag_y: 0 });
-      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_x: 0, diag_y: 0 } : p));
-      setSelected(entry.id);
-      bringToFront(entry.id);
-    } catch { showToast("Error placing item"); }
+  // Drop `count` new unit boxes, tiled front-to-back so they don't stack exactly.
+  const placeUnits = async (entry, count) => {
+    const existing = getPositions(entry);
+    const [bw, bd] = getBaseDims(entry);
+    const perRow = Math.max(1, Math.floor(length / bw));
+    const add = [];
+    for (let i = 0; i < count; i++) {
+      const index = existing.length + i;
+      const col = index % perRow;
+      const row = Math.floor(index / perRow);
+      add.push({ x: clampX(snap(col * bw), bw), y: clampY(snap(row * bd), bd), rotated: false });
+    }
+    const positions = [...existing, ...add];
+    await savePositions(entry, positions);
+    setPlaceCounts(prev => { const n = { ...prev }; delete n[entry.id]; return n; });
+    const lastKey = unitKey(entry.id, positions.length - 1);
+    setSelected(lastKey);
+    bringToFront(lastKey);
   };
 
-  const unplaceItem = async entry => {
-    try {
-      await api.updatePacking(entry.id, { diag_x: null, diag_y: null, diag_rotated: false });
-      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_x: null, diag_y: null, diag_rotated: false } : p));
-      if (selected === entry.id) setSelected(null);
-    } catch { showToast("Error removing from diagram"); }
+  const removeUnit = async (entry, idx) => {
+    const positions = getPositions(entry).filter((_, i) => i !== idx);
+    setSelected(null);
+    clearTransient(entry.id);
+    await savePositions(entry, positions);
   };
 
-  const rotateItem = async entry => {
-    const r = !entry.diag_rotated;
-    try {
-      await api.updatePacking(entry.id, { diag_rotated: r });
-      setPacking(prev => prev.map(p => p.id === entry.id ? { ...p, diag_rotated: r } : p));
-    } catch { showToast("Error rotating"); }
+  const rotateUnit = async (entry, idx) => {
+    const positions = getPositions(entry).map((p, i) => {
+      if (i !== idx) return p;
+      const r = !p.rotated;
+      const [iw, ih] = getUnitDims(entry, r);
+      return { ...p, rotated: r, x: clampX(p.x, iw), y: clampY(p.y, ih) };
+    });
+    await savePositions(entry, positions);
   };
 
-  const placed = packingEntries.filter(e => e.diag_x != null && e.diag_y != null);
-  const unplaced = packingEntries.filter(e => e.diag_x == null || e.diag_y == null);
-  const selectedEntry = placed.find(e => e.id === selected);
+  // Flatten every entry's positions into individually-placed unit boxes.
+  const units = [];
+  packingEntries.forEach(entry => {
+    getPositions(entry).forEach((pos, idx) => units.push({ key: unitKey(entry.id, idx), entry, idx, pos }));
+  });
+  const selectedUnit = units.find(u => u.key === selected);
 
-  // Render placed items with z-order: recently interacted items draw on top
-  const sortedPlaced = [
-    ...placed.filter(e => !zOrder.includes(e.id)),
-    ...zOrder.map(id => placed.find(e => e.id === id)).filter(Boolean),
+  // Entries with units still waiting to be placed (qty − already placed).
+  const trayEntries = packingEntries.filter(e => (e.qty_needed || 1) - getPositions(e).length > 0);
+
+  // Render placed units with z-order: recently interacted units draw on top
+  const sortedUnits = [
+    ...units.filter(u => !zOrder.includes(u.key)),
+    ...zOrder.map(k => units.find(u => u.key === k)).filter(Boolean),
   ];
 
   const downloadPNG = () => {
@@ -452,30 +501,29 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
           <text x={FRONT_W + 0.4} y={0.6} fill="#9ca3af" fontSize={0.5} fontFamily="sans-serif">Driver</text>
           <text x={FRONT_W + 0.4} y={VH - 0.15} fill="#9ca3af" fontSize={0.5} fontFamily="sans-serif">Passenger</text>
 
-          {/* Placed items — rendered in z-order so recently touched items draw on top */}
-          {sortedPlaced.map(entry => {
-            const [iw, ih] = getItemDims(entry);
-            const ix = FRONT_W + (localPos[entry.id]?.x ?? entry.diag_x ?? 0);
-            const iy = localPos[entry.id]?.y ?? entry.diag_y ?? 0;
-            const isSel = selected === entry.id;
-            const isDraggingThis = dragging?.id === entry.id;
+          {/* Placed units — rendered in z-order so recently touched units draw on top */}
+          {sortedUnits.map(({ key, entry, idx, pos }) => {
+            const [iw, ih] = getUnitDims(entry, pos.rotated);
+            const live = localPos[key];
+            const ix = FRONT_W + (live?.x ?? pos.x);
+            const iy = live?.y ?? pos.y;
+            const isSel = selected === key;
+            const isDraggingThis = dragging?.key === key;
             const isTemp = !entry.item_id && !entry.container_id && !!entry.ad_hoc_name;
             const isContainer = !!entry.container_id;
             const hasDims = (entry.container?.dim_w_ft && entry.container?.dim_d_ft) || (entry.item?.dim_w_ft && entry.item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
             const name = entry.container?.name || entry.item?.name || entry.ad_hoc_name || "Item";
-            const qty = entry.qty_needed || 1;
             const fontSize = Math.min(0.65, Math.max(0.25, Math.min(iw, ih) * 0.28));
-            const fullLabel = name + (qty > 1 ? ` \xd7${qty}` : "");
             const charsPerLine = Math.max(3, Math.floor(iw / (fontSize * 0.52)));
-            const lines = wrapSvgText(fullLabel, charsPerLine);
+            const lines = wrapSvgText(name, charsPerLine);
             const lineH = fontSize * 1.25;
             const textBlockH = lines.length * lineH;
             const textStartY = iy + ih / 2 - (textBlockH - lineH) / 2;
 
             return (
-              <g key={entry.id}
-                onMouseDown={e => startDrag(e, entry)}
-                onTouchStart={e => startDrag(e, entry)}
+              <g key={key}
+                onMouseDown={e => startDrag(e, entry, idx, pos)}
+                onTouchStart={e => startDrag(e, entry, idx, pos)}
                 style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}>
                 {isSel && <rect x={ix + 0.1} y={iy + 0.1} width={iw} height={ih} rx={0.15} fill="rgba(0,0,0,0.1)" />}
                 <rect x={ix} y={iy} width={iw} height={ih} rx={0.12}
@@ -536,43 +584,64 @@ function TrailerCanvas({ trailer, packingEntries, setPacking, showToast, eventNa
         </svg>
       </div>
 
-      {/* Selected item controls */}
-      {selectedEntry && (
+      {/* Selected unit controls */}
+      {selectedUnit && (() => {
+        const { entry, idx } = selectedUnit;
+        const total = entry.qty_needed || 1;
+        return (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", marginTop: 10, fontSize: 13 }}>
           <span style={{ flex: 1, fontWeight: 500, color: "#1d4ed8" }}>
-            {selectedEntry.container?.name || selectedEntry.item?.name || selectedEntry.ad_hoc_name}{(selectedEntry.qty_needed || 1) > 1 ? ` \xd7${selectedEntry.qty_needed}` : ""}
-            {selectedEntry.container_id && <span style={{ background: "#eff6ff", color: "#2563eb", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>{ctLabel(selectedEntry.container?.type)}</span>}
-            {!selectedEntry.item_id && !selectedEntry.container_id && selectedEntry.ad_hoc_name && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>TEMP</span>}
+            {entry.container?.name || entry.item?.name || entry.ad_hoc_name}{total > 1 ? ` (${idx + 1} of ${total})` : ""}
+            {entry.container_id && <span style={{ background: "#eff6ff", color: "#2563eb", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>{ctLabel(entry.container?.type)}</span>}
+            {!entry.item_id && !entry.container_id && entry.ad_hoc_name && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>TEMP</span>}
           </span>
-          <button style={{ ...ghostBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => rotateItem(selectedEntry)}>↻ Rotate</button>
-          <button style={{ ...dangerBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => unplaceItem(selectedEntry)}>Remove</button>
+          <button style={{ ...ghostBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => rotateUnit(entry, idx)}>↻ Rotate</button>
+          <button style={{ ...dangerBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => removeUnit(entry, idx)}>Remove</button>
           <button style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 16, lineHeight: 1, padding: "2px 6px" }} onClick={() => setSelected(null)}>✕</button>
         </div>
-      )}
+        );
+      })()}
 
-      {/* Unplaced items panel */}
-      {unplaced.length > 0 && (
+      {/* Items still to place */}
+      {trayEntries.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-            Unplaced Items ({unplaced.length})
+            To Place ({trayEntries.reduce((s, e) => s + ((e.qty_needed || 1) - getPositions(e).length), 0)})
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {unplaced.map(entry => {
-              const item = entry.item;
-              const isTemp = !entry.item_id && !!entry.ad_hoc_name;
-              const hasDims = (item?.dim_w_ft && item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
-              const dimW = item?.dim_w_ft || entry.ad_hoc_dim_w_ft;
-              const dimD = item?.dim_d_ft || entry.ad_hoc_dim_d_ft;
-              const qty = entry.qty_needed || 1;
+            {trayEntries.map(entry => {
+              const isTemp = !entry.item_id && !entry.container_id && !!entry.ad_hoc_name;
+              const hasDims = (entry.container?.dim_w_ft && entry.container?.dim_d_ft) || (entry.item?.dim_w_ft && entry.item?.dim_d_ft) || (entry.ad_hoc_dim_w_ft && entry.ad_hoc_dim_d_ft);
+              const dimW = entry.container?.dim_w_ft || entry.item?.dim_w_ft || entry.ad_hoc_dim_w_ft;
+              const dimD = entry.container?.dim_d_ft || entry.item?.dim_d_ft || entry.ad_hoc_dim_d_ft;
+              const name = entry.container?.name || entry.item?.name || entry.ad_hoc_name || "Item";
+              const total = entry.qty_needed || 1;
+              const placedCount = getPositions(entry).length;
+              const rem = total - placedCount;
+              const cnt = Math.min(rem, Math.max(1, placeCounts[entry.id] ?? rem));
+              const setCnt = v => setPlaceCounts(prev => ({ ...prev, [entry.id]: Math.min(rem, Math.max(1, v)) }));
+              const stepBtn = { ...ghostBtn, padding: "2px 8px", fontSize: 14, lineHeight: 1 };
               return (
                 <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: isTemp ? "#faf5ff" : "#fff", border: `1px solid ${isTemp ? "#e9d5ff" : "#e5e7eb"}`, borderRadius: 8, fontSize: 13 }}>
-                  <span style={{ fontWeight: 500 }}>{item?.name || entry.ad_hoc_name || "Item"}{qty > 1 ? ` \xd7${qty}` : ""}</span>
+                  <span style={{ fontWeight: 500 }}>{name}</span>
                   {isTemp && <span style={{ background: "#f3e8ff", color: "#7c3aed", fontSize: 10, padding: "1px 5px", borderRadius: 4, fontWeight: 600 }}>TEMP</span>}
                   {hasDims
                     ? <span style={{ color: "#9ca3af", fontSize: 11 }}>{dimW}\xd7{dimD}ft</span>
                     : <span style={{ color: "#f59e0b", fontSize: 11 }}>⚠ no size</span>
                   }
-                  <button style={{ ...primaryBtn, padding: "3px 10px", fontSize: 12 }} onClick={() => placeItem(entry)}>Place</button>
+                  {placedCount > 0 && <span style={{ color: "#9ca3af", fontSize: 11 }}>{placedCount} of {total} placed</span>}
+                  {total > 1 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button style={stepBtn} onClick={() => setCnt(cnt - 1)}>−</button>
+                      <input type="number" value={cnt} min={1} max={rem}
+                        onChange={e => setCnt(Number(e.target.value) || 1)}
+                        style={{ width: 42, textAlign: "center", padding: "4px 2px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 13 }} />
+                      <button style={stepBtn} onClick={() => setCnt(cnt + 1)}>+</button>
+                    </div>
+                  )}
+                  <button style={{ ...primaryBtn, padding: "3px 10px", fontSize: 12 }} onClick={() => placeUnits(entry, total > 1 ? cnt : 1)}>
+                    Place{total > 1 ? ` ${cnt}` : ""}
+                  </button>
                 </div>
               );
             })}

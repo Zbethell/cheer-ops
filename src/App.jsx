@@ -992,6 +992,49 @@ const periodByOffset = (offset) => {
   return range;
 };
 
+// Stat pay looks back over the 4 weeks (28 days) immediately before the holiday.
+// The holiday itself is excluded — the window ends the moment before it starts.
+const STAT_LOOKBACK_DAYS = 28;
+const STAT_DIVISOR = 20;
+const statWindow = (statDate) => ({
+  start: new Date(statDate.getFullYear(), statDate.getMonth(), statDate.getDate() - STAT_LOOKBACK_DAYS, 0, 0, 0, 0),
+  end: new Date(statDate.getTime() - 1),
+});
+const fmtWindow = (start, end) => {
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const o = { month: "short", day: "numeric" };
+  return `${start.toLocaleDateString([], sameYear ? o : { ...o, year: "numeric" })} – ${end.toLocaleDateString([], { ...o, year: "numeric" })}`;
+};
+
+// Did the employee have a shift starting on this calendar day? Stat-pay rows
+// don't count as worked — otherwise back-to-back holidays would vouch for each other.
+const workedOnDate = (entries, date) => {
+  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  return entries.some(e => {
+    if (e.is_stat) return false;
+    const ci = new Date(e.clock_in);
+    return ci >= dayStart && ci <= dayEnd;
+  });
+};
+
+// Eligibility check shown to the approving manager: worked the day before and the
+// day after the holiday. Each day is reported separately so the manager judges,
+// not the code. A day that hasn't finished yet reports "pending" rather than "no" —
+// submitting before the holiday must not look like a failed check.
+const statAdjacency = (entries, statDate) => {
+  const shift = (n) => new Date(statDate.getFullYear(), statDate.getMonth(), statDate.getDate() + n);
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const check = (day) => workedOnDate(entries, day) ? "yes" : (day >= todayStart ? "pending" : "no");
+  const before = check(shift(-1)), after = check(shift(1));
+  return {
+    before, after,
+    both: before === "yes" && after === "yes",
+    anyMissing: before === "no" || after === "no",
+    pending: before === "pending" || after === "pending",
+  };
+};
+
 function ItemSearchInput({ items, value, onChange, placeholder = "Search items...", style = {} }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -1359,7 +1402,7 @@ function ClockPage() {
   const [daySummary, setDaySummary] = useState(null);
   const [timesheet, setTimesheet] = useState(null);
   const [statForm, setStatForm] = useState({ date: "", note: "" });
-  const [statCalc, setStatCalc] = useState(null); // { loading } | { error } | { totalMs, totalHours, statHours, monthLabel, dateLabel }
+  const [statCalc, setStatCalc] = useState(null); // { loading } | { error } | { totalMs, totalHours, statHours, windowLabel, adjacency, dateLabel }
   const [periodOffset, setPeriodOffset] = useState(0); // 0 = current pay period, negative = earlier
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
@@ -1494,16 +1537,17 @@ function ClockPage() {
 
   const openStat = () => { setError(""); setStatForm({ date: "", note: "" }); setStatCalc(null); setScreen("stat"); };
 
-  // Stat pay = total hours worked the previous calendar month (relative to the
-  // selected stat date), combined across all companies, divided by 20. Completed
-  // shifts only; prior stat-pay entries are excluded so you don't earn stat on stat.
+  // Stat pay = total hours worked in the 4 weeks before the selected stat date,
+  // combined across all companies, divided by 20. Completed shifts only; prior
+  // stat-pay entries are excluded so you don't earn stat on stat.
   const recalcStat = async (dateStr) => {
     if (!dateStr || !employee) { setStatCalc(null); return; }
     setStatCalc({ loading: true });
     try {
       const d = new Date(`${dateStr}T00:00:00`);
-      const windowStart = new Date(d.getFullYear(), d.getMonth() - 1, 1, 0, 0, 0, 0);
-      const windowEnd = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999);
+      const { start: windowStart, end: windowEnd } = statWindow(d);
+      // Fetches from the window start with no upper bound, so the rows also cover
+      // the day after the holiday for the eligibility check below.
       const rows = await api.getEmployeeEntriesSince(employee.id, windowStart.toISOString());
       let totalMs = 0;
       rows.forEach(e => {
@@ -1517,8 +1561,9 @@ function ClockPage() {
       setStatCalc({
         totalMs,
         totalHours,
-        statHours: totalHours / 20,
-        monthLabel: windowStart.toLocaleDateString([], { month: "long", year: "numeric" }),
+        statHours: totalHours / STAT_DIVISOR,
+        windowLabel: fmtWindow(windowStart, windowEnd),
+        adjacency: statAdjacency(rows, d),
         dateLabel: d.toLocaleDateString([], { weekday: "short", month: "long", day: "numeric", year: "numeric" }),
       });
     } catch { setStatCalc({ error: "Couldn't calculate. Please try again." }); }
@@ -1527,7 +1572,7 @@ function ClockPage() {
   const submitStat = async () => {
     if (!statForm.date) { setError("Please select the stat holiday date."); return; }
     if (!statCalc || statCalc.loading || statCalc.error) { setError("Please wait for the calculation."); return; }
-    if (statCalc.totalMs <= 0) { setError(`No hours found in ${statCalc.monthLabel} to calculate stat pay.`); return; }
+    if (statCalc.totalMs <= 0) { setError(`No hours found in the 4 weeks before the holiday (${statCalc.windowLabel}) to calculate stat pay.`); return; }
     setLoading(true); setError("");
     try {
       const ci = new Date(`${statForm.date}T00:00:00`);
@@ -1540,7 +1585,7 @@ function ClockPage() {
         is_manual: true,
         needs_review: true,
         is_stat: true,
-        notes: `Stat pay${statForm.note.trim() ? ` — ${statForm.note.trim()}` : ""} · ${statCalc.dateLabel} · ${statCalc.monthLabel} (${statCalc.totalHours.toFixed(1)}h ÷ 20 = ${statCalc.statHours.toFixed(2)}h)`,
+        notes: `Stat pay${statForm.note.trim() ? ` — ${statForm.note.trim()}` : ""} · ${statCalc.dateLabel} · 4 wks ${statCalc.windowLabel} (${statCalc.totalHours.toFixed(1)}h ÷ ${STAT_DIVISOR} = ${statCalc.statHours.toFixed(2)}h)`,
       });
       setSuccessMsg(`Stat pay of ${statCalc.statHours.toFixed(2)}h submitted for admin review.`);
       setScreen("success");
@@ -1754,17 +1799,36 @@ function ClockPage() {
           <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Stat holiday date</div><input type="date" value={statForm.date} onChange={e => { const v = e.target.value; setError(""); setStatForm(f => ({ ...f, date: v })); recalcStat(v); }} style={{ ...inputStyle, fontSize: 15 }} /></div>
           <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Holiday name (optional)</div><input value={statForm.note} onChange={e => setStatForm(f => ({ ...f, note: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} placeholder="e.g. Canada Day" /></div>
           {statForm.date && statCalc?.loading && <div style={{ color: "#6b7280", fontSize: 14, textAlign: "center", padding: "8px 0" }}>Calculating…</div>}
-          {statCalc && !statCalc.loading && !statCalc.error && (
+          {statCalc && !statCalc.loading && !statCalc.error && (<>
             <div style={{ background: "#f8f9fb", border: "1px solid #eef0f3", borderRadius: 12, padding: "14px 16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 8 }}><span>Hours worked in {statCalc.monthLabel}</span><span style={{ fontWeight: 600 }}>{statCalc.totalHours.toFixed(1)} h</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 8 }}><span>Divided by</span><span style={{ fontWeight: 600 }}>20</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 2 }}><span>Hours worked in the 4 weeks before</span><span style={{ fontWeight: 600 }}>{statCalc.totalHours.toFixed(1)} h</span></div>
+              <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>{statCalc.windowLabel}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#374151", marginBottom: 8 }}><span>Divided by</span><span style={{ fontWeight: 600 }}>{STAT_DIVISOR}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, color: "#111", borderTop: "1px solid #e5e7eb", paddingTop: 9 }}><span style={{ fontWeight: 700 }}>Stat pay</span><span style={{ fontWeight: 800, color: "#059669" }}>{statCalc.statHours.toFixed(2)} h</span></div>
             </div>
-          )}
+            {(() => {
+              const a = statCalc.adjacency;
+              const mark = { yes: { icon: "✓", color: "#059669" }, no: { icon: "✕", color: "#dc2626" }, pending: { icon: "•", color: "#9ca3af" } };
+              const row = (label, state) => (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#374151", marginBottom: 4 }}>
+                  <span>{label}</span>
+                  <span style={{ fontWeight: 600, color: mark[state].color }}>{mark[state].icon} {state === "yes" ? "Worked" : state === "pending" ? "Not yet" : "No shift"}</span>
+                </div>
+              );
+              return (
+                <div style={{ background: a.anyMissing ? "#fffbeb" : "#f8f9fb", border: `1px solid ${a.anyMissing ? "#fde68a" : "#eef0f3"}`, borderRadius: 12, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Eligibility check</div>
+                  {row("Day before the holiday", a.before)}
+                  {row("Day after the holiday", a.after)}
+                  {a.anyMissing && <div style={{ fontSize: 12, color: "#b45309", marginTop: 8 }}>You can still submit — your manager will review this.</div>}
+                </div>
+              );
+            })()}
+          </>)}
           {statCalc?.error && <div style={{ color: "#dc2626", fontSize: 13 }}>{statCalc.error}</div>}
           {error && <div style={{ color: "#dc2626", fontSize: 13 }}>{error}</div>}
           <button onClick={submitStat} disabled={!canSubmit} style={{ background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: canSubmit ? 1 : 0.6 }}>{loading ? "Submitting..." : "Submit for Approval"}</button>
-          <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: 0 }}>Based on your total hours the previous calendar month across all companies. Flagged for admin review.</p>
+          <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: 0 }}>Based on your total hours in the 4 weeks before the holiday, across all companies. Flagged for admin review.</p>
         </div>
       </div>
     </div>
@@ -2272,6 +2336,23 @@ function EmployeeHours({ isMobile: m, showToast }) {
                         {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
                       </div>
                       {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}
+                      {entry.is_stat && (() => {
+                        // Computed live from every entry on file (not the filtered view),
+                        // so a late-entered shift is reflected at approval time.
+                        const a = statAdjacency(timeEntries.filter(x => x.employee_id === entry.employee_id && x.id !== entry.id), new Date(entry.clock_in));
+                        const word = { yes: "worked", no: "no shift", pending: "not yet" };
+                        const color = { yes: "#059669", no: "#dc2626", pending: "#9ca3af" };
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, fontSize: 11, flexWrap: "wrap" }}>
+                            <span style={{ color: "#6b7280", fontWeight: 500 }}>Eligibility:</span>
+                            <span style={{ color: color[a.before] }}>day before — {word[a.before]}</span>
+                            <span style={{ color: "#d1d5db" }}>|</span>
+                            <span style={{ color: color[a.after] }}>day after — {word[a.after]}</span>
+                            {a.anyMissing && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Check before approving</span>}
+                            {a.both && <span style={{ background: "#dcfce7", color: "#15803d", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Eligible</span>}
+                          </div>
+                        );
+                      })()}
                     </div>
                     {entry.needs_review && <button onClick={() => approveEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap", color: "#059669", borderColor: "#059669" }}>Approve</button>}
                     <button onClick={() => openEditEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}>Edit</button>

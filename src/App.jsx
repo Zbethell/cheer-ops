@@ -1562,7 +1562,9 @@ function ClockPage() {
         if (ageH >= AUTO_CLOCKOUT_HOURS) {
           setEmployee(emp);
           setResolveEntry(open);
-          setResolveForm({ date: new Date(open.clock_in).toISOString().split("T")[0], time: "", notes: "" });
+          // Local, not UTC: submitResolve parses this back as local time, and an
+          // evening shift would otherwise pre-fill the following day's date.
+          setResolveForm({ date: localDateStr(new Date(open.clock_in)), time: "", notes: "" });
           setScreen("resolve");
           setLoading(false);
           return;
@@ -2241,12 +2243,17 @@ function EmployeeHours({ isMobile: m, showToast }) {
     setSavingEditEmp(false);
   };
 
+  // Date and time must both be read in the SAME zone. This used to take the date
+  // from toISOString() (UTC) and the time from toTimeString() (local), so an
+  // evening shift opened showing tomorrow's date at yesterday's time — and saving
+  // without touching anything moved the entry a day forward. saveEntry parses
+  // `${date}T${time}` with no offset, which JS reads as local, so local is the
+  // side that has to win here.
   const openEditEntry = (entry) => {
     const ci = new Date(entry.clock_in);
     const co = entry.clock_out ? new Date(entry.clock_out) : null;
-    const toDate = (d) => d.toISOString().split("T")[0];
     const toTime = (d) => d.toTimeString().slice(0, 5);
-    setEditForm({ clock_in_date: toDate(ci), clock_in_time: toTime(ci), clock_out_date: co ? toDate(co) : toDate(ci), clock_out_time: co ? toTime(co) : "", notes: entry.notes || "" });
+    setEditForm({ clock_in_date: localDateStr(ci), clock_in_time: toTime(ci), clock_out_date: co ? localDateStr(co) : localDateStr(ci), clock_out_time: co ? toTime(co) : "", notes: entry.notes || "" });
     setEditEntry(entry);
   };
 

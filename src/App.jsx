@@ -8,6 +8,127 @@ const ORG_LOGO_PUBLIC_URL = `${SUPABASE_URL}/storage/v1/object/public/logos/${OR
 const ADMIN_EMAIL = "zack@canadiancheer.com";
 const KIOSK_CODE = "cheerops2026";
 
+// ─── Dev write-guard ──────────────────────────────────────────────────────────
+// There is only one Supabase project, so `npm run dev` talks to live production
+// data. A stray click on localhost used to write straight to payroll. In dev we
+// therefore intercept fetch and refuse anything that mutates, until writes are
+// deliberately switched on from the banner. Reads are untouched, so the app is
+// fully usable for looking around.
+//
+// `import.meta.env.DEV` is false in any production build, so this whole block is
+// dead code on cheer-ops.vercel.app — the deployed site is byte-identical in
+// behaviour to before.
+// The `__cheeropsDevGuard` latch matters: HMR re-executes this module on every
+// edit, which would otherwise stack a new fetch wrapper and a duplicate banner
+// each time you save a file.
+if (import.meta.env.DEV && !window.__cheeropsDevGuard) {
+  window.__cheeropsDevGuard = true;
+  const KEY = "cheerops_dev_writes";
+  // sessionStorage, not localStorage: enabling writes lasts only for this tab,
+  // so it can't be left switched on across days.
+  const writesOn = () => sessionStorage.getItem(KEY) === "on";
+
+  // Only guard calls that reach real infrastructure. Vite's own dev-server
+  // traffic and the Supabase auth endpoints (signing in, refreshing a token)
+  // must pass through or the app can't start.
+  const isGuarded = (url, method) => {
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+    const u = String(url);
+    if (u.startsWith("/api/") || u.includes("/api/")) return true;
+    return u.startsWith(SUPABASE_URL) && !u.includes("/auth/v1/");
+  };
+
+  let blocked = 0;
+  let lastBlocked = "";
+  const realFetch = window.fetch.bind(window);
+
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    const method = (init.method || (typeof input === "object" && input?.method) || "GET").toUpperCase();
+    if (!writesOn() && isGuarded(url, method)) {
+      blocked++;
+      lastBlocked = `${method} ${url.replace(SUPABASE_URL + "/rest/v1/", "").split("?")[0]}`;
+      render();
+      return Promise.reject(new Error(`Write blocked in dev: ${lastBlocked}`));
+    }
+    return realFetch(input, init);
+  };
+
+  // Painted straight into the DOM rather than rendered by React, so it survives
+  // every route — /clock and /pack return their own trees before App renders.
+  const el = document.createElement("div");
+  el.style.cssText = "position:fixed;z-index:99999;font:600 12px/1.4 system-ui,sans-serif;border-radius:99px;padding:6px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.28);pointer-events:auto;cursor:grab;touch-action:none;user-select:none";
+
+  function render() {
+    const on = writesOn();
+    // The dangerous state is the loud one.
+    el.style.background = on ? "#dc2626" : "#1f2937";
+    el.style.color = "#fff";
+    el.style.border = on ? "2px solid #fca5a5" : "1px solid #374151";
+    el.innerHTML = `<span style="opacity:.5;cursor:grab">⠿</span><span>${on ? "🔴 DEV — WRITES ENABLED ON LIVE DATA" : "⚠️ DEV — LIVE DATA · writes OFF"}</span>`;
+    if (!on && blocked > 0) {
+      const note = document.createElement("span");
+      note.style.cssText = "opacity:.75;font-weight:500";
+      note.textContent = `${blocked} blocked · last ${lastBlocked}`;
+      el.appendChild(note);
+    }
+    const btn = document.createElement("button");
+    btn.textContent = on ? "Disable" : "Enable writes";
+    btn.style.cssText = "background:#fff;color:#111;border:none;border-radius:99px;padding:3px 10px;font:600 11px system-ui,sans-serif;cursor:pointer";
+    btn.onclick = () => {
+      if (writesOn()) sessionStorage.removeItem(KEY);
+      else if (confirm("Enable writes from dev?\n\nThis is LIVE production data — anything you change here is real. Turns itself off when you close this tab.")) sessionStorage.setItem(KEY, "on");
+      blocked = 0; lastBlocked = "";
+      render();
+    };
+    el.appendChild(btn);
+  }
+
+  // Drag to park it. Fixed at the top it sat on top of the nav bar, and there is
+  // no safe corner across every route, so let it be moved and remember where.
+  const POS_KEY = "cheerops_dev_guard_pos";
+  const place = (left, top) => {
+    const w = el.offsetWidth || 280, h = el.offsetHeight || 30;
+    // Clamp inside the viewport so it can never be dragged somewhere
+    // unreachable, and so a position saved on a big monitor still shows up on a
+    // laptop screen.
+    el.style.left = Math.min(Math.max(6, left), Math.max(6, window.innerWidth - w - 6)) + "px";
+    el.style.top = Math.min(Math.max(6, top), Math.max(6, window.innerHeight - h - 6)) + "px";
+  };
+  const curPos = () => ({ left: parseInt(el.style.left) || 0, top: parseInt(el.style.top) || 0 });
+
+  let drag = null;
+  el.addEventListener("pointerdown", e => {
+    if (e.target.tagName === "BUTTON") return; // don't hijack the toggle
+    const r = el.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    el.setPointerCapture(e.pointerId);
+    el.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  el.addEventListener("pointermove", e => { if (drag) place(e.clientX - drag.dx, e.clientY - drag.dy); });
+  const endDrag = () => {
+    if (!drag) return;
+    drag = null;
+    el.style.cursor = "grab";
+    try { localStorage.setItem(POS_KEY, JSON.stringify(curPos())); } catch { /* private mode */ }
+  };
+  el.addEventListener("pointerup", endDrag);
+  el.addEventListener("pointercancel", endDrag);
+  window.addEventListener("resize", () => { const p = curPos(); place(p.left, p.top); });
+
+  render();
+  const mount = () => {
+    document.body.appendChild(el);
+    // Must be in the DOM before measuring, so position is applied after mount.
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(POS_KEY) || "null"); } catch { /* ignore */ }
+    if (saved) place(saved.left, saved.top);
+    else place(10, window.innerHeight - el.offsetHeight - 10); // bottom-left: nav is top, mobile tabs are bottom-centre
+  };
+  if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount);
+}
+
 let authToken = null;
 
 const sb = async (path, options = {}) => {

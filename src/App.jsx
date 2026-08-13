@@ -973,6 +973,9 @@ const formatDuration = (start, end = new Date()) => {
 };
 const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
 const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "—";
+// Local calendar date as YYYY-MM-DD, for <input type="date">. toISOString() would
+// give the UTC day, which is already tomorrow for an evening shift west of Greenwich.
+const localDateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 // Semi-monthly pay periods: the 1st–15th, then the 16th–end of month.
 const payPeriodRange = (d = new Date()) => {
   const y = d.getFullYear(), m = d.getMonth();
@@ -1006,13 +1009,17 @@ const fmtWindow = (start, end) => {
   return `${start.toLocaleDateString([], sameYear ? o : { ...o, year: "numeric" })} – ${end.toLocaleDateString([], { ...o, year: "numeric" })}`;
 };
 
+// A rejected entry stays on file for the audit trail but is never paid, so it is
+// left out of every hours total — employee timesheet, admin summary and export.
+const isPayable = (e) => !e.is_rejected;
+
 // Did the employee have a shift starting on this calendar day? Stat-pay rows
 // don't count as worked — otherwise back-to-back holidays would vouch for each other.
 const workedOnDate = (entries, date) => {
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
   const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
   return entries.some(e => {
-    if (e.is_stat) return false;
+    if (e.is_stat || !isPayable(e)) return false;
     const ci = new Date(e.clock_in);
     return ci >= dayStart && ci <= dayEnd;
   });
@@ -1395,7 +1402,7 @@ function ClockPage() {
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [now, setNow] = useState(new Date());
-  const [manualForm, setManualForm] = useState({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" });
+  const [manualForm, setManualForm] = useState({ date: localDateStr(), clock_in: "", clock_out: "", notes: "", company: "" });
   const [resolveEntry, setResolveEntry] = useState(null);
   const [resolveForm, setResolveForm] = useState({ date: "", time: "", notes: "" });
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -1409,7 +1416,10 @@ function ClockPage() {
 
   const fmtMs = (ms) => { const h = Math.floor(ms / 3600000); const mn = Math.floor((ms % 3600000) / 60000); return `${h}h ${mn}m`; };
 
-  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setTimesheet(null); setManualForm({ date: new Date().toISOString().split("T")[0], clock_in: "", clock_out: "", notes: "" }); setStatForm({ date: "", note: "" }); setStatCalc(null); setPeriodOffset(0); };
+  const reset = () => { setDigits([]); setScreen("code"); setEmployee(null); setOpenEntry(null); setError(""); setSuccessMsg(""); setResolveEntry(null); setResolveForm({ date: "", time: "", notes: "" }); setSelectedCompany(null); setDaySummary(null); setTimesheet(null); setManualForm({ date: localDateStr(), clock_in: "", clock_out: "", notes: "", company: "" }); setStatForm({ date: "", note: "" }); setStatCalc(null); setPeriodOffset(0); };
+
+  // The companies this employee may book time against, newest schema first.
+  const empCompanyList = () => (employee?.companies?.length ? employee.companies : [employee?.company]).filter(Boolean);
 
   const pressDigit = (d) => {
     if (digits.length >= 4 || loading) return;
@@ -1474,7 +1484,7 @@ function ClockPage() {
         const perCo = {};
         let totalMs = 0;
         todays.forEach(e => {
-          if (!e.clock_out) return;
+          if (!e.clock_out || !isPayable(e)) return;
           const ms = new Date(e.clock_out) - new Date(e.clock_in);
           if (ms <= 0) return;
           const co = e.company || employee.company || "—";
@@ -1521,13 +1531,23 @@ function ClockPage() {
     setLoading(false);
   };
 
+  // Seed the company from whichever one they're currently working under, so a
+  // single-company employee never sees the picker and a multi-company one starts
+  // on the right answer.
+  const openManual = () => {
+    setError("");
+    setManualForm(f => ({ ...f, company: openEntry?.company || selectedCompany || empCompanyList()[0] || "" }));
+    setScreen("manual");
+  };
+
   const submitManual = async () => {
     if (!manualForm.date || !manualForm.clock_in || !manualForm.clock_out) { setError("Please fill in all fields."); return; }
+    if (!manualForm.company) { setError("Please choose which company this time was worked for."); return; }
     setLoading(true); setError("");
     try {
       const ci = new Date(`${manualForm.date}T${manualForm.clock_in}`).toISOString();
       const co = new Date(`${manualForm.date}T${manualForm.clock_out}`).toISOString();
-      await api.addTimeEntry({ employee_id: employee.id, clock_in: ci, clock_out: co, is_manual: true, needs_review: true, notes: manualForm.notes || null });
+      await api.addTimeEntry({ employee_id: employee.id, clock_in: ci, clock_out: co, company: manualForm.company, is_manual: true, needs_review: true, notes: manualForm.notes || null });
       setSuccessMsg("Manual entry submitted for admin review.");
       setScreen("success");
       setTimeout(reset, 3500);
@@ -1551,7 +1571,7 @@ function ClockPage() {
       const rows = await api.getEmployeeEntriesSince(employee.id, windowStart.toISOString());
       let totalMs = 0;
       rows.forEach(e => {
-        if (!e.clock_out || e.is_stat) return;
+        if (!e.clock_out || e.is_stat || !isPayable(e)) return;
         const ci = new Date(e.clock_in);
         if (ci < windowStart || ci > windowEnd) return;
         const ms = new Date(e.clock_out) - ci;
@@ -1628,6 +1648,9 @@ function ClockPage() {
       const perCo = {};
       let totalMs = 0;
       entries.forEach(e => {
+        // Rejected entries stay in the list so the employee can see what happened,
+        // but they contribute nothing to the totals.
+        if (!isPayable(e)) return;
         // Open entries count up to now, but never past the period's end (for old periods).
         const endTs = e.clock_out ? new Date(e.clock_out) : new Date(Math.min(Date.now(), end.getTime()));
         const ms = Math.max(0, endTs - new Date(e.clock_in));
@@ -1765,10 +1788,27 @@ function ClockPage() {
           <button onClick={() => setScreen("dashboard")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 0, color: "#6b7280" }}>←</button>
           <div>
             <div style={{ fontWeight: 700, fontSize: 17 }}>Manual Time Entry</div>
-            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name} · <span style={{ color: companyColor, fontWeight: 600 }}>{companyLabel(employee?.company)}</span></div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>{employee?.name} · <span style={{ color: manualForm.company === "progymservices" ? "#059669" : manualForm.company === "evo" ? "#7c3aed" : "#2563eb", fontWeight: 600 }}>{companyLabel(manualForm.company)}</span></div>
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {empCompanyList().length > 1 && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>Company</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {empCompanyList().map(co => {
+                  const active = manualForm.company === co;
+                  const color = co === "progymservices" ? "#059669" : co === "evo" ? "#7c3aed" : "#2563eb";
+                  return (
+                    <button key={co} onClick={() => setManualForm(f => ({ ...f, company: co }))}
+                      style={{ flex: 1, background: active ? color : "#fff", color: active ? "#fff" : "#374151", border: `2px solid ${active ? color : "#e5e7eb"}`, borderRadius: 10, padding: "11px 8px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      {companyLabel(co)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Date</div><input type="date" value={manualForm.date} onChange={e => setManualForm(f => ({ ...f, date: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4 }}>Clock In</div><input type="time" value={manualForm.clock_in} onChange={e => setManualForm(f => ({ ...f, clock_in: e.target.value }))} style={{ ...inputStyle, fontSize: 15 }} /></div>
@@ -1892,15 +1932,17 @@ function ClockPage() {
                 const co = e.company || employee?.company;
                 const color = co === "progymservices" ? "#059669" : co === "evo" ? "#7c3aed" : "#2563eb";
                 return (
-                  <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f1f4" }}>
+                  <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f1f4", opacity: e.is_rejected ? 0.6 : 1 }}>
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: "#111" }}>{fmtDate(e.clock_in)}</div>
                       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
                         <span style={{ color, fontWeight: 600 }}>{companyLabel(co)}</span> · {fmtTime(e.clock_in)} → {open ? "now" : fmtTime(e.clock_out)}
                         {e.needs_review && <span style={{ color: "#b45309", fontWeight: 600 }}> · pending review</span>}
+                        {e.is_rejected && <span style={{ color: "#dc2626", fontWeight: 600 }}> · not approved</span>}
                       </div>
+                      {e.is_rejected && e.rejection_reason && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 2 }}>{e.rejection_reason}</div>}
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: open ? "#059669" : "#111", whiteSpace: "nowrap", marginLeft: 10 }}>{open ? formatDuration(e.clock_in, now) : formatDuration(e.clock_in, e.clock_out)}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: e.is_rejected ? "#9ca3af" : open ? "#059669" : "#111", whiteSpace: "nowrap", marginLeft: 10, textDecoration: e.is_rejected ? "line-through" : "none" }}>{open ? formatDuration(e.clock_in, now) : formatDuration(e.clock_in, e.clock_out)}</div>
                   </div>
                 );
               })}
@@ -1950,7 +1992,7 @@ function ClockPage() {
         )}
         <button onClick={viewHours} disabled={loading} style={{ width: "100%", background: "#fff", color: "#1a1a2e", border: "2px solid #e5e7eb", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.6 : 1, marginBottom: 12 }}>📋 View My Hours</button>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <button onClick={() => setScreen("manual")} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Manual entry</button>
+          <button onClick={openManual} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Manual entry</button>
           <button onClick={openStat} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Stat pay</button>
           <button onClick={reset} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>Not you?</button>
         </div>
@@ -2010,8 +2052,11 @@ function EmployeeHours({ isMobile: m, showToast }) {
   const [editEntry, setEditEntry] = useState(null);
   const [editForm, setEditForm] = useState({ clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
   const [savingEntry, setSavingEntry] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [savingReject, setSavingReject] = useState(false);
   const [showAddEntry, setShowAddEntry] = useState(false);
-  const [addEntryForm, setAddEntryForm] = useState({ employee_id: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
+  const [addEntryForm, setAddEntryForm] = useState({ employee_id: "", company: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
   const [savingAddEntry, setSavingAddEntry] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -2089,7 +2134,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
     try {
       const ci = new Date(`${editForm.clock_in_date}T${editForm.clock_in_time}`).toISOString();
       const co = editForm.clock_out_time ? new Date(`${editForm.clock_out_date}T${editForm.clock_out_time}`).toISOString() : null;
-      const patch = { clock_in: ci, clock_out: co, notes: editForm.notes || null, needs_review: false, is_auto_clocked_out: false };
+      const patch = { clock_in: ci, clock_out: co, notes: editForm.notes || null, needs_review: false, is_auto_clocked_out: false, is_rejected: false, rejection_reason: null };
       await api.updateTimeEntry(editEntry.id, patch);
       setTimeEntries(prev => prev.map(e => e.id === editEntry.id ? { ...e, ...patch } : e));
       setEditEntry(null);
@@ -2108,27 +2153,52 @@ function EmployeeHours({ isMobile: m, showToast }) {
     return true;
   });
 
+  // Approving also lifts a previous rejection, so this is the single way back to
+  // "these hours count" no matter which state the entry was in.
   const approveEntry = async (entry) => {
     try {
-      const patch = { needs_review: false };
+      const patch = { needs_review: false, is_rejected: false, rejection_reason: null };
       await api.updateTimeEntry(entry.id, patch);
       setTimeEntries(prev => prev.map(e => e.id === entry.id ? { ...e, ...patch } : e));
-      showToast("Entry approved");
+      showToast(entry.is_rejected ? "Entry approved — hours now count" : "Entry approved");
     } catch { showToast("Error approving entry"); }
+  };
+
+  // Rejected entries are kept rather than deleted: the employee submitted them and
+  // needs to see what happened, and payroll needs the trail. They are simply
+  // excluded from every total from here on.
+  const confirmReject = async () => {
+    setSavingReject(true);
+    try {
+      const patch = { is_rejected: true, needs_review: false, rejection_reason: rejectReason.trim() || null };
+      await api.updateTimeEntry(rejectTarget.id, patch);
+      setTimeEntries(prev => prev.map(e => e.id === rejectTarget.id ? { ...e, ...patch } : e));
+      setRejectTarget(null);
+      showToast("Entry marked not approved — excluded from hours");
+    } catch { showToast("Error rejecting entry"); }
+    setSavingReject(false);
+  };
+
+  // Companies the selected employee can be booked against.
+  const companiesFor = (empId) => {
+    const emp = employees.find(x => x.id === empId);
+    if (!emp) return [];
+    return (emp.companies?.length ? emp.companies : [emp.company]).filter(Boolean);
   };
 
   const saveAddEntry = async () => {
     if (!addEntryForm.employee_id || !addEntryForm.clock_in_date || !addEntryForm.clock_in_time) return;
+    if (!addEntryForm.company) { showToast("Choose which company this time is for"); return; }
     setSavingAddEntry(true);
     try {
       const ci = new Date(`${addEntryForm.clock_in_date}T${addEntryForm.clock_in_time}`).toISOString();
       const co = addEntryForm.clock_out_date && addEntryForm.clock_out_time
         ? new Date(`${addEntryForm.clock_out_date}T${addEntryForm.clock_out_time}`).toISOString()
         : null;
-      const [created] = await api.addTimeEntry({ employee_id: addEntryForm.employee_id, clock_in: ci, clock_out: co, notes: addEntryForm.notes || null, is_manual: true, needs_review: false });
+      const [created] = await api.addTimeEntry({ employee_id: addEntryForm.employee_id, company: addEntryForm.company, clock_in: ci, clock_out: co, notes: addEntryForm.notes || null, is_manual: true, needs_review: false });
       setTimeEntries(prev => [created, ...prev]);
       setShowAddEntry(false);
-      setAddEntryForm({ employee_id: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
+      setAddEntryForm({ employee_id: "", company: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" });
       showToast("Entry added");
     } catch { showToast("Error adding entry"); }
     setSavingAddEntry(false);
@@ -2148,13 +2218,16 @@ function EmployeeHours({ isMobile: m, showToast }) {
         "Clock Out": e.clock_out ? fmtDt(e.clock_out) : "Still clocked in",
         "Duration": ms !== null ? fmtHours(ms) : "",
         "Notes": e.notes || "",
-        "Needs Review": e.needs_review ? "Yes" : "",
+        "Status": e.is_rejected ? "NOT APPROVED — not paid" : e.needs_review ? "Needs review" : "Approved",
+        "Rejection Reason": e.rejection_reason || "",
       };
     });
 
+    // Summary is the payroll sheet, so rejected entries are left out entirely —
+    // they still appear on the detail sheet, flagged, for the paper trail.
     const totalsMap = {};
     filteredEntries.forEach(e => {
-      if (!e.clock_out) return;
+      if (!e.clock_out || !isPayable(e)) return;
       const emp = employees.find(x => x.id === e.employee_id);
       const co = companyLabel(e.company || emp?.company);
       const key = `${e.employee_id}_${co}`;
@@ -2177,7 +2250,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
   };
 
   const liveEntries = timeEntries
-    .filter(e => !e.clock_out && (new Date() - new Date(e.clock_in)) / 3600000 < AUTO_CLOCKOUT_HOURS)
+    .filter(e => !e.clock_out && isPayable(e) && (new Date() - new Date(e.clock_in)) / 3600000 < AUTO_CLOCKOUT_HOURS)
     .map(e => ({ ...e, employee: employees.find(x => x.id === e.employee_id) }))
     .filter(e => e.employee);
 
@@ -2280,7 +2353,7 @@ function EmployeeHours({ isMobile: m, showToast }) {
           {entriesView === "summary" ? (() => {
             const byEmployee = {};
             filteredEntries.forEach(e => {
-              if (!e.clock_out) return;
+              if (!e.clock_out || !isPayable(e)) return;
               const emp = employees.find(x => x.id === e.employee_id);
               const co = e.company || emp?.company || "";
               const key = `${e.employee_id}_${co}`;
@@ -2321,8 +2394,8 @@ function EmployeeHours({ isMobile: m, showToast }) {
               {filteredEntries.map((entry, i) => {
                 const emp = employees.find(x => x.id === entry.employee_id);
                 return (
-                  <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: i < filteredEntries.length - 1 ? "1px solid #f3f4f6" : "none", flexWrap: m ? "wrap" : "nowrap" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                  <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: i < filteredEntries.length - 1 ? "1px solid #f3f4f6" : "none", flexWrap: m ? "wrap" : "nowrap", background: entry.is_rejected ? "#fffafa" : "transparent" }}>
+                    <div style={{ flex: 1, minWidth: 0, opacity: entry.is_rejected ? 0.65 : 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, fontSize: 13 }}>{emp?.name || "Unknown"}</span>
                         <span style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11, padding: "1px 6px", borderRadius: 99 }}>{companyLabel(entry.company || emp?.company)}</span>
@@ -2330,12 +2403,15 @@ function EmployeeHours({ isMobile: m, showToast }) {
                         {entry.is_manual && !entry.is_stat && <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Manual</span>}
                         {entry.is_auto_clocked_out && <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Auto Clock-Out</span>}
                         {entry.needs_review && <span style={{ background: "#fef3c7", color: "#b45309", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Needs Review</span>}
+                        {entry.is_rejected && <span style={{ background: "#dc2626", color: "#fff", fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>Not Approved</span>}
                       </div>
                       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
                         {fmtDate(entry.clock_in)} · {fmtTime(entry.clock_in)} → {entry.clock_out ? fmtTime(entry.clock_out) : (new Date() - new Date(entry.clock_in)) / 3600000 >= AUTO_CLOCKOUT_HOURS ? <span style={{ color: "#b45309", fontWeight: 600 }}>Awaiting employee correction — auto clock-out initiated</span> : <span style={{ color: "#059669", fontWeight: 600 }}>Active</span>}
-                        {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
+                        {entry.clock_out && <span style={{ marginLeft: 6, fontWeight: 500, color: "#374151", textDecoration: entry.is_rejected ? "line-through" : "none" }}>{formatDuration(entry.clock_in, entry.clock_out)}</span>}
+                        {entry.is_rejected && <span style={{ marginLeft: 6, color: "#dc2626", fontWeight: 600 }}>not paid</span>}
                       </div>
                       {entry.notes && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1, fontStyle: "italic" }}>{entry.notes}</div>}
+                      {entry.is_rejected && entry.rejection_reason && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 1 }}>Reason: {entry.rejection_reason}</div>}
                       {entry.is_stat && (() => {
                         // Computed live from every entry on file (not the filtered view),
                         // so a late-entered shift is reflected at approval time.
@@ -2354,7 +2430,8 @@ function EmployeeHours({ isMobile: m, showToast }) {
                         );
                       })()}
                     </div>
-                    {entry.needs_review && <button onClick={() => approveEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap", color: "#059669", borderColor: "#059669" }}>Approve</button>}
+                    {(entry.needs_review || entry.is_rejected) && <button onClick={() => approveEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap", color: "#059669", borderColor: "#059669" }}>{entry.is_rejected ? "Re-approve" : "Approve"}</button>}
+                    {entry.needs_review && !entry.is_rejected && <button onClick={() => { setRejectReason(""); setRejectTarget(entry); }} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap", color: "#dc2626", borderColor: "#fecaca" }}>Not Approved</button>}
                     <button onClick={() => openEditEntry(entry)} style={{ ...ghostBtn, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}>Edit</button>
                   </div>
                 );
@@ -2433,12 +2510,19 @@ function EmployeeHours({ isMobile: m, showToast }) {
       )}
 
       {showAddEntry && (
-        <Modal title="Add Time Entry" onClose={() => { setShowAddEntry(false); setAddEntryForm({ employee_id: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" }); }} onSave={saveAddEntry} saveLabel="Add Entry" saving={savingAddEntry} isMobile={m}>
+        <Modal title="Add Time Entry" onClose={() => { setShowAddEntry(false); setAddEntryForm({ employee_id: "", company: "", clock_in_date: "", clock_in_time: "", clock_out_date: "", clock_out_time: "", notes: "" }); }} onSave={saveAddEntry} saveLabel="Add Entry" saving={savingAddEntry} isMobile={m}>
           <label style={labelStyle}>Employee</label>
-          <select value={addEntryForm.employee_id} onChange={e => setAddEntryForm(f => ({ ...f, employee_id: e.target.value }))} style={iStyle} autoFocus>
+          <select value={addEntryForm.employee_id} onChange={e => { const id = e.target.value; const list = companiesFor(id); setAddEntryForm(f => ({ ...f, employee_id: id, company: list.length === 1 ? list[0] : "" })); }} style={iStyle} autoFocus>
             <option value="">Select employee...</option>
             {employees.filter(e => e.active).map(e => <option key={e.id} value={e.id}>{e.name} — {companyLabel(e.company)}</option>)}
           </select>
+          {companiesFor(addEntryForm.employee_id).length > 1 && (<>
+            <label style={labelStyle}>Company</label>
+            <select value={addEntryForm.company} onChange={e => setAddEntryForm(f => ({ ...f, company: e.target.value }))} style={iStyle}>
+              <option value="">Select company...</option>
+              {companiesFor(addEntryForm.employee_id).map(c => <option key={c} value={c}>{companyLabel(c)}</option>)}
+            </select>
+          </>)}
           <label style={labelStyle}>Clock In</label>
           <div style={{ display: "flex", gap: 8 }}>
             <input type="date" value={addEntryForm.clock_in_date} onChange={e => setAddEntryForm(f => ({ ...f, clock_in_date: e.target.value, clock_out_date: f.clock_out_date || e.target.value }))} style={{ ...iStyle, flex: 1 }} />
@@ -2471,6 +2555,27 @@ function EmployeeHours({ isMobile: m, showToast }) {
           <label style={labelStyle}>Notes</label>
           <input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} style={iStyle} placeholder="Admin notes..." />
           <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Saving will clear the review flag and mark this entry as approved.</p>
+        </Modal>
+      )}
+
+      {rejectTarget && (
+        <Modal title="Mark Not Approved" onClose={() => setRejectTarget(null)} onSave={confirmReject} saveLabel="Mark Not Approved" saving={savingReject} isMobile={m}>
+          {(() => {
+            const emp = employees.find(x => x.id === rejectTarget.employee_id);
+            const what = rejectTarget.is_stat ? "stat pay entry" : rejectTarget.is_manual ? "manual entry" : "shift";
+            return (
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#374151" }}>
+                <div style={{ fontWeight: 600, marginBottom: 3 }}>{emp?.name} — {what}</div>
+                <div style={{ color: "#6b7280" }}>
+                  {fmtDate(rejectTarget.clock_in)} · {fmtTime(rejectTarget.clock_in)} → {rejectTarget.clock_out ? fmtTime(rejectTarget.clock_out) : "still open"}
+                  {rejectTarget.clock_out && ` · ${formatDuration(rejectTarget.clock_in, rejectTarget.clock_out)}`}
+                </div>
+              </div>
+            );
+          })()}
+          <label style={labelStyle}>Reason <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional, visible to the employee)</span></label>
+          <input value={rejectReason} onChange={e => setRejectReason(e.target.value)} style={iStyle} placeholder="e.g. shift was not scheduled" autoFocus />
+          <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>These hours stay on file but are excluded from all totals, the summary view and the payroll export. You can re-approve at any time.</p>
         </Modal>
       )}
     </div>

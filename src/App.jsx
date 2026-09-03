@@ -280,6 +280,14 @@ const api = {
   updateEventStaff: (id, patch) => sb(`event_staff?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteEventStaff: (id) => sb(`event_staff?id=eq.${id}`, { method: "DELETE" }),
   getCheckinsForEvent: (eventId) => sb(`event_checkins?event_id=eq.${eventId}&order=checked_in_at`),
+  getPlansForEvent: (eventId) => sb(`event_attendance_plans?event_id=eq.${eventId}`),
+  // on_conflict names the unique index rather than the primary key, so a second
+  // declaration updates the existing plan instead of failing.
+  savePlan: (plan) => sb("event_attendance_plans?on_conflict=event_id,staff_id", {
+    method: "POST",
+    prefer: "return=representation,resolution=merge-duplicates",
+    body: JSON.stringify(plan),
+  }),
   addCheckin: (c) => sb("event_checkins", { method: "POST", body: JSON.stringify(c) }),
   deleteCheckin: (id) => sb(`event_checkins?id=eq.${id}`, { method: "DELETE" }),
 
@@ -1620,6 +1628,41 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
 }
 
 // ─── Clock Page (kiosk) ───────────────────────────────────────────────────────
+// ─── Attendance ───────────────────────────────────────────────────────────────
+const ATTENDANCE_TYPES = [
+  { value: "setup",    label: "Setup only",     sub: "Here to set up, not for the competition", oneDay: true  },
+  { value: "half_day", label: "Half day",       sub: "Part of a day",                           oneDay: false },
+  { value: "full_day", label: "Full day",       sub: "The whole day, start to finish",          oneDay: false },
+  { value: "teardown", label: "Tear down only", sub: "Here to pack up at the end",              oneDay: true  },
+];
+const HALVES = [
+  { value: "morning",   label: "Morning" },
+  { value: "afternoon", label: "Afternoon" },
+];
+const attendanceLabel = (type, half) => {
+  const t = ATTENDANCE_TYPES.find(x => x.value === type);
+  if (!t) return type || "—";
+  return t.value === "half_day" && half
+    ? `${t.label} — ${HALVES.find(h => h.value === half)?.label.toLowerCase() || half}`
+    : t.label;
+};
+
+// The days an event covers, from its first day to its last. A missing end_date
+// means a single-day event; a malformed range falls back to the first day so the
+// kiosk always has at least one day to offer.
+function eventDays(event) {
+  if (!event?.date) return [];
+  const start = new Date(`${event.date}T00:00:00`);
+  const end = event.end_date ? new Date(`${event.end_date}T00:00:00`) : start;
+  if (isNaN(start)) return [];
+  if (isNaN(end) || end < start) return [event.date];
+  const out = [];
+  for (let d = new Date(start); d <= end && out.length < 31; d.setDate(d.getDate() + 1)) {
+    out.push(localDateStr(d));
+  }
+  return out;
+}
+
 // ─── Kiosk activation gate ────────────────────────────────────────────────────
 // Which kiosks ask for the activation code. These defaults match the behaviour
 // from before the toggle existed; a row in kiosk_settings overrides them.
@@ -3834,8 +3877,14 @@ function EventFormFields({ form, setForm, isMobile: m }) {
     <>
       <label style={labelStyle}>Event Name</label>
       <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={iStyle} placeholder="e.g. Nationals Qualifier – Ottawa" autoFocus />
-      <label style={labelStyle}>Date</label>
+      <label style={labelStyle}>First Day</label>
       <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={iStyle} />
+      <label style={labelStyle}>Last Day <span style={{ color: "#9ca3af", fontWeight: 400 }}>(leave blank for a single day)</span></label>
+      <input type="date" value={form.end_date || ""} min={form.date || undefined}
+        onChange={e => setForm(f => ({ ...f, end_date: e.target.value || null }))} style={iStyle} />
+      <div style={{ fontSize: 12, color: "#9ca3af", marginTop: -6, marginBottom: 4 }}>
+        Sets the days staff can pick from when they check in. Include the setup day as the first day if there is one.
+      </div>
       <label style={labelStyle}>Location</label>
       <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={iStyle} placeholder="e.g. Toronto, ON" />
       <label style={labelStyle}>Status</label>
@@ -4345,11 +4394,11 @@ function Awards({ isMobile: m, events, showToast }) {
 function Events({ isMobile: m, events, setEvents, packing, setPacking, eventTrailers, setEventTrailers, setView, setSelectedEventId, showToast }) {
   const [showModal, setShowModal] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
-  const [form, setForm] = useState({ name: "", date: "", location: "", status: "upcoming", logo_url: null });
+  const [form, setForm] = useState({ name: "", date: "", end_date: null, location: "", status: "upcoming", logo_url: null });
   const [saving, setSaving] = useState(false);
 
-  const openAdd = () => { setForm({ name: "", date: "", location: "", status: "upcoming", logo_url: null }); setEditEvent(null); setShowModal(true); };
-  const openEdit = (e, evt) => { evt && evt.stopPropagation(); setForm({ name: e.name, date: e.date || "", location: e.location || "", status: e.status, logo_url: e.logo_url || null }); setEditEvent(e); setShowModal(true); };
+  const openAdd = () => { setForm({ name: "", date: "", end_date: null, location: "", status: "upcoming", logo_url: null }); setEditEvent(null); setShowModal(true); };
+  const openEdit = (e, evt) => { evt && evt.stopPropagation(); setForm({ name: e.name, date: e.date || "", end_date: e.end_date || null, location: e.location || "", status: e.status, logo_url: e.logo_url || null }); setEditEvent(e); setShowModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) return;
@@ -4481,7 +4530,7 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   const [awardCalc, setAwardCalc] = useState(null);   // most recent saved award calculation for this event
 
   useEffect(() => {
-    setEditForm({ name: event.name, date: event.date || "", location: event.location || "", status: event.status, logo_url: event.logo_url || null });
+    setEditForm({ name: event.name, date: event.date || "", end_date: event.end_date || null, location: event.location || "", status: event.status, logo_url: event.logo_url || null });
   }, [event]);
 
   // Pull the latest saved Awards calculation for this event (read-only "needed" reference for packing).
@@ -5760,12 +5809,15 @@ function EventCheckins({ event, isMobile: m, showToast, hideWhenEmpty = true }) 
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
 
+  const [plans, setPlans] = useState([]);
+
   const load = useCallback(() => {
     setLoading(true);
     api.getCheckinsForEvent(event.id)
       .then(r => { setRows(r); setMissing(false); })
       .catch(() => setMissing(true))
       .finally(() => setLoading(false));
+    api.getPlansForEvent(event.id).then(setPlans).catch(() => setPlans([]));
   }, [event.id]);
 
   useEffect(() => { load(); }, [load]);
@@ -5788,21 +5840,45 @@ function EventCheckins({ event, isMobile: m, showToast, hideWhenEmpty = true }) 
     const detail = rows
       .slice()
       .sort((a, b) => (a.local_date || "").localeCompare(b.local_date || "") || new Date(a.checked_in_at) - new Date(b.checked_in_at))
-      .map(r => ({
-        Day: r.local_date,
-        Name: r.staff_name || "",
-        "Arrived": r.checked_in_at ? new Date(r.checked_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
-      }));
+      .map(r => {
+        const plan = plans.find(p => p.staff_id === r.staff_id);
+        return {
+          Day: r.local_date,
+          Name: r.staff_name || "",
+          "Arrived": r.checked_in_at ? new Date(r.checked_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+          "Here for": plan ? attendanceLabel(plan.attendance_type, plan.half) : "",
+          "Days declared": plan ? (plan.days || []).join(", ") : "",
+        };
+      });
     const summary = days.slice().reverse().map(d => ({ Day: d, "People checked in": byDay[d].length }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detail), "Check-ins");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "By day");
+    if (noShows.length) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+        noShows.map(n => ({ Day: n.day, Name: n.name, "Here for": n.type }))), "No-shows");
+    }
     const safe = (event.name || "event").replace(/[^a-zA-Z0-9-_ ]/g, "").trim().replace(/\s+/g, "-");
     XLSX.writeFile(wb, `checkins_${safe}.xlsx`);
   }
 
+  // Declared but never turned up: a day someone said they'd be on site with no
+  // arrival recorded for it. Only meaningful for days that have already passed —
+  // a future day isn't a no-show yet.
+  const todayStr = localDateStr();
+  const arrived = new Set(rows.map(r => `${r.staff_id}|${r.local_date}`));
+  const noShows = [];
+  plans.forEach(p => {
+    (p.days || []).forEach(d => {
+      if (d < todayStr && !arrived.has(`${p.staff_id}|${d}`)) {
+        noShows.push({ name: p.staff_name, day: d, type: attendanceLabel(p.attendance_type, p.half) });
+      }
+    });
+  });
+  noShows.sort((a, b) => b.day.localeCompare(a.day) || (a.name || "").localeCompare(b.name || ""));
+
   // Stay out of the way entirely until the feature is actually in use.
-  if (hideWhenEmpty && (missing || (!loading && rows.length === 0))) return null;
+  if (hideWhenEmpty && (missing || (!loading && rows.length === 0 && plans.length === 0))) return null;
 
   if (missing) return (
     <div className="card" style={{ padding: m ? 14 : 18, background: "#fffbeb", borderColor: "#fde68a", fontSize: 13, color: "#92400e" }}>
@@ -5834,16 +5910,39 @@ function EventCheckins({ event, isMobile: m, showToast, hideWhenEmpty = true }) 
             </span>
             <span style={{ fontSize: 12, color: "#9ca3af" }}>{byDay[day].length} checked in</span>
           </div>
-          {byDay[day].map(r => (
+          {byDay[day].map(r => {
+            const plan = plans.find(p => p.staff_id === r.staff_id);
+            return (
             <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0" }}>
               <span style={{ fontSize: 13, color: "#6b7280", width: 64, flexShrink: 0 }}>{fmtTime(r.checked_in_at)}</span>
-              <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>{r.staff_name}</span>
+              <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>
+                {r.staff_name}
+                {plan && <span style={{ color: "#9ca3af", marginLeft: 8, fontSize: 12 }}>{attendanceLabel(plan.attendance_type, plan.half)}</span>}
+              </span>
               <button onClick={() => removeRow(r)} title="Remove this check-in"
                 style={{ background: "none", border: "none", color: "#d1d5db", cursor: "pointer", fontSize: 13, fontFamily: "inherit", padding: "2px 6px" }}>✕</button>
             </div>
-          ))}
+            );
+          })}
         </div>
       ))}
+
+      {noShows.length > 0 && (
+        <div style={{ marginTop: 4, paddingTop: 12, borderTop: "1px solid #f3f4f6" }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#92400e", marginBottom: 6 }}>
+            Said they'd be here but didn't check in
+          </div>
+          {noShows.map((n, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", fontSize: 13 }}>
+              <span style={{ color: "#b45309", width: 64, flexShrink: 0 }}>
+                {new Date(`${n.day}T00:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}
+              </span>
+              <span style={{ flex: 1 }}>{n.name}</span>
+              <span style={{ color: "#9ca3af", fontSize: 12 }}>{n.type}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -6062,6 +6161,12 @@ function CheckInKiosk() {
   const [eventId, setEventId] = useState(() => localStorage.getItem("cheerops_checkin_event") || null);
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [planFor, setPlanFor] = useState(null);   // person being asked what they're here for
+  const [planType, setPlanType] = useState("full_day");
+  const [planHalf, setPlanHalf] = useState("morning");
+  const [planDays, setPlanDays] = useState([]);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [addingSelf, setAddingSelf] = useState(false);
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState("");
@@ -6093,8 +6198,11 @@ function CheckInKiosk() {
 
   // Arrivals are loaded per event; the kiosk only ever shows one event at a time.
   useEffect(() => {
-    if (!eventId) { setCheckins([]); return; }
+    if (!eventId) { setCheckins([]); setPlans([]); return; }
     api.getCheckinsForEvent(eventId).then(setCheckins).catch(() => setCheckins([]));
+    // A missing table just means nobody is asked what they're here for; the
+    // kiosk keeps working as a plain arrival log.
+    api.getPlansForEvent(eventId).then(setPlans).catch(() => setPlans([]));
   }, [eventId]);
 
   const event = events.find(e => e.id === eventId) || null;
@@ -6102,6 +6210,51 @@ function CheckInKiosk() {
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
   const arrivalFor = (staffId) => checkins.find(c => c.staff_id === staffId && c.local_date === today);
+  const planForStaff = (staffId) => plans.find(p => p.staff_id === staffId);
+  const days = eventDays(event);
+
+  // Asked once per person per event. Later days are a single tap, because the
+  // declaration already covers them.
+  function beginCheckIn(person) {
+    if (planForStaff(person.id) || days.length === 0) return checkIn(person);
+    setPlanFor(person);
+    setPlanType("full_day");
+    setPlanHalf("morning");
+    setPlanDays(days.includes(today) ? [today] : [days[0]]);
+  }
+
+  async function savePlanAndCheckIn() {
+    if (!planFor) return;
+    const type = ATTENDANCE_TYPES.find(t => t.value === planType);
+    const chosen = type?.oneDay ? planDays.slice(0, 1) : planDays;
+    if (chosen.length === 0) { showToast("Pick at least one day"); return; }
+    setSavingPlan(true);
+    try {
+      const plan = {
+        event_id: eventId,
+        staff_id: planFor.id,
+        staff_name: planFor.name,
+        attendance_type: planType,
+        half: planType === "half_day" ? planHalf : null,
+        days: chosen,
+        updated_at: new Date().toISOString(),
+      };
+      const saved = await api.savePlan(plan);
+      const rec = (Array.isArray(saved) ? saved[0] : saved) || plan;
+      setPlans(prev => [...prev.filter(p => p.staff_id !== planFor.id), rec]);
+      const person = planFor;
+      setPlanFor(null);
+      await checkIn(person);
+    } catch {
+      // Don't strand someone at the kiosk over a failed declaration — record the
+      // arrival, which is the part that matters, and let it be fixed in the admin.
+      const person = planFor;
+      setPlanFor(null);
+      showToast("Couldn't save what you're here for — checking you in anyway");
+      await checkIn(person);
+    }
+    setSavingPlan(false);
+  }
   const arrivedToday = checkins.filter(c => c.local_date === today);
 
   const activeStaff = staff.filter(p => p.active !== false);
@@ -6129,7 +6282,7 @@ function CheckInKiosk() {
         setStaff(prev => [...prev, person]);
       }
       setAddingSelf(false); setNewName(""); setNewRole(""); setSearch("");
-      await checkIn(person);
+      beginCheckIn(person);
     } catch {
       showToast("Could not add you — please see an organiser");
     }
@@ -6209,6 +6362,88 @@ function CheckInKiosk() {
       </div>
     </div>
   );
+
+  if (planFor) {
+    const type = ATTENDANCE_TYPES.find(t => t.value === planType);
+    const oneDay = !!type?.oneDay;
+    const toggleDay = (d) => setPlanDays(prev =>
+      oneDay ? [d] : (prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d].sort()));
+    return (
+      <div style={{ ...base, alignItems: "flex-start", paddingTop: 32, overflowY: "auto" }}>
+        <div style={{ ...card, maxWidth: 520 }}>
+          <div style={{ textAlign: "center", marginBottom: 22 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 4 }}>{planFor.name}</div>
+            <div style={{ fontSize: 14, color: "#6b7280" }}>What are you here for?</div>
+          </div>
+
+          {ATTENDANCE_TYPES.map(t => (
+            <button key={t.value}
+              onClick={() => {
+                setPlanType(t.value);
+                // A setup or tear-down shift is a single day, so collapse any
+                // multi-day selection rather than silently keeping it.
+                if (t.oneDay) setPlanDays(prev => (prev.length ? [prev[0]] : [days.includes(today) ? today : days[0]]));
+              }}
+              style={{
+                display: "block", width: "100%", textAlign: "left", marginBottom: 8,
+                padding: "14px 16px", borderRadius: 12, cursor: "pointer", fontFamily: "inherit",
+                background: planType === t.value ? "#1a1a2e" : "#fff",
+                color: planType === t.value ? "#fff" : "#1a1a2e",
+                border: `1px solid ${planType === t.value ? "#1a1a2e" : "#d7dae0"}`,
+              }}>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>{t.label}</div>
+              <div style={{ fontSize: 12, opacity: planType === t.value ? 0.75 : 0.6, marginTop: 2 }}>{t.sub}</div>
+            </button>
+          ))}
+
+          {planType === "half_day" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 4, marginBottom: 4 }}>
+              {HALVES.map(h => (
+                <button key={h.value} onClick={() => setPlanHalf(h.value)}
+                  style={{
+                    flex: 1, padding: "11px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontSize: 15,
+                    background: planHalf === h.value ? "#eef2ff" : "#fff",
+                    color: planHalf === h.value ? "#1a1a2e" : "#6b7280",
+                    border: `1px solid ${planHalf === h.value ? "#818cf8" : "#d7dae0"}`,
+                    fontWeight: planHalf === h.value ? 600 : 400,
+                  }}>{h.label}</button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ marginTop: 18, marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>
+            {oneDay ? "Which day?" : "Which days are you here?"}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+            {days.map(d => {
+              const on = planDays.includes(d);
+              return (
+                <button key={d} onClick={() => toggleDay(d)}
+                  style={{
+                    padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontSize: 14,
+                    background: on ? "#1a1a2e" : "#fff", color: on ? "#fff" : "#374151",
+                    border: `1px solid ${on ? "#1a1a2e" : "#d7dae0"}`, fontWeight: on ? 600 : 400,
+                  }}>
+                  {new Date(`${d}T00:00:00`).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}
+                  {d === today && <span style={{ opacity: 0.6, marginLeft: 6, fontSize: 12 }}>today</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          <button onClick={savePlanAndCheckIn} disabled={savingPlan || planDays.length === 0}
+            style={{
+              width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12,
+              padding: 15, fontSize: 16, fontWeight: 600, fontFamily: "inherit", marginBottom: 10,
+              cursor: savingPlan || planDays.length === 0 ? "default" : "pointer",
+              opacity: savingPlan || planDays.length === 0 ? 0.5 : 1,
+            }}>{savingPlan ? "Checking in…" : "Check in"}</button>
+          <button onClick={() => setPlanFor(null)}
+            style={{ width: "100%", background: "none", border: "1px solid #d1d5db", borderRadius: 12, padding: 13, fontSize: 15, color: "#374151", fontFamily: "inherit", cursor: "pointer" }}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
 
   if (addingSelf) return (
     <div style={base}>
@@ -6309,13 +6544,19 @@ function CheckInKiosk() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 17, fontWeight: 600, color: arrival ? "#6b7280" : "#1a1a2e" }}>{person.name}</div>
                 {person.role && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{person.role}</div>}
+                {planForStaff(person.id) && (
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                    {attendanceLabel(planForStaff(person.id).attendance_type, planForStaff(person.id).half)}
+                    {(planForStaff(person.id).days || []).length > 1 && ` · ${(planForStaff(person.id).days || []).length} days`}
+                  </div>
+                )}
               </div>
               {arrival ? (
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#059669" }}>✓ {fmtTime(arrival.checked_in_at)}</div>
                 </div>
               ) : (
-                <button onClick={() => checkIn(person)} disabled={busy}
+                <button onClick={() => beginCheckIn(person)} disabled={busy}
                   style={{ flexShrink: 0, background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 10, padding: "12px 22px", fontSize: 15, fontWeight: 600, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>
                   {busy ? "…" : "Check in"}
                 </button>

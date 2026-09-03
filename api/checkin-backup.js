@@ -52,10 +52,22 @@ export default async function handler(req, res) {
   try {
     const msToken = await getMicrosoftToken();
 
-    const [checkins, events] = await Promise.all([
-      sb("event_checkins?select=id,event_id,staff_name,local_date,checked_in_at&order=checked_in_at"),
+    const [checkins, events, plans] = await Promise.all([
+      sb("event_checkins?select=id,event_id,staff_id,staff_name,local_date,checked_in_at&order=checked_in_at"),
       sb("events?select=id,name"),
+      // Optional: the table may not exist yet, and a backup should not stop for
+      // the sake of an extra column.
+      sb("event_attendance_plans?select=event_id,staff_id,attendance_type,half").catch(() => []),
     ]);
+    const planFor = new Map(plans.map((p) => [`${p.event_id}|${p.staff_id}`, p]));
+    const HALF = { morning: "morning", afternoon: "afternoon" };
+    const TYPE = { setup: "Setup only", half_day: "Half day", full_day: "Full day", teardown: "Tear down only" };
+    const hereFor = (c) => {
+      const p = planFor.get(`${c.event_id}|${c.staff_id}`);
+      if (!p) return "";
+      const base = TYPE[p.attendance_type] || p.attendance_type || "";
+      return p.attendance_type === "half_day" && HALF[p.half] ? `${base} — ${HALF[p.half]}` : base;
+    };
     const eventName = Object.fromEntries(events.map((e) => [String(e.id), e.name || ""]));
 
     // Read whatever is already backed up. A missing file is the first run.
@@ -80,6 +92,7 @@ export default async function handler(req, res) {
         "Day": c.local_date || "",
         "Event": eventName[String(c.event_id)] || c.event_id || "",
         "Name": c.staff_name || "",
+        "Here for": hereFor(c),
         "Arrived": fmtTime(c.checked_in_at),
         "Recorded (UTC)": c.checked_in_at || "",
         "Backed up": new Date().toISOString(),
@@ -91,7 +104,11 @@ export default async function handler(req, res) {
 
     const rows = [...existing, ...added];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), SHEET);
+    // Explicit header: rows written before a column existed simply get a blank
+    // for it, rather than the sheet's columns depending on which row happened to
+    // be first. Add new columns to the end of this list, never in the middle.
+    const HEADERS = ["Check-in ID", "Day", "Event", "Name", "Here for", "Arrived", "Recorded (UTC)", "Backed up"];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows, { header: HEADERS }), SHEET);
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "buffer" });
 
     const put = await fetch(url, {

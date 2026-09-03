@@ -17,8 +17,12 @@ const SHEET = "Check-ins";
 // The anon key is already public (it ships in the browser bundle), so falling
 // back to it keeps this working even if the Vercel env vars were never set for
 // the server side — which they may not have been, since nothing else needed them.
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://peylonukcwsqdknchxda.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || ADMIN_TOKEN;
+// Whitespace is stripped because a JWT pasted into a dashboard can arrive with
+// a line break folded into it, and a header value containing one throws before
+// any request is made. The production SUPABASE_ANON_KEY had exactly that.
+const clean = (v) => (v || "").replace(/\s+/g, "");
+const SUPABASE_URL = clean(process.env.SUPABASE_URL) || "https://peylonukcwsqdknchxda.supabase.co";
+const SUPABASE_KEY = clean(process.env.SUPABASE_ANON_KEY) || ADMIN_TOKEN;
 
 const sb = async (path) => {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {

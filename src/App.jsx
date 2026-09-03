@@ -7537,11 +7537,21 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     setCorrectingAmount((s) => { const n = new Set(s); n.delete(expenseId); return n; });
   }
 
+  // The rate shown in the box for a line: what the admin has typed, else the
+  // rate this line was already priced at, else the configured default.
+  // Both the input and applyMileageRate read through here — when they resolved
+  // it separately, an untouched box displayed the default but submitted
+  // undefined, so pricing failed until the value was nudged and put back.
+  function rateCentsFor(expense) {
+    return rateDraft[expense.id]
+      ?? String(Math.round(((expense.mileageRate ?? config.mileageRate) || 0.70) * 100));
+  }
+
   // Price a distance that was submitted without an amount. Sets the dollar
   // figure and records the rate that produced it; paying stays a separate,
   // deliberate step so nothing is marked paid as a side effect of pricing.
   async function applyMileageRate(expense) {
-    const cents = parseFloat(rateDraft[expense.id] ?? "");
+    const cents = parseFloat(rateCentsFor(expense));
     if (!(cents > 0)) { showToast("Enter a rate in cents per km"); return; }
     const rate = cents / 100;
     const amount = parseFloat((parseFloat(expense.totalKMs) * rate).toFixed(2));
@@ -8079,11 +8089,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                   // The addresses are optional, so a route may be partial or absent.
                   const route = [expense.startLocation, expense.endLocation].filter(Boolean).join(" → ");
                   const unpriced = !parseFloat(expense.amount);
-                  // Prefill from the rate already applied to this line, falling
-                  // back to the configured one, so "Update amount" starts from
-                  // what actually produced the current figure.
-                  const cents = rateDraft[expense.id]
-                    ?? String(Math.round(((expense.mileageRate ?? config.mileageRate) || 0.70) * 100));
+                  const cents = rateCentsFor(expense);
                   const centsNum = parseFloat(cents);
                   const preview = centsNum > 0
                     ? (parseFloat(expense.totalKMs) * (centsNum / 100)).toFixed(2)

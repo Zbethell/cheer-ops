@@ -1062,6 +1062,10 @@ function EventStaffManager({ showToast, isMobile: m }) {
                 {p.name}
                 {p.role && <span style={{ color: "#9ca3af", marginLeft: 8, fontSize: 13 }}>{p.role}</span>}
                 {p.active === false && <span style={{ color: "#9ca3af", marginLeft: 8, fontSize: 12 }}>· hidden</span>}
+                {/* Anyone can add themselves from the kiosk, so show when a name
+                    appeared — a run of new entries after an event is worth a look
+                    for duplicates or typos. */}
+                {p.created_at && <span style={{ color: "#c3c7ce", marginLeft: 8, fontSize: 12 }}>· added {fmtDate(p.created_at)}</span>}
               </div>
               <button onClick={() => toggleActive(p)} style={rowBtn}>{p.active === false ? "Show" : "Hide"}</button>
               <button onClick={() => remove(p)} style={{ ...rowBtn, border: "1px solid #fecaca", color: "#ef4444" }}>✕</button>
@@ -6058,6 +6062,10 @@ function CheckInKiosk() {
   const [eventId, setEventId] = useState(() => localStorage.getItem("cheerops_checkin_event") || null);
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [addingSelf, setAddingSelf] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState("");
+  const [savingSelf, setSavingSelf] = useState(false);
   const [banner, setBanner] = useState(null);   // { name, time, repeat }
   const [toast, setToast] = useState(null);
   // Re-rendered on a timer so the clock and the local date stay right on a
@@ -6074,7 +6082,10 @@ function CheckInKiosk() {
       try {
         const [e, s] = await Promise.all([api.getEvents(), api.getEventStaff()]);
         setEvents(e);
-        setStaff(s.filter(p => p.active !== false));
+        // The whole roster is kept, hidden people included, and filtered for
+        // display below. Self-add matches against all of it so someone who was
+        // hidden is reactivated rather than duplicated.
+        setStaff(s);
       } catch { setError("Could not connect to the database."); }
       setLoading(false);
     })();
@@ -6093,7 +6104,37 @@ function CheckInKiosk() {
   const arrivalFor = (staffId) => checkins.find(c => c.staff_id === staffId && c.local_date === today);
   const arrivedToday = checkins.filter(c => c.local_date === today);
 
-  const visible = staff.filter(p => p.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const activeStaff = staff.filter(p => p.active !== false);
+  const visible = activeStaff.filter(p => p.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  // Someone who isn't on the roster can add themselves rather than being stuck.
+  async function addSelfAndCheckIn() {
+    const name = newName.trim().replace(/\s+/g, " ");
+    if (name.length < 2) { showToast("Please enter your full name"); return; }
+    setSavingSelf(true);
+    try {
+      // Case-insensitive match across the whole roster, so a typo'd re-add or a
+      // previously hidden person doesn't create a second record of them.
+      const existing = staff.find(p => (p.name || "").trim().toLowerCase() === name.toLowerCase());
+      let person = existing || null;
+      if (existing) {
+        if (existing.active === false) {
+          await api.updateEventStaff(existing.id, { active: true });
+          person = { ...existing, active: true };
+          setStaff(prev => prev.map(p => (p.id === existing.id ? person : p)));
+        }
+      } else {
+        const rows = await api.addEventStaff({ name, role: newRole.trim() || null, active: true });
+        person = Array.isArray(rows) ? rows[0] : rows;
+        setStaff(prev => [...prev, person]);
+      }
+      setAddingSelf(false); setNewName(""); setNewRole(""); setSearch("");
+      await checkIn(person);
+    } catch {
+      showToast("Could not add you — please see an organiser");
+    }
+    setSavingSelf(false);
+  }
 
   async function checkIn(person) {
     if (busyId) return;
@@ -6169,6 +6210,47 @@ function CheckInKiosk() {
     </div>
   );
 
+  if (addingSelf) return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 6 }}>Add yourself</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>You'll be checked in to {event.name} straight away.</div>
+        </div>
+        <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Your name</label>
+        <input
+          value={newName} autoFocus
+          onChange={e => setNewName(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addSelfAndCheckIn()}
+          placeholder="First and last name"
+          style={{ ...iStyle, marginBottom: 16 }}
+        />
+        <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Role <span style={{ color: "#9ca3af", fontWeight: 400 }}>(optional)</span></label>
+        <input
+          value={newRole}
+          onChange={e => setNewRole(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addSelfAndCheckIn()}
+          placeholder="e.g. Judge, Volunteer"
+          style={{ ...iStyle, marginBottom: 22 }}
+        />
+        <button
+          onClick={addSelfAndCheckIn}
+          disabled={savingSelf || newName.trim().length < 2}
+          style={{
+            width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12,
+            padding: 15, fontSize: 16, fontWeight: 600, fontFamily: "inherit",
+            cursor: savingSelf || newName.trim().length < 2 ? "default" : "pointer",
+            opacity: savingSelf || newName.trim().length < 2 ? 0.5 : 1, marginBottom: 10,
+          }}
+        >{savingSelf ? "Adding…" : "Add me and check in"}</button>
+        <button
+          onClick={() => { setAddingSelf(false); setNewName(""); setNewRole(""); }}
+          style={{ width: "100%", background: "none", border: "1px solid #d1d5db", borderRadius: 12, padding: 13, fontSize: 15, color: "#374151", fontFamily: "inherit", cursor: "pointer" }}
+        >Cancel</button>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ minHeight: "100vh", background: "#f8f9fb", fontFamily: "'DM Sans','Segoe UI',sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
@@ -6208,9 +6290,9 @@ function CheckInKiosk() {
           style={{ ...iStyle, marginBottom: 16, background: "#fff" }}
         />
 
-        {staff.length === 0 && (
-          <div style={{ ...card, textAlign: "center", color: "#9ca3af", maxWidth: "none" }}>
-            No staff on the roster yet. Add people under Settings → Event Staff.
+        {activeStaff.length === 0 && (
+          <div style={{ ...card, textAlign: "center", color: "#9ca3af", maxWidth: "none", marginBottom: 12 }}>
+            Nobody on the roster yet — add yourself below.
           </div>
         )}
 
@@ -6242,11 +6324,24 @@ function CheckInKiosk() {
           );
         })}
 
-        {staff.length > 0 && visible.length === 0 && (
-          <div style={{ textAlign: "center", color: "#9ca3af", padding: "30px 0", fontSize: 14 }}>
+        {activeStaff.length > 0 && visible.length === 0 && (
+          <div style={{ textAlign: "center", color: "#9ca3af", padding: "24px 0 8px", fontSize: 14 }}>
             No one matching “{search}”.
           </div>
         )}
+
+        {/* Always offered, not only when a search comes up empty — someone who
+            can't find themselves is unlikely to try searching first. */}
+        <button
+          onClick={() => { setNewName(search.trim()); setNewRole(""); setAddingSelf(true); }}
+          style={{
+            width: "100%", marginTop: 10, padding: "14px", borderRadius: 12,
+            border: "2px dashed #d1d5db", background: "none", color: "#6b7280",
+            fontSize: 15, fontWeight: 500, fontFamily: "inherit", cursor: "pointer",
+          }}
+        >
+          + I'm not on the list
+        </button>
       </div>
 
       {toast && <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1a1a2e", color: "#fff", padding: "12px 22px", borderRadius: 10, fontSize: 14 }}>{toast}</div>}

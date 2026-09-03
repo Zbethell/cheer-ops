@@ -11,6 +11,8 @@ const DOC_INTEL_ENDPOINT = (process.env.DOC_INTEL_ENDPOINT || "").trim();
 export const SITE_ID = "canadiancheer.sharepoint.com,3de101e2-cad1-4d01-b8f2-581326ad7ef2,b28c2a3b-2636-4279-9c6a-ba34c5edfcb9";
 export const EXPENSES_LIST_ID = "33fd6b8c-b4df-47bd-af5b-b17ee2bfcf51";
 export const SHAREPOINT_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_LkVJJY25OMISagOm60QPCvf";
+// The "IT" document library, where the check-in backup workbook lives.
+export const IT_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_LlhtsFPVPnTQKkZTxnVtTGN";
 
 export async function getMicrosoftToken() {
   const res = await fetch(

@@ -266,6 +266,16 @@ const api = {
   getKitItems: () => sb("kit_items"),
   addKitItem: (ki) => sb("kit_items", { method: "POST", body: JSON.stringify(ki) }),
   deleteKitItemsByKit: (kitId) => sb(`kit_items?kit_id=eq.${kitId}`, { method: "DELETE" }),
+  // Venue check-in (/checkin). Separate roster from `employees` so payroll and
+  // venue attendance stay independent — see sql/event_checkins.sql.
+  getEventStaff: () => sb("event_staff?order=name"),
+  addEventStaff: (s) => sb("event_staff", { method: "POST", body: JSON.stringify(s) }),
+  updateEventStaff: (id, patch) => sb(`event_staff?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteEventStaff: (id) => sb(`event_staff?id=eq.${id}`, { method: "DELETE" }),
+  getCheckinsForEvent: (eventId) => sb(`event_checkins?event_id=eq.${eventId}&order=checked_in_at`),
+  addCheckin: (c) => sb("event_checkins", { method: "POST", body: JSON.stringify(c) }),
+  deleteCheckin: (id) => sb(`event_checkins?id=eq.${id}`, { method: "DELETE" }),
+
   getEmployees: () => sb("employees?order=name"),
   addEmployee: (e) => sb("employees", { method: "POST", body: JSON.stringify(e) }),
   updateEmployee: (id, patch) => sb(`employees?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -974,6 +984,97 @@ function CategoryManager({ categories, setCategories, showToast, isMobile: m }) 
 }
 
 // ─── Trailer Manager (for Settings) ──────────────────────────────────────────
+// The roster behind the /checkin kiosk. Separate from `employees` on purpose:
+// these are the people who turn up at a venue, which includes casuals and
+// volunteers who have no payroll record.
+function EventStaffManager({ showToast, isMobile: m }) {
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.getEventStaff()
+      .then(setStaff)
+      .catch(() => setMissing(true))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function add() {
+    const n = name.trim();
+    if (!n || saving) return;
+    setSaving(true);
+    try {
+      const rows = await api.addEventStaff({ name: n, role: role.trim() || null, active: true });
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      setStaff(prev => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)));
+      setName(""); setRole("");
+    } catch { showToast("Could not add — is sql/event_checkins.sql run?"); }
+    setSaving(false);
+  }
+
+  async function toggleActive(p) {
+    const next = p.active === false;
+    try {
+      await api.updateEventStaff(p.id, { active: next });
+      setStaff(prev => prev.map(x => x.id === p.id ? { ...x, active: next } : x));
+    } catch { showToast("Could not update"); }
+  }
+
+  async function remove(p) {
+    // Past attendance keeps its own copy of the name, so removing someone from
+    // the roster never blanks them out of an event's history.
+    if (!confirm(`Remove ${p.name} from the check-in roster?\n\nPast check-ins are kept.`)) return;
+    try {
+      await api.deleteEventStaff(p.id);
+      setStaff(prev => prev.filter(x => x.id !== p.id));
+    } catch { showToast("Could not remove"); }
+  }
+
+  const rowBtn = { background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: "pointer", color: "#374151", fontFamily: "inherit", fontSize: 13 };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600 }}>Event Staff</h3>
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>{staff.filter(p => p.active !== false).length} active</span>
+      </div>
+      {missing ? (
+        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#92400e" }}>
+          Run <code>sql/event_checkins.sql</code> in the Supabase SQL editor to enable check-ins.
+        </div>
+      ) : loading ? (
+        <div style={{ fontSize: 13, color: "#9ca3af" }}>Loading…</div>
+      ) : (
+        <>
+          {staff.map(p => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 1, padding: "9px 12px", background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14, opacity: p.active === false ? 0.5 : 1 }}>
+                {p.name}
+                {p.role && <span style={{ color: "#9ca3af", marginLeft: 8, fontSize: 13 }}>{p.role}</span>}
+                {p.active === false && <span style={{ color: "#9ca3af", marginLeft: 8, fontSize: 12 }}>· hidden</span>}
+              </div>
+              <button onClick={() => toggleActive(p)} style={rowBtn}>{p.active === false ? "Show" : "Hide"}</button>
+              <button onClick={() => remove(p)} style={{ ...rowBtn, border: "1px solid #fecaca", color: "#ef4444" }}>✕</button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <input style={{ ...inputStyle, flex: 2, minWidth: 140 }} value={name} placeholder="Name"
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && (e.preventDefault(), add())} />
+            <input style={{ ...inputStyle, flex: 1, minWidth: 110 }} value={role} placeholder="Role (optional)"
+              onChange={e => setRole(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && (e.preventDefault(), add())} />
+            <button onClick={add} disabled={saving} style={{ ...primaryBtn, width: "auto", padding: "9px 18px", fontSize: 13, opacity: saving ? 0.6 : 1 }}>Add</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TrailerManager({ trailers, setTrailers, showToast, isMobile: m }) {
   const [showModal, setShowModal] = useState(false);
   const [editTrailer, setEditTrailer] = useState(null);
@@ -2804,7 +2905,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -2904,6 +3005,7 @@ export default function App() {
 
   if (window.location.pathname === "/clock") return <ClockPage />;
   if (window.location.pathname === "/pack") return <KioskPack />;
+  if (window.location.pathname === "/checkin") return <CheckInKiosk />;
 
   if (!authChecked) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "DM Sans, sans-serif", color: "#6b7280" }}>Loading...</div>;
   if (!session) return <LoginScreen onLogin={handleLogin} />;
@@ -2925,6 +3027,7 @@ export default function App() {
   const canViewEvents    = isAdmin || ok(userPerms.can_view_events);
   const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
   const canViewAwards    = isAdmin || ok(userPerms.can_view_awards);
+  const canViewEventStaff = isAdmin || ok(userPerms.can_view_event_staff);
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
   const canViewContainers = isAdmin || ok(userPerms.can_view_containers);
   const canViewEmployeeHours = isAdmin || !!userPerms.can_view_employee_hours;
@@ -2974,6 +3077,7 @@ export default function App() {
           {canViewEvents && <button className={`nav-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}>Events</button>}
           {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
           {canViewAwards && <button className={`nav-btn ${view === "awards" ? "active" : ""}`} onClick={() => setView("awards")}>Awards</button>}
+          {canViewEventStaff && <button className={`nav-btn ${view === "event-staff" ? "active" : ""}`} onClick={() => setView("event-staff")}>Event Staff</button>}
           {canViewEmployeeHours && <button className={`nav-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}>Employee Hours</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
           {canViewExpenses && <button className={`nav-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}>Expenses</button>}
@@ -2994,6 +3098,7 @@ export default function App() {
         {view === "event-detail" && canViewEvents && selectedEvent && <EventDetail isMobile={m} event={selectedEvent} events={events} setEvents={setEvents} items={items} eventPacking={eventPacking} packing={packing} setPacking={setPacking} trailers={trailers} setTrailers={setTrailers} eventTrailers={eventTrailers} setEventTrailers={setEventTrailers} eventSignage={eventSignage} setEventSignage={setEventSignage} containers={containers} containerItems={containerItems} setContainerItems={setContainerItems} eventContainerItems={eventContainerItems} setEventContainerItems={setEventContainerItems} kits={kits} kitItems={kitItems} setView={setView} showToast={showToast} />}
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "awards" && canViewAwards && <Awards isMobile={m} events={events} showToast={showToast} />}
+        {view === "event-staff" && canViewEventStaff && <EventStaffPage isMobile={m} events={events} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
         {view === "expenses" && canViewExpenses && <ExpensesAdmin isMobile={m} showToast={showToast} />}
@@ -3008,6 +3113,7 @@ export default function App() {
           {canViewEvents && <button className={`tab-btn ${["events", "event-detail"].includes(view) ? "active" : ""}`} onClick={() => setView("events")}><span className="tab-icon">📅</span>Events</button>}
           {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
           {canViewAwards && <button className={`tab-btn ${view === "awards" ? "active" : ""}`} onClick={() => setView("awards")}><span className="tab-icon">🏅</span>Awards</button>}
+          {canViewEventStaff && <button className={`tab-btn ${view === "event-staff" ? "active" : ""}`} onClick={() => setView("event-staff")}><span className="tab-icon">🕘</span>Staff</button>}
           {canViewEmployeeHours && <button className={`tab-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}><span className="tab-icon">⏱️</span>Hours</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
           {canViewExpenses && <button className={`tab-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}><span className="tab-icon">💳</span>Expenses</button>}
@@ -5506,6 +5612,8 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
         </Modal>
       )}
 
+      <EventCheckins event={event} isMobile={m} showToast={showToast} />
+
       {showScanMode && activeTrailer && (
         <ScanMode
           event={event}
@@ -5517,6 +5625,182 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
           showToast={showToast}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Event Staff tab ──────────────────────────────────────────────────────────
+// The admin side of the /checkin kiosk: arrival timestamps per event, and the
+// roster of people the kiosk offers.
+function EventStaffPage({ isMobile: m, events, showToast }) {
+  const [section, setSection] = useState("log");   // "log" | "roster"
+  const [eventId, setEventId] = useState("");
+
+  // Default to the event most likely being worked right now: the active one,
+  // else the most recent by date.
+  useEffect(() => {
+    if (eventId || events.length === 0) return;
+    const active = events.find(e => e.status === "active");
+    const latest = [...events].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    const pick = active || latest;
+    if (pick) setEventId(pick.id);
+  }, [events, eventId]);
+
+  const event = events.find(e => e.id === eventId) || null;
+  const kioskUrl = `${window.location.origin}/checkin`;
+
+  const segBtn = (key, label) => (
+    <button key={key} onClick={() => setSection(key)} style={{
+      padding: "7px 16px", borderRadius: 8, border: "1px solid",
+      fontFamily: "inherit", fontSize: 13, fontWeight: 500, cursor: "pointer",
+      background: section === key ? "#1a1a2e" : "#fff",
+      color: section === key ? "#fff" : "#374151",
+      borderColor: section === key ? "#1a1a2e" : "#e5e7eb",
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Event Staff</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>Venue arrivals and the roster behind the check-in kiosk</p>
+        </div>
+        <button
+          onClick={() => { navigator.clipboard?.writeText(kioskUrl); showToast("Kiosk link copied"); }}
+          style={{ ...ghostBtn, fontSize: 13 }}
+          title={kioskUrl}
+        >🔗 Copy kiosk link</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {segBtn("log", "Check-in Log")}
+        {segBtn("roster", "Staff Roster")}
+      </div>
+
+      {section === "log" ? (
+        <>
+          {events.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, color: "#6b7280" }}>Event</span>
+              <select
+                value={eventId}
+                onChange={e => setEventId(e.target.value)}
+                style={{ ...(m ? inputStyleMobile : inputStyle), width: "auto", maxWidth: 320 }}
+              >
+                {[...events]
+                  .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+                  .map(ev => <option key={ev.id} value={ev.id}>{ev.name}{ev.date ? ` — ${fmtDate(ev.date)}` : ""}</option>)}
+              </select>
+            </div>
+          )}
+          {event
+            ? <EventCheckins event={event} isMobile={m} showToast={showToast} hideWhenEmpty={false} />
+            : <div className="card" style={{ padding: 30, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet.</div>}
+        </>
+      ) : (
+        <div className="card" style={{ padding: m ? 16 : "20px 24px" }}>
+          <EventStaffManager showToast={showToast} isMobile={m} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Event check-ins ──────────────────────────────────────────────────────────
+// Attendance recorded by the /checkin kiosk, grouped by day. Self-contained so
+// EventDetail doesn't have to carry yet another slice of state.
+// `hideWhenEmpty` keeps this out of the way on an event that doesn't use
+// check-ins; the Event Staff tab passes false so it can say so explicitly.
+function EventCheckins({ event, isMobile: m, showToast, hideWhenEmpty = true }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.getCheckinsForEvent(event.id)
+      .then(r => { setRows(r); setMissing(false); })
+      .catch(() => setMissing(true))
+      .finally(() => setLoading(false));
+  }, [event.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Days newest first; within a day, earliest arrival first.
+  const byDay = {};
+  rows.forEach(r => { (byDay[r.local_date] ||= []).push(r); });
+  const days = Object.keys(byDay).sort().reverse();
+  days.forEach(d => byDay[d].sort((a, b) => new Date(a.checked_in_at) - new Date(b.checked_in_at)));
+
+  async function removeRow(r) {
+    if (!confirm(`Remove ${r.staff_name}'s check-in?`)) return;
+    try {
+      await api.deleteCheckin(r.id);
+      setRows(prev => prev.filter(x => x.id !== r.id));
+    } catch { showToast("Could not remove check-in"); }
+  }
+
+  function exportXlsx() {
+    const detail = rows
+      .slice()
+      .sort((a, b) => (a.local_date || "").localeCompare(b.local_date || "") || new Date(a.checked_in_at) - new Date(b.checked_in_at))
+      .map(r => ({
+        Day: r.local_date,
+        Name: r.staff_name || "",
+        "Arrived": r.checked_in_at ? new Date(r.checked_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      }));
+    const summary = days.slice().reverse().map(d => ({ Day: d, "People checked in": byDay[d].length }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detail), "Check-ins");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "By day");
+    const safe = (event.name || "event").replace(/[^a-zA-Z0-9-_ ]/g, "").trim().replace(/\s+/g, "-");
+    XLSX.writeFile(wb, `checkins_${safe}.xlsx`);
+  }
+
+  // Stay out of the way entirely until the feature is actually in use.
+  if (hideWhenEmpty && (missing || (!loading && rows.length === 0))) return null;
+
+  if (missing) return (
+    <div className="card" style={{ padding: m ? 14 : 18, background: "#fffbeb", borderColor: "#fde68a", fontSize: 13, color: "#92400e" }}>
+      Run <code>sql/event_checkins.sql</code> in the Supabase SQL editor to enable check-ins.
+    </div>
+  );
+
+  return (
+    <div className="card" style={{ padding: m ? 14 : 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 700, fontSize: m ? 15 : 16 }}>🕘 Venue Check-ins</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={load} style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px" }}>↻ Refresh</button>
+          <button onClick={exportXlsx} style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px" }}>↓ Export</button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 13, color: "#9ca3af" }}>Loading…</div>
+      ) : days.length === 0 ? (
+        <div style={{ fontSize: 13, color: "#9ca3af", padding: "18px 0", textAlign: "center" }}>
+          No one has checked in to this event yet.
+        </div>
+      ) : days.map(day => (
+        <div key={day} style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid #f3f4f6" }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>
+              {new Date(day + "T00:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+            </span>
+            <span style={{ fontSize: 12, color: "#9ca3af" }}>{byDay[day].length} checked in</span>
+          </div>
+          {byDay[day].map(r => (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0" }}>
+              <span style={{ fontSize: 13, color: "#6b7280", width: 64, flexShrink: 0 }}>{fmtTime(r.checked_in_at)}</span>
+              <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>{r.staff_name}</span>
+              <button onClick={() => removeRow(r)} title="Remove this check-in"
+                style={{ background: "none", border: "none", color: "#d1d5db", cursor: "pointer", fontSize: 13, fontFamily: "inherit", padding: "2px 6px" }}>✕</button>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -5720,6 +6004,250 @@ function ScanMode({ event, trailer, packing, setPacking, containers, onClose, sh
 // ─── Kiosk Packing (warehouse laptop + scanner, route: /pack) ─────────────────
 // Open route, no admin login. Pick an upcoming event → a trailer → a scan-first
 // pack screen: scan container QR codes onto the truck, tap loose items to check off.
+// ─── Venue check-in kiosk (/checkin) ──────────────────────────────────────────
+// Staff tap their name on arrival. Arrival only — no check-out — so this is an
+// attendance log, not a timesheet, and it writes to event_checkins rather than
+// time_entries (see sql/event_checkins.sql for why that separation matters).
+function CheckInKiosk() {
+  const [kioskUnlocked, setKioskUnlocked] = useState(() => {
+    if (localStorage.getItem("cheerops_kiosk") === KIOSK_CODE) return true;
+    try {
+      const s = JSON.parse(localStorage.getItem("sb_session") || "{}");
+      return (s.expires_at || 0) > Math.floor(Date.now() / 1000) + 60;
+    } catch { return false; }
+  });
+  const [kioskInput, setKioskInput] = useState("");
+  const [kioskError, setKioskError] = useState("");
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [events, setEvents] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [checkins, setCheckins] = useState([]);
+  const [eventId, setEventId] = useState(() => localStorage.getItem("cheerops_checkin_event") || null);
+  const [search, setSearch] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [banner, setBanner] = useState(null);   // { name, time, repeat }
+  const [toast, setToast] = useState(null);
+  // Re-rendered on a timer so the clock and the local date stay right on a
+  // kiosk left open across midnight, which is the whole point of a per-day log.
+  const [now, setNow] = useState(new Date());
+
+  const showToast = (m) => { setToast(m); setTimeout(() => setToast(null), 2600); };
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
+
+  const today = localDateStr(now);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [e, s] = await Promise.all([api.getEvents(), api.getEventStaff()]);
+        setEvents(e);
+        setStaff(s.filter(p => p.active !== false));
+      } catch { setError("Could not connect to the database."); }
+      setLoading(false);
+    })();
+  }, []);
+
+  // Arrivals are loaded per event; the kiosk only ever shows one event at a time.
+  useEffect(() => {
+    if (!eventId) { setCheckins([]); return; }
+    api.getCheckinsForEvent(eventId).then(setCheckins).catch(() => setCheckins([]));
+  }, [eventId]);
+
+  const event = events.find(e => e.id === eventId) || null;
+  const upcoming = events.filter(e => e.status !== "completed")
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  const arrivalFor = (staffId) => checkins.find(c => c.staff_id === staffId && c.local_date === today);
+  const arrivedToday = checkins.filter(c => c.local_date === today);
+
+  const visible = staff.filter(p => p.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  async function checkIn(person) {
+    if (busyId) return;
+    const existing = arrivalFor(person.id);
+    if (existing) {
+      setBanner({ name: person.name, time: fmtTime(existing.checked_in_at), repeat: true });
+      setTimeout(() => setBanner(null), 4000);
+      return;
+    }
+    setBusyId(person.id);
+    const row = {
+      event_id: eventId,
+      staff_id: person.id,
+      staff_name: person.name,
+      local_date: today,
+      checked_in_at: new Date().toISOString(),
+    };
+    try {
+      const saved = await api.addCheckin(row);
+      const rec = (Array.isArray(saved) ? saved[0] : saved) || row;
+      setCheckins(prev => [...prev, rec]);
+      setBanner({ name: person.name, time: fmtTime(rec.checked_in_at), repeat: false });
+      setSearch("");
+      setTimeout(() => setBanner(null), 4000);
+    } catch (e) {
+      // The once-per-day unique index is the source of truth, not this screen:
+      // two tablets can be open at the same venue. On a conflict, reload and
+      // show the arrival that actually won.
+      const msg = String(e.message || "");
+      if (msg.includes("event_checkins_once_per_day") || msg.includes("23505") || msg.includes("duplicate key")) {
+        const fresh = await api.getCheckinsForEvent(eventId).catch(() => null);
+        if (fresh) setCheckins(fresh);
+        const hit = (fresh || []).find(c => c.staff_id === person.id && c.local_date === today);
+        setBanner({ name: person.name, time: hit ? fmtTime(hit.checked_in_at) : "", repeat: true });
+        setTimeout(() => setBanner(null), 4000);
+      } else {
+        showToast("Could not check in — please try again");
+      }
+    }
+    setBusyId(null);
+  }
+
+  function submitKioskCode() {
+    if (kioskInput === KIOSK_CODE) {
+      localStorage.setItem("cheerops_kiosk", KIOSK_CODE);
+      setKioskUnlocked(true);
+      setKioskInput("");
+      setKioskError("");
+    } else setKioskError("Incorrect code.");
+  }
+
+  const base = { minHeight: "100vh", background: "#f8f9fb", fontFamily: "'DM Sans','Segoe UI',sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 };
+  const card = { background: "#fff", borderRadius: 18, border: "1px solid #e5e7eb", padding: 32, width: "100%", maxWidth: 480 };
+  const iStyle = { width: "100%", padding: "14px 16px", border: "1px solid #d1d5db", borderRadius: 12, fontSize: 17, fontFamily: "inherit", boxSizing: "border-box", color: "#1a1a2e" };
+
+  // The roster lists real people's names, so this screen is gated the same way
+  // the time clock is rather than left fully open like /pack.
+  if (!kioskUnlocked) return (
+    <div style={base}>
+      <div style={card}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 8 }}>Kiosk Setup</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>Enter the activation code to set up this device.</div>
+        </div>
+        <input type="password" value={kioskInput} autoFocus
+          onChange={e => { setKioskInput(e.target.value); setKioskError(""); }}
+          onKeyDown={e => e.key === "Enter" && submitKioskCode()}
+          style={{ ...iStyle, marginBottom: 12 }} placeholder="Activation code" />
+        {kioskError && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 12 }}>{kioskError}</div>}
+        <button onClick={submitKioskCode} style={{ width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: 14, fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Activate Device</button>
+      </div>
+    </div>
+  );
+
+  if (loading) return <div style={{ ...base, color: "#9ca3af" }}>Loading…</div>;
+  if (error) return <div style={{ ...base, color: "#dc2626" }}>{error}</div>;
+
+  // Pick the event once when the kiosk is set up; it is remembered so staff only
+  // ever see the name list.
+  if (!event) return (
+    <div style={{ ...base, alignItems: "flex-start", paddingTop: 40 }}>
+      <div style={{ width: "100%", maxWidth: 560 }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#1a1a2e" }}>Which event?</div>
+          <div style={{ fontSize: 14, color: "#6b7280", marginTop: 6 }}>Staff will check in against the event you pick.</div>
+        </div>
+        {upcoming.length === 0
+          ? <div style={{ ...card, textAlign: "center", color: "#9ca3af" }}>No upcoming events.</div>
+          : upcoming.map(ev => (
+            <button key={ev.id}
+              onClick={() => { setEventId(ev.id); localStorage.setItem("cheerops_checkin_event", ev.id); }}
+              style={{ display: "block", width: "100%", textAlign: "left", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: "18px 20px", marginBottom: 12, cursor: "pointer", fontFamily: "inherit" }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "#1a1a2e" }}>{ev.name}</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginTop: 3 }}>{fmtDate(ev.date)}{ev.location ? ` · ${ev.location}` : ""}</div>
+            </button>
+          ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8f9fb", fontFamily: "'DM Sans','Segoe UI',sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
+
+      <div style={{ background: "#1a1a2e", color: "#fff", padding: "18px 20px", textAlign: "center" }}>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>{event.name}</div>
+        <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>
+          {now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })} · {arrivedToday.length} checked in today
+        </div>
+        <button
+          onClick={() => { setEventId(null); localStorage.removeItem("cheerops_checkin_event"); }}
+          style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "rgba(255,255,255,0.8)", borderRadius: 8, padding: "4px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", marginTop: 10 }}>
+          Change event
+        </button>
+      </div>
+
+      {banner && (
+        <div style={{
+          background: banner.repeat ? "#fffbeb" : "#ecfdf5",
+          borderBottom: `1px solid ${banner.repeat ? "#fde68a" : "#a7f3d0"}`,
+          color: banner.repeat ? "#92400e" : "#065f46",
+          padding: "18px 20px", textAlign: "center",
+        }}>
+          <div style={{ fontSize: 30, marginBottom: 4 }}>{banner.repeat ? "⏱️" : "✅"}</div>
+          <div style={{ fontSize: 19, fontWeight: 700 }}>{banner.name}</div>
+          <div style={{ fontSize: 14, marginTop: 2 }}>
+            {banner.repeat ? `Already checked in${banner.time ? ` at ${banner.time}` : ""}` : `Checked in at ${banner.time}`}
+          </div>
+        </div>
+      )}
+
+      <div style={{ maxWidth: 620, margin: "0 auto", padding: "20px 16px 60px" }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search for your name…"
+          style={{ ...iStyle, marginBottom: 16, background: "#fff" }}
+        />
+
+        {staff.length === 0 && (
+          <div style={{ ...card, textAlign: "center", color: "#9ca3af", maxWidth: "none" }}>
+            No staff on the roster yet. Add people under Settings → Event Staff.
+          </div>
+        )}
+
+        {visible.map(person => {
+          const arrival = arrivalFor(person.id);
+          const busy = busyId === person.id;
+          return (
+            <div key={person.id} style={{
+              display: "flex", alignItems: "center", gap: 12,
+              background: arrival ? "#f8f9fb" : "#fff",
+              border: `1px solid ${arrival ? "#e5e7eb" : "#d7dae0"}`,
+              borderRadius: 14, padding: "14px 16px", marginBottom: 10,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 17, fontWeight: 600, color: arrival ? "#6b7280" : "#1a1a2e" }}>{person.name}</div>
+                {person.role && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{person.role}</div>}
+              </div>
+              {arrival ? (
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#059669" }}>✓ {fmtTime(arrival.checked_in_at)}</div>
+                </div>
+              ) : (
+                <button onClick={() => checkIn(person)} disabled={busy}
+                  style={{ flexShrink: 0, background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 10, padding: "12px 22px", fontSize: 15, fontWeight: 600, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>
+                  {busy ? "…" : "Check in"}
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {staff.length > 0 && visible.length === 0 && (
+          <div style={{ textAlign: "center", color: "#9ca3af", padding: "30px 0", fontSize: 14 }}>
+            No one matching “{search}”.
+          </div>
+        )}
+      </div>
+
+      {toast && <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1a1a2e", color: "#fff", padding: "12px 22px", borderRadius: 10, fontSize: 14 }}>{toast}</div>}
+    </div>
+  );
+}
+
 function KioskPack() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -8219,7 +8747,10 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true });
+  // Kept masked by default so the code isn't sitting on screen during a
+  // screen-share or over someone's shoulder.
+  const [showKioskCode, setShowKioskCode] = useState(false);
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -8230,13 +8761,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses, can_view_awards: user.can_view_awards !== false });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses, can_view_awards: user.can_view_awards !== false, can_view_event_staff: user.can_view_event_staff !== false });
     setEditUser(user);
     setShowModal(true);
   };
@@ -8246,11 +8777,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards, can_view_event_staff: form.can_view_event_staff });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards, can_view_event_staff: form.can_view_event_staff });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -8270,6 +8801,16 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     } catch { showToast("Error removing user"); }
   };
 
+  // Kiosk devices are set up by typing an activation code once, which is easy to
+  // forget between events. Listed here because the Users tab is already
+  // admin-only. Note this is a convenience reference, not a secret store — see
+  // the caveat rendered with it.
+  const KIOSKS = [
+    { path: "/checkin", label: "Venue Check-in", sub: "Staff tap their name on arrival", gated: true },
+    { path: "/clock",   label: "Time Clock",     sub: "Clock in and out, 4-digit staff codes", gated: true },
+    { path: "/pack",    label: "Warehouse Pack", sub: "Scan containers onto a trailer", gated: false },
+  ];
+
   const PERM_ROWS = [
     { key: "can_view_dashboard",      label: "Dashboard",              sub: "Event overview and stats"         },
     { key: "can_view_inventory",      label: "Inventory",              sub: "Master inventory list"            },
@@ -8281,6 +8822,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     { key: "can_view_pro",            label: "PRO Sales CRM",          sub: "Access to the PRO Sales CRM" },
     { key: "can_view_expenses",       label: "Expenses",               sub: "Expense submission review and approval" },
     { key: "can_view_awards",         label: "Awards",                 sub: "Banner, pin & medal calculator" },
+    { key: "can_view_event_staff",    label: "Event Staff",            sub: "Venue check-in log and staff roster" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
@@ -8293,6 +8835,44 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
           <p style={{ color: "#6b7280", fontSize: 14 }}>Manage who can access CheerOps and what they can see</p>
         </div>
         <button style={{ ...primaryBtn, padding: m ? "9px 14px" : "8px 16px" }} onClick={openAdd}>+ Add User</button>
+      </div>
+
+      {/* Kiosk activation reference — admin-only, since this whole tab is. */}
+      <div className="card" style={{ padding: m ? "14px 16px" : "16px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: m ? 14 : 15 }}>🖥️ Kiosk devices</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>Open the link on the device, then enter the activation code once.</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <code style={{ background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 12px", fontSize: 14, fontWeight: 600, letterSpacing: "0.04em", color: "#1a1a2e" }}>
+              {showKioskCode ? KIOSK_CODE : "••••••••••••"}
+            </code>
+            <button onClick={() => setShowKioskCode(v => !v)} style={{ ...ghostBtn, fontSize: 12, padding: "6px 10px" }}>{showKioskCode ? "Hide" : "Show"}</button>
+            <button onClick={() => { navigator.clipboard?.writeText(KIOSK_CODE); showToast("Activation code copied"); }} style={{ ...ghostBtn, fontSize: 12, padding: "6px 10px" }}>Copy</button>
+          </div>
+        </div>
+
+        {KIOSKS.map(k => (
+          <div key={k.path} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid #f3f4f6", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{k.label}</div>
+              <div style={{ fontSize: 12, color: "#9ca3af" }}>{k.sub}</div>
+            </div>
+            <code style={{ fontSize: 12, color: "#6b7280" }}>{k.path}</code>
+            <span className="pill" style={{ background: k.gated ? "#f0f9ff" : "#f3f4f6", color: k.gated ? "#0369a1" : "#9ca3af", fontSize: 11 }}>
+              {k.gated ? "needs code" : "no code"}
+            </span>
+            <button
+              onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}${k.path}`); showToast(`${k.label} link copied`); }}
+              style={{ ...ghostBtn, fontSize: 12, padding: "6px 10px" }}
+            >🔗 Link</button>
+          </div>
+        ))}
+
+        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 10, paddingTop: 10, borderTop: "1px solid #f3f4f6", lineHeight: 1.5 }}>
+          A device stays activated until its browser storage is cleared. The code is built into the app, so it is readable by anyone who inspects the site — treat it as a setup convenience, not a password.
+        </div>
       </div>
 
       {/* How-to notice */}
@@ -8346,6 +8926,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
                 {user.can_view_pro && <span className="pill" style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 11 }}>PRO Sales</span>}
                 {user.can_view_expenses && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Expenses</span>}
                 {user.can_view_awards !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Awards</span>}
+                {user.can_view_event_staff !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Event Staff</span>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

@@ -7211,8 +7211,12 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
     // with no route. Fall back to the distance alone rather than "undefined →
     // undefined".
     const route = [e.startLocation, e.endLocation].filter(Boolean).join(" → ");
+    // Show the rate the line was priced at, so the export explains how the
+    // mileage figure was arrived at instead of just asserting an amount.
+    const rate = e.mileageRate != null ? ` @ $${parseFloat(e.mileageRate).toFixed(2)}/km` : "";
+    const distance = e.totalKMs != null ? `${e.totalKMs} km${rate}` : "";
     const desc = e.totalKMs != null
-      ? (route ? `${route} (${e.totalKMs} km)` : `${e.totalKMs} km`)
+      ? (route ? `${route} (${distance})` : distance)
       : (e.description || "—");
     // A distance submitted for pricing must not slip through an accounting
     // export looking like a settled $0.00 line.
@@ -7611,8 +7615,14 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     return { company: co, count: rows.length, total: rows.reduce((s, r) => s + r.total, 0) };
   }).filter((c) => c.count > 0);
 
+  // "Needs amount" cuts across status: a report can be marked paid while a
+  // mileage line on it is still sitting at $0.00, and the Pending filter would
+  // then hide the very thing that still needs pricing.
+  const needsAmountCount = reports.filter((r) => r.needsAmount > 0).length;
   const filtered = reports
-    .filter((r) => filter === "All" || r.status === filter)
+    .filter((r) => filter === "All" ? true
+      : filter === "Needs amount" ? r.needsAmount > 0
+      : r.status === filter)
     .filter((r) => !filterCompany || r.company === filterCompany);
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading expenses…</div>;
@@ -7914,7 +7924,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        {["Pending", "Paid", "All"].map((f) => (
+        {["Pending", "Paid", "All", ...(needsAmountCount > 0 ? ["Needs amount"] : [])].map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -7929,6 +7939,9 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
             {f}
             {f === "Pending" && pendingCount > 0 && (
               <span style={{ marginLeft: 6, background: "#ef4444", color: "#fff", borderRadius: 99, padding: "1px 6px", fontSize: 11 }}>{pendingCount}</span>
+            )}
+            {f === "Needs amount" && (
+              <span style={{ marginLeft: 6, background: "#f59e0b", color: "#fff", borderRadius: 99, padding: "1px 6px", fontSize: 11 }}>{needsAmountCount}</span>
             )}
           </button>
         ))}
@@ -8066,7 +8079,11 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                   // The addresses are optional, so a route may be partial or absent.
                   const route = [expense.startLocation, expense.endLocation].filter(Boolean).join(" → ");
                   const unpriced = !parseFloat(expense.amount);
-                  const cents = rateDraft[expense.id] ?? String(Math.round((config.mileageRate || 0.70) * 100));
+                  // Prefill from the rate already applied to this line, falling
+                  // back to the configured one, so "Update amount" starts from
+                  // what actually produced the current figure.
+                  const cents = rateDraft[expense.id]
+                    ?? String(Math.round(((expense.mileageRate ?? config.mileageRate) || 0.70) * 100));
                   const centsNum = parseFloat(cents);
                   const preview = centsNum > 0
                     ? (parseFloat(expense.totalKMs) * (centsNum / 100)).toFixed(2)
@@ -8090,9 +8107,12 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                       </div>
                       {route && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 5 }}>🚗 {route}</div>}
 
-                      {unpriced && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: "1px solid #fde68a" }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>Rate</span>
+                      {/* Always offered, not just on unpriced lines: the rate
+                          changes, so an amount that was calculated at submission
+                          time still needs to be re-priced at the current rate. */}
+                      {(
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px solid ${unpriced ? "#fde68a" : "#e5e7eb"}` }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: unpriced ? "#92400e" : "#374151" }}>Rate</span>
                           <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
                             <input
                               type="number" min="0" step="0.1"
@@ -8113,9 +8133,13 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                               cursor: busy || !preview ? "default" : "pointer", opacity: busy || !preview ? 0.55 : 1,
                             }}
                           >
-                            {busy ? "Saving…" : "Apply rate"}
+                            {busy ? "Saving…" : (unpriced ? "Apply rate" : "Update amount")}
                           </button>
-                          <span style={{ fontSize: 12, color: "#92400e" }}>Sets the amount only — pay with Mark Paid.</span>
+                          <span style={{ fontSize: 12, color: unpriced ? "#92400e" : "#9ca3af" }}>
+                            {unpriced
+                              ? "Sets the amount only — pay with Mark Paid."
+                              : "Re-prices this line at the rate above."}
+                          </span>
                         </div>
                       )}
                     </div>

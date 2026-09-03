@@ -43,10 +43,17 @@ export default async function handler(req, res) {
 
     if (status === "Paid") {
       const f = value[0].fields;
+      // Mileage fields come along so the approval email can show the distance
+      // and the rate it was priced at, rather than a bare dollar figure.
       const lineItems = value.map((i) => ({
-        category:    i.fields.Category    || "",
-        expenseDate: i.fields.ExpenseDate || "",
-        amount:      i.fields.Amount      || 0,
+        category:      i.fields.Category      || "",
+        expenseDate:   i.fields.ExpenseDate   || "",
+        amount:        i.fields.Amount        || 0,
+        description:   i.fields.Description   || "",
+        totalKMs:      i.fields.TotalKMs      ?? null,
+        mileageRate:   i.fields.MileageRate   ?? null,
+        startLocation: i.fields.StartLocation || null,
+        endLocation:   i.fields.EndLocation   || null,
       }));
       const totalAmount = lineItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
 

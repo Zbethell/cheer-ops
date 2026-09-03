@@ -116,15 +116,49 @@ function emailButton(url, text, bgColor = "#1a1a2e") {
   </tr></table>`;
 }
 
+// A mileage line is submitted as a distance and may not have been priced yet.
+// "$0.00" in an email reads as "you are getting nothing", so these lines say
+// what is actually true instead.
+const isUnpricedMileage = (item) =>
+  item.totalKMs != null && !parseFloat(item.amount);
+
+// "134.9 km @ $0.68/km · Toronto → Ottawa" — the rate and route are both
+// optional, since the rate may not be set yet and the address fields can be
+// switched off on the form.
+function mileageDetail(item) {
+  if (item.totalKMs == null) return "";
+  const route = [item.startLocation, item.endLocation].filter(Boolean).join(" → ");
+  const rate = item.mileageRate != null ? ` @ $${parseFloat(item.mileageRate).toFixed(2)}/km` : "";
+  return `<div style="color:#6b7280;font-size:12px;margin-top:3px;">${item.totalKMs} km${rate}${route ? ` · ${route}` : ""}</div>`;
+}
+
 function itemTableRows(lineItems) {
-  return lineItems.map((item) =>
-    `<tr>
+  return lineItems.map((item) => {
+    const detail = mileageDetail(item);
+    const desc = item.description || (detail ? "" : "—");
+    const amountCell = isUnpricedMileage(item)
+      ? `<span style="color:#b45309;font-weight:600;">Rate to be applied</span>`
+      : `$${parseFloat(item.amount).toFixed(2)}`;
+    return `<tr>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:13px;">${item.expenseDate || "—"}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#374151;font-size:13px;">${item.category}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:13px;">${item.description || "—"}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#1a1a2e;font-size:13px;text-align:right;font-weight:500;">$${parseFloat(item.amount).toFixed(2)}</td>
-    </tr>`
-  ).join("");
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:13px;">${desc}${detail}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#1a1a2e;font-size:13px;text-align:right;font-weight:500;">${amountCell}</td>
+    </tr>`;
+  }).join("");
+}
+
+// Explains an understated total. Without this the reader just sees a total that
+// silently omits the mileage.
+function mileageNote(lineItems, audience) {
+  const pending = (lineItems || []).filter(isUnpricedMileage);
+  if (pending.length === 0) return "";
+  const km = pending.reduce((s, i) => s + (parseFloat(i.totalKMs) || 0), 0);
+  const many = pending.length !== 1;
+  const text = audience === "accountant"
+    ? `${pending.length} mileage line${many ? "s" : ""} totalling <strong>${km.toFixed(1)} km</strong> ${many ? "were" : "was"} submitted as distance only. Apply the current rate per kilometre in CheerOps to set the reimbursement — the total below excludes ${many ? "them" : "it"} until you do.`
+    : `Your mileage was submitted as distance only (<strong>${km.toFixed(1)} km</strong>). Accounting applies the current rate per kilometre when your report is reviewed, so the total below does not include your mileage reimbursement yet.`;
+  return `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-bottom:20px;color:#92400e;font-size:13px;line-height:1.5;">${text}</div>`;
 }
 
 function itemTableHeader() {
@@ -147,6 +181,7 @@ export function accountantEmailHtml({ submitterName, submitterEmail, company, li
       <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.5;">
         <strong>${submitterName}</strong> (${submitterEmail}) submitted ${lineItems.length} expense${lineItems.length !== 1 ? "s" : ""} for <strong>${company}</strong> totalling <strong>$${totalAmount.toFixed(2)}</strong>.
       </p>
+      ${mileageNote(lineItems, "accountant")}
       <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;margin-bottom:20px;">
         ${itemTableHeader()}
         <tbody>
@@ -175,6 +210,7 @@ export function submitterConfirmationHtml({ submitterName, company, lineItems, t
       <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.5;">
         Hi ${submitterName}, your ${lineItems.length > 1 ? `${lineItems.length} expenses have` : "expense has"} been received for <strong>${company}</strong> and ${lineItems.length > 1 ? "are" : "is"} pending review.
       </p>
+      ${mileageNote(lineItems, "submitter")}
       <table style="width:100%;border-collapse:collapse;font-size:14px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;margin-bottom:20px;">
         ${itemTableHeader()}
         <tbody>

@@ -5,7 +5,7 @@ const cors = require("cors");
 const crypto = require("crypto");
 
 const app = express();
-app.use(cors({ origin: "http://localhost:5173" }));
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || "http://localhost:5173" }));
 app.use(express.json({ limit: "20mb" }));
 
 const { AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, DOC_INTEL_KEY, DOC_INTEL_ENDPOINT, AZURE_MAPS_KEY } = process.env;
@@ -339,13 +339,18 @@ app.patch("/api/expense-report-update", async (req, res) => {
 
 // PATCH /api/expense-update/:id
 app.patch("/api/expense-update/:id", async (req, res) => {
-  const { status, amount } = req.body;
-  if (!status && amount == null) return res.status(400).json({ error: "status or amount required" });
+  const { status, amount, mileageRate } = req.body;
+  if (!status && amount == null && mileageRate == null) {
+    return res.status(400).json({ error: "status, amount or mileageRate required" });
+  }
   try {
     const token = await getMicrosoftToken();
     const fields = {};
     if (status) fields.Status = status;
     if (amount != null) fields.Amount = parseFloat(amount);
+    // Recorded when an admin prices a distance by hand, so the row shows which
+    // rate produced the amount rather than leaving it unexplained.
+    if (mileageRate != null) fields.MileageRate = parseFloat(mileageRate);
     const r = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${EXPENSES_LIST_ID}/items/${req.params.id}/fields`,
       {
@@ -462,4 +467,7 @@ app.post("/api/expense-config", async (req, res) => {
   }
 });
 
-app.listen(3001, () => console.log("API server running at http://localhost:3001"));
+// Port is overridable so this can run alongside another local project already
+// holding 3001 (pro-crm uses the same default). Unset, it behaves as before.
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`API server running at http://localhost:${PORT}`));

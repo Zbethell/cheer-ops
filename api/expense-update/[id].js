@@ -10,8 +10,10 @@ export default async function handler(req, res) {
   if (!user) return;
 
   const { id } = req.query;
-  const { status, amount } = req.body;
-  if (!status && amount == null) return res.status(400).json({ error: "status or amount required" });
+  const { status, amount, mileageRate } = req.body;
+  if (!status && amount == null && mileageRate == null) {
+    return res.status(400).json({ error: "status, amount or mileageRate required" });
+  }
 
   try {
     const token = await getMicrosoftToken();
@@ -19,6 +21,9 @@ export default async function handler(req, res) {
     const fields = {};
     if (status) fields.Status = status;
     if (amount != null) fields.Amount = parseFloat(amount);
+    // Recorded when an admin prices a distance by hand, so the row shows which
+    // rate produced the amount rather than leaving it unexplained.
+    if (mileageRate != null) fields.MileageRate = parseFloat(mileageRate);
 
     // Fetch expense details before updating (needed for paid notification)
     const detailRes = await fetch(

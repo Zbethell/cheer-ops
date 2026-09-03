@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
+import {
+  DEFAULT_EXPENSE_CONFIG, FIELD_DEFS, FIELD_GROUPS,
+  mergeExpenseConfig, labelsFromFields,
+} from "./expenseForm.js";
 
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
@@ -7203,9 +7207,16 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
   const itemsWithReceipts = withTax.filter((e) => e.receiptURL);
 
   const txRows = withTax.map((e) => {
+    // The address fields are optional, so a mileage row may carry a distance
+    // with no route. Fall back to the distance alone rather than "undefined →
+    // undefined".
+    const route = [e.startLocation, e.endLocation].filter(Boolean).join(" → ");
     const desc = e.totalKMs != null
-      ? `${e.startLocation} → ${e.endLocation} (${e.totalKMs} km)`
+      ? (route ? `${route} (${e.totalKMs} km)` : `${e.totalKMs} km`)
       : (e.description || "—");
+    // A distance submitted for pricing must not slip through an accounting
+    // export looking like a settled $0.00 line.
+    const unpriced = e.totalKMs != null && !parseFloat(e.amount);
     const descCell = (eventNames.length > 1 && e.eventName) ? `${desc} <span style="color:#0369a1;font-size:12px;">[${e.eventName}]</span>` : desc;
     return `<tr>
       <td>${(e.expenseDate || "—").split("T")[0]}</td>
@@ -7215,7 +7226,7 @@ function generateExpenseReportHtml(items, { company, dateFrom, dateTo, statusFil
       <td>${e.category}</td>
       <td class="num">${fmt(e._net)}</td>
       <td class="num">${fmtOpt(e._tax)}</td>
-      <td class="num fw">${fmt(e._total)}</td>
+      <td class="num fw">${unpriced ? `<span style="color:#b45309;">needs amount</span>` : fmt(e._total)}</td>
       <td class="num">${e.receiptURL ? `<a href="${e.receiptURL}" target="_blank" style="color:#2563eb;text-decoration:none;font-weight:500;">View →</a>` : "—"}</td>
     </tr>`;
   }).join("");
@@ -7319,20 +7330,8 @@ ${receiptSection}
 </body></html>`;
 }
 
-const DEFAULT_EXPENSE_CONFIG = {
-  formTitle: "Expense Report",
-  formSubtitle: "Submit your expense for reimbursement. You'll receive a link to track its status.",
-  categories: ["Meal", "Gas", "Office Supplies", "Mileage"],
-  mileageRate: 0.70,
-  expenseCompanies: ["Pro", "Pro Gym Services", "EVO"],
-  approvers: ["Doug", "Frank", "Steph", "Nic"],
-  labels: {
-    name: "Your Name", email: "Email Address", amount: "Amount ($)",
-    date: "Date of Expense", category: "Category", company: "Company",
-    description: "Description", receipt: "Receipt Photo",
-    startLocation: "Start Location", endLocation: "End Location", totalKMs: "Total KMs",
-  },
-};
+// The form's shape now lives in src/expenseForm.js so the public form and this
+// editor can never drift apart.
 
 function ExpensesAdmin({ isMobile: m, showToast }) {
   const [expenses, setExpenses] = useState([]);
@@ -7340,6 +7339,8 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   const [filter, setFilter] = useState("Pending");
   const [updating, setUpdating] = useState(new Set());
   const [correctingAmount, setCorrectingAmount] = useState(new Set());
+  // Per-line rate the admin is typing, in cents per km, keyed by expense id.
+  const [rateDraft, setRateDraft] = useState({});
   const [activeSection, setActiveSection] = useState("submissions");
   const [config, setConfig] = useState(DEFAULT_EXPENSE_CONFIG);
   const [configDraft, setConfigDraft] = useState(null);
@@ -7365,7 +7366,7 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     loadExpenses();
     fetch("/api/expense-config")
       .then((r) => r.json())
-      .then((c) => { const merged = { ...DEFAULT_EXPENSE_CONFIG, ...c, labels: { ...DEFAULT_EXPENSE_CONFIG.labels, ...(c.labels || {}) } }; setConfig(merged); setConfigDraft(merged); })
+      .then((c) => { const merged = mergeExpenseConfig(c); setConfig(merged); setConfigDraft(merged); })
       .catch(() => {});
   }, []);
 
@@ -7378,8 +7379,25 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
     setConfigDraft((d) => ({ ...d, [field]: value }));
   }
 
-  function setLabel(key, value) {
-    setConfigDraft((d) => ({ ...d, labels: { ...d.labels, [key]: value } }));
+  // Per-field editing. `prop` is enabled | required | label | placeholder | hint.
+  function setField(key, prop, value) {
+    setConfigDraft((d) => ({
+      ...d,
+      fields: { ...d.fields, [key]: { ...d.fields[key], [prop]: value } },
+    }));
+  }
+
+  function setText(key, value) {
+    setConfigDraft((d) => ({ ...d, text: { ...d.text, [key]: value } }));
+  }
+
+  // A company either requires an event or it doesn't; this drives whether the
+  // Event picker shows on the public form.
+  function toggleEventCompany(co) {
+    setConfigDraft((d) => {
+      const list = d.eventCompanies || [];
+      return { ...d, eventCompanies: list.includes(co) ? list.filter((c) => c !== co) : [...list, co] };
+    });
   }
 
   function addCategory() {
@@ -7390,7 +7408,13 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   }
 
   function removeCategory(cat) {
-    setConfigDraft((d) => ({ ...d, categories: d.categories.filter((c) => c !== cat) }));
+    setConfigDraft((d) => ({
+      ...d,
+      categories: d.categories.filter((c) => c !== cat),
+      // Don't leave the mileage calculator pointing at a category that no longer
+      // exists — that would silently turn mileage into a plain typed amount.
+      mileageCategory: d.mileageCategory === cat ? "" : d.mileageCategory,
+    }));
   }
 
   function moveCategory(index, dir) {
@@ -7410,7 +7434,11 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   }
 
   function removeCompany(co) {
-    setConfigDraft((d) => ({ ...d, expenseCompanies: (d.expenseCompanies || []).filter((c) => c !== co) }));
+    setConfigDraft((d) => ({
+      ...d,
+      expenseCompanies: (d.expenseCompanies || []).filter((c) => c !== co),
+      eventCompanies: (d.eventCompanies || []).filter((c) => c !== co),
+    }));
   }
 
   function moveCompany(index, dir) {
@@ -7444,13 +7472,17 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
   async function saveConfig() {
     setSavingConfig(true);
     try {
+      // Keep the legacy flat `labels` in step with the per-field labels, so a
+      // browser still running the previous bundle shows the new wording rather
+      // than falling back to the built-in defaults.
+      const payload = { ...configDraft, labels: labelsFromFields(configDraft.fields) };
       const r = await fetch("/api/expense-config", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
-        body: JSON.stringify(configDraft),
+        body: JSON.stringify(payload),
       });
       if (!r.ok) throw new Error(await r.text());
-      setConfig(configDraft);
+      setConfig(payload);
       showToast("Form settings saved");
       setActiveSection("submissions");
     } catch {
@@ -7476,6 +7508,9 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
       eventName:     items[0].eventName || null,
       status:        items.every((i) => i.status === "Paid") ? "Paid" : "Pending",
       total:         items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0),
+      // Mileage lines submitted as a distance for you to price. The report total
+      // reads low until these are filled in, so the count is surfaced on the row.
+      needsAmount:   items.filter((i) => i.totalKMs != null && !parseFloat(i.amount)).length,
       submittedAt:   items[0].submittedAt,
       items:         [...items].sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)),
     })).sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
@@ -7496,6 +7531,31 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
       showToast(`Failed to correct amount: ${e.message}`);
     }
     setCorrectingAmount((s) => { const n = new Set(s); n.delete(expenseId); return n; });
+  }
+
+  // Price a distance that was submitted without an amount. Sets the dollar
+  // figure and records the rate that produced it; paying stays a separate,
+  // deliberate step so nothing is marked paid as a side effect of pricing.
+  async function applyMileageRate(expense) {
+    const cents = parseFloat(rateDraft[expense.id] ?? "");
+    if (!(cents > 0)) { showToast("Enter a rate in cents per km"); return; }
+    const rate = cents / 100;
+    const amount = parseFloat((parseFloat(expense.totalKMs) * rate).toFixed(2));
+    setCorrectingAmount((s) => new Set(s).add(expense.id));
+    try {
+      const r = await fetch(`/api/expense-update/${expense.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({ amount, mileageRate: rate }),
+      });
+      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+      setExpenses((prev) => prev.map((e) => e.id === expense.id ? { ...e, amount, mileageRate: rate } : e));
+      setRateDraft((d) => { const n = { ...d }; delete n[expense.id]; return n; });
+      showToast(`Priced at $${amount.toFixed(2)} — ${cents}¢/km × ${expense.totalKMs} km`);
+    } catch (e) {
+      showToast(`Failed to price mileage: ${e.message}`);
+    }
+    setCorrectingAmount((s) => { const n = new Set(s); n.delete(expense.id); return n; });
   }
 
   async function markReportPaid(report) {
@@ -7585,12 +7645,84 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
           </div>
         </div>
 
-        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Field Labels</div>
-          {Object.entries(configDraft.labels).map(([key, val]) => (
+        {FIELD_GROUPS.map((group) => (
+          <div key={group.key} className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>{group.title}</div>
+              <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>{group.blurb}</div>
+            </div>
+            {FIELD_DEFS.filter((f) => f.group === group.key).map((def) => {
+              const val = configDraft.fields[def.key];
+              const off = !def.locked && val.enabled === false;
+              return (
+                <div key={def.key} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: m ? 12 : 14, background: off ? "#fafafa" : "#fff", opacity: off ? 0.72 : 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <input
+                      style={{ ...iStyle, flex: 1, minWidth: 160, fontWeight: 600 }}
+                      value={val.label}
+                      onChange={(e) => setField(def.key, "label", e.target.value)}
+                    />
+                    {def.locked ? (
+                      <span className="pill" style={{ background: "#f3f4f6", color: "#6b7280", fontSize: 11 }} title="Submissions are rejected without this field, so it can't be switched off.">🔒 Always on</span>
+                    ) : (
+                      <>
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                          <input type="checkbox" checked={val.enabled !== false} onChange={(e) => setField(def.key, "enabled", e.target.checked)} />
+                          Show
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: val.enabled === false ? "#d1d5db" : "#374151", cursor: val.enabled === false ? "default" : "pointer", whiteSpace: "nowrap" }}>
+                          <input type="checkbox" disabled={val.enabled === false} checked={!!val.required} onChange={(e) => setField(def.key, "required", e.target.checked)} />
+                          Required
+                        </label>
+                      </>
+                    )}
+                  </div>
+                  {!off && (
+                    <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : (def.placeholder ? "1fr 1fr" : "1fr"), gap: 10, marginTop: 10 }}>
+                      {def.placeholder && (
+                        <input
+                          style={{ ...iStyle, fontSize: 13 }}
+                          value={val.placeholder || ""}
+                          onChange={(e) => setField(def.key, "placeholder", e.target.value)}
+                          placeholder="Placeholder (greyed-out example text)"
+                        />
+                      )}
+                      <input
+                        style={{ ...iStyle, fontSize: 13 }}
+                        value={val.hint || ""}
+                        onChange={(e) => setField(def.key, "hint", e.target.value)}
+                        placeholder="Help text shown under the field"
+                      />
+                    </div>
+                  )}
+                  {def.note && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 8 }}>{def.note}</div>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>Buttons &amp; Wording</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>Everything on the form that isn&apos;t a field label.</div>
+          </div>
+          {[
+            ["submitterSection", "Section heading above the submitter details"],
+            ["lineItemLabel", "Word for one expense (used in headings, the submit button and error messages)"],
+            ["addItem", "Add-another button"],
+            ["totalLabel", "Total row label"],
+            ["submitButton", "Submit button verb"],
+            ["successTitle", "Confirmation screen heading"],
+            ["successBody", "Confirmation screen message"],
+            ["copyLink", "Copy-status-link button"],
+            ["submitAnother", "Start-another-report button"],
+          ].map(([key, help]) => (
             <div key={key}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6, textTransform: "capitalize" }}>{key}</label>
-              <input style={iStyle} value={val} onChange={(e) => setLabel(key, e.target.value)} />
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{help}</label>
+              {key === "successBody"
+                ? <textarea style={{ ...iStyle, minHeight: 64, resize: "vertical" }} value={configDraft.text[key]} onChange={(e) => setText(key, e.target.value)} />
+                : <input style={iStyle} value={configDraft.text[key]} onChange={(e) => setText(key, e.target.value)} />}
             </div>
           ))}
         </div>
@@ -7598,16 +7730,56 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
         <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
           <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Mileage Settings</div>
           <div>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Rate per KM ($)</label>
-            <input
-              style={{ ...iStyle, maxWidth: 160 }}
-              type="number" min="0" step="0.01"
-              value={configDraft.mileageRate ?? 0.70}
-              onChange={(e) => setDraft("mileageRate", parseFloat(e.target.value) || 0)}
-            />
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#374151", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={configDraft.mileageCalculatesAmount !== false}
+                onChange={(e) => setDraft("mileageCalculatesAmount", e.target.checked)}
+              />
+              Work out a dollar amount from the distance
+            </label>
             <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>
-              The reimbursement amount is calculated automatically from KMs × this rate. Update here when the rate changes.
+              Turn this off when the rate varies. Staff then submit the distance only — no dollar figure is shown to them on the form or on their status link — and the expense arrives for you to price.
             </div>
+          </div>
+
+          {configDraft.mileageCalculatesAmount !== false ? (
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Rate per KM ($)</label>
+              <input
+                style={{ ...iStyle, maxWidth: 160 }}
+                type="number" min="0" step="0.01"
+                value={configDraft.mileageRate ?? 0.70}
+                onChange={(e) => setDraft("mileageRate", parseFloat(e.target.value) || 0)}
+              />
+              <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>
+                The reimbursement amount is calculated automatically from KMs × this rate. Update here when the rate changes.
+              </div>
+            </div>
+          ) : (
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#92400e" }}>
+              Mileage expenses will arrive at <strong>$0.00</strong> and are flagged “needs amount” in the list until you set the figure. They add nothing to the outstanding total before then.
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Category that uses mileage</label>
+            <select
+              style={{ ...iStyle, maxWidth: 280 }}
+              value={configDraft.mileageCategory || ""}
+              onChange={(e) => setDraft("mileageCategory", e.target.value)}
+            >
+              <option value="">None — no mileage calculator</option>
+              {configDraft.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>
+              Picking this category on the form swaps the typed amount for the address / KM calculator. If you rename the category, re-pick it here.
+            </div>
+            {configDraft.mileageCategory && !configDraft.categories.includes(configDraft.mileageCategory) && (
+              <div style={{ marginTop: 8, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#b91c1c" }}>
+                “{configDraft.mileageCategory}” is no longer one of your categories, so the mileage calculator will never appear. Pick a current category, or choose “None”.
+              </div>
+            )}
           </div>
         </div>
 
@@ -7634,10 +7806,27 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
         </div>
 
         <div className="card" style={{ padding: m ? "16px" : "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>Companies</div>
+          <div style={{ paddingBottom: 8, borderBottom: "1px solid #f3f4f6" }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>Companies</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+              Tick “needs event” to make the {configDraft.fields.event.label} picker appear and be required for that company.
+            </div>
+          </div>
           {(configDraft.expenseCompanies || []).map((co, i) => (
-            <div key={co} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ flex: 1, padding: "9px 12px", background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14 }}>{co}</div>
+            <div key={co} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 140, padding: "9px 12px", background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14 }}>{co}</div>
+              <label
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, whiteSpace: "nowrap", cursor: configDraft.fields.event.enabled === false ? "default" : "pointer", color: configDraft.fields.event.enabled === false ? "#d1d5db" : "#374151" }}
+                title={configDraft.fields.event.enabled === false ? "The Event field is switched off above." : ""}
+              >
+                <input
+                  type="checkbox"
+                  disabled={configDraft.fields.event.enabled === false}
+                  checked={(configDraft.eventCompanies || []).includes(co)}
+                  onChange={() => toggleEventCompany(co)}
+                />
+                needs event
+              </label>
               <button onClick={() => moveCompany(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↑</button>
               <button onClick={() => moveCompany(i, 1)} disabled={i === (configDraft.expenseCompanies || []).length - 1} style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "6px 10px", cursor: i === (configDraft.expenseCompanies || []).length - 1 ? "default" : "pointer", color: i === (configDraft.expenseCompanies || []).length - 1 ? "#d1d5db" : "#374151", fontFamily: "inherit", fontSize: 13 }}>↓</button>
               <button onClick={() => removeCompany(co)} style={{ background: "none", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px", cursor: "pointer", color: "#ef4444", fontFamily: "inherit", fontSize: 13 }}>✕</button>
@@ -7781,6 +7970,11 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                   {report.items.length > 1 && (
                     <span className="pill" style={{ background: "#f0f0ff", color: "#4f46e5", fontSize: 11 }}>{report.items.length} items</span>
                   )}
+                  {report.needsAmount > 0 && (
+                    <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11, fontWeight: 600 }}>
+                      ⚠ {report.needsAmount} needs amount
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, flexWrap: "wrap" }}>
                   <span>{report.submitterEmail}</span>
@@ -7829,6 +8023,13 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
               <div key={expense.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f3f4f6" }}>
                 <div style={{ fontSize: 13, color: "#374151", marginBottom: 3, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 14 }}>${parseFloat(expense.amount).toFixed(2)}</strong>
+                  {/* A distance with no amount was submitted for pricing, not
+                      approved at zero. Say so loudly so it can't be paid as-is. */}
+                  {expense.totalKMs != null && !parseFloat(expense.amount) && (
+                    <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11, fontWeight: 600 }}>
+                      ⚠ Needs amount
+                    </span>
+                  )}
                   {expense.extractedTotal != null && (() => {
                     const mismatch = Math.abs(expense.extractedTotal - parseFloat(expense.amount)) > 0.02;
                     return (
@@ -7861,12 +8062,65 @@ function ExpensesAdmin({ isMobile: m, showToast }) {
                   <span style={{ color: "#9ca3af" }}>{expense.category}</span>
                   {expense.expenseDate && <span style={{ color: "#9ca3af" }}>{expense.expenseDate.split("T")[0]}</span>}
                 </div>
-                {expense.totalKMs != null && (
-                  <div style={{ fontSize: 13, color: "#374151", marginBottom: 3 }}>
-                    🚗 {expense.startLocation} → {expense.endLocation}
-                    <span style={{ color: "#9ca3af", marginLeft: 8 }}>{expense.totalKMs} km @ ${expense.mileageRate?.toFixed(2)}/km</span>
-                  </div>
-                )}
+                {expense.totalKMs != null && (() => {
+                  // The addresses are optional, so a route may be partial or absent.
+                  const route = [expense.startLocation, expense.endLocation].filter(Boolean).join(" → ");
+                  const unpriced = !parseFloat(expense.amount);
+                  const cents = rateDraft[expense.id] ?? String(Math.round((config.mileageRate || 0.70) * 100));
+                  const centsNum = parseFloat(cents);
+                  const preview = centsNum > 0
+                    ? (parseFloat(expense.totalKMs) * (centsNum / 100)).toFixed(2)
+                    : null;
+                  const busy = correctingAmount.has(expense.id);
+                  return (
+                    <div style={{
+                      margin: "8px 0", padding: m ? "10px 12px" : "12px 14px", borderRadius: 8,
+                      background: unpriced ? "#fffbeb" : "#f8f9fb",
+                      border: `1px solid ${unpriced ? "#fde68a" : "#e5e7eb"}`,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: m ? 20 : 22, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.1 }}>
+                          {expense.totalKMs} km
+                        </span>
+                        {/* No rate is stored when a distance is still awaiting
+                            pricing, so don't render "@ $undefined/km". */}
+                        {expense.mileageRate != null && (
+                          <span style={{ fontSize: 13, color: "#6b7280" }}>@ ${expense.mileageRate.toFixed(2)}/km</span>
+                        )}
+                      </div>
+                      {route && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 5 }}>🚗 {route}</div>}
+
+                      {unpriced && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: "1px solid #fde68a" }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>Rate</span>
+                          <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                            <input
+                              type="number" min="0" step="0.1"
+                              value={cents}
+                              disabled={busy}
+                              onChange={(e) => setRateDraft((d) => ({ ...d, [expense.id]: e.target.value }))}
+                              style={{ width: 92, padding: "7px 34px 7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 14, fontFamily: "inherit", color: "#1a1a2e" }}
+                            />
+                            <span style={{ position: "absolute", right: 9, fontSize: 12, color: "#9ca3af", pointerEvents: "none" }}>¢/km</span>
+                          </span>
+                          {preview && <span style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>= ${preview}</span>}
+                          <button
+                            onClick={() => applyMileageRate(expense)}
+                            disabled={busy || !preview}
+                            style={{
+                              background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 6,
+                              padding: "7px 14px", fontSize: 13, fontWeight: 500, fontFamily: "inherit",
+                              cursor: busy || !preview ? "default" : "pointer", opacity: busy || !preview ? 0.55 : 1,
+                            }}
+                          >
+                            {busy ? "Saving…" : "Apply rate"}
+                          </button>
+                          <span style={{ fontSize: 12, color: "#92400e" }}>Sets the amount only — pay with Mark Paid.</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {expense.merchantName && (
                   <div style={{ fontSize: 13, color: "#374151", marginBottom: 3 }}>
                     🏪 {expense.merchantName}

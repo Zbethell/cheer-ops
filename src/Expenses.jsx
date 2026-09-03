@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef } from "react";
+import {
+  DEFAULT_EXPENSE_CONFIG, mergeExpenseConfig, isFieldOn, isFieldRequired,
+} from "./expenseForm.js";
 
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
@@ -9,21 +12,6 @@ const sbFetch = async (path) => {
   });
   const text = await res.text();
   return text ? JSON.parse(text) : [];
-};
-
-const DEFAULT_CONFIG = {
-  formTitle: "Expense Report",
-  formSubtitle: "Submit your expenses for reimbursement. You'll receive a link to track their status.",
-  categories: ["Meal", "Gas", "Office Supplies", "Mileage"],
-  mileageRate: 0.70,
-  expenseCompanies: ["Pro", "Pro Gym Services", "EVO"],
-  approvers: ["Doug", "Frank", "Steph", "Nic"],
-  labels: {
-    name: "Your Name", email: "Email Address", amount: "Amount ($)",
-    date: "Date of Expense", category: "Category", company: "Company",
-    description: "Description", receipt: "Receipt Photo",
-    startLocation: "Start Location", endLocation: "End Location", totalKMs: "Total KMs",
-  },
 };
 
 const primaryBtn = {
@@ -137,9 +125,18 @@ function AddressAutocomplete({ label, required, value, onSelect, placeholder }) 
 function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
   const [calculatingKMs, setCalculatingKMs] = useState(false);
   const fileRef = useRef(null);
-  const isMileage = item.category === "Mileage";
+  const fld = (key) => config.fields[key] || {};
+  const on = (key) => isFieldOn(config, key);
+  const req = (key) => isFieldRequired(config, key);
+  // Mileage mode is driven by the configured category name, not a hardcoded
+  // "Mileage", so renaming the category in settings keeps the calculator wired up.
+  const isMileage = !!config.mileageCategory && item.category === config.mileageCategory;
+  const usesAddresses = isMileage && on("startLocation") && on("endLocation");
   const mileageRate = config.mileageRate || 0.70;
-  const calculatedAmount = isMileage && item.totalKMs
+  // When the rate varies, no dollar figure is quoted to the submitter at all —
+  // showing one would promise a number accounting may not honour.
+  const calcAmount = config.mileageCalculatesAmount !== false;
+  const calculatedAmount = calcAmount && isMileage && item.totalKMs
     ? (parseFloat(item.totalKMs) * mileageRate).toFixed(2)
     : null;
 
@@ -168,7 +165,7 @@ function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "20px 20px 4px", marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a2e", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          Expense #{index}
+          {config.text.lineItemLabel} #{index}
         </div>
         {total > 1 && (
           <button
@@ -182,7 +179,7 @@ function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <Field label={config.labels.category} required>
+        <Field label={fld("category").label} required={req("category")} hint={fld("category").hint}>
           <select
             style={inputStyle}
             value={item.category}
@@ -192,7 +189,7 @@ function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
             {config.categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </Field>
-        <Field label={config.labels.date} required>
+        <Field label={fld("date").label} required={req("date")} hint={fld("date").hint}>
           <input
             style={inputStyle}
             type="date"
@@ -204,31 +201,47 @@ function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
 
       {isMileage && (
         <>
-          <AddressAutocomplete
-            label={config.labels.startLocation}
-            required
-            value={item.fromPlace}
-            onSelect={(s) => onUpdate({ fromPlace: s })}
-            placeholder="Start typing a start address…"
-          />
-          <AddressAutocomplete
-            label={config.labels.endLocation}
-            required
-            value={item.toPlace}
-            onSelect={(s) => onUpdate({ toPlace: s })}
-            placeholder="Start typing an end address…"
-          />
+          {on("startLocation") && (
+            <AddressAutocomplete
+              label={fld("startLocation").label}
+              required={req("startLocation")}
+              value={item.fromPlace}
+              onSelect={(s) => onUpdate({ fromPlace: s })}
+              placeholder={fld("startLocation").placeholder}
+            />
+          )}
+          {on("endLocation") && (
+            <AddressAutocomplete
+              label={fld("endLocation").label}
+              required={req("endLocation")}
+              value={item.toPlace}
+              onSelect={(s) => onUpdate({ toPlace: s })}
+              placeholder={fld("endLocation").placeholder}
+            />
+          )}
           <Field
-            label={config.labels.totalKMs}
-            required
-            hint={calculatingKMs ? "Calculating route…" : `Rate: $${mileageRate.toFixed(2)}/km — auto-filled from addresses, adjust if needed`}
+            label={fld("totalKMs").label}
+            required={req("totalKMs")}
+            hint={
+              calculatingKMs ? "Calculating route…"
+                : fld("totalKMs").hint
+                  ? fld("totalKMs").hint
+                  : calcAmount
+                    ? (usesAddresses
+                        ? `Rate: $${mileageRate.toFixed(2)}/km — auto-filled from addresses, adjust if needed`
+                        : `Rate: $${mileageRate.toFixed(2)}/km`)
+                    // No rate quoted — accounting prices the distance later.
+                    : (usesAddresses
+                        ? "Auto-filled from the addresses above, adjust if needed"
+                        : "Enter the distance driven")
+            }
           >
             <input
               style={{ ...inputStyle, background: calculatingKMs ? "#f8f9fb" : "#fff" }}
               type="number" min="0.1" step="0.1"
               value={item.totalKMs}
               onChange={(e) => onUpdate({ totalKMs: e.target.value })}
-              placeholder="0.0"
+              placeholder={fld("totalKMs").placeholder}
             />
           </Field>
           {calculatedAmount && (
@@ -241,28 +254,30 @@ function LineItemEditor({ item, index, total, config, onUpdate, onRemove }) {
       )}
 
       {!isMileage && item.category && (
-        <Field label={config.labels.amount} required>
+        <Field label={fld("amount").label} required={req("amount")} hint={fld("amount").hint}>
           <input
             style={inputStyle}
             type="number" min="0.01" step="0.01"
             value={item.amount}
             onChange={(e) => onUpdate({ amount: e.target.value })}
-            placeholder="0.00"
+            placeholder={fld("amount").placeholder}
           />
         </Field>
       )}
 
-      <Field label={config.labels.description}>
-        <textarea
-          style={{ ...inputStyle, minHeight: 72, resize: "vertical" }}
-          value={item.description}
-          onChange={(e) => onUpdate({ description: e.target.value })}
-          placeholder="Brief description of the expense"
-        />
-      </Field>
+      {on("description") && (
+        <Field label={fld("description").label} required={req("description")} hint={fld("description").hint}>
+          <textarea
+            style={{ ...inputStyle, minHeight: 72, resize: "vertical" }}
+            value={item.description}
+            onChange={(e) => onUpdate({ description: e.target.value })}
+            placeholder={fld("description").placeholder}
+          />
+        </Field>
+      )}
 
-      {!isMileage && item.category && (
-        <Field label={config.labels.receipt} hint="Optional — attach a photo or PDF of your receipt">
+      {on("receipt") && !isMileage && item.category && (
+        <Field label={fld("receipt").label} required={req("receipt")} hint={fld("receipt").hint}>
           <div
             onClick={() => fileRef.current?.click()}
             style={{
@@ -307,7 +322,7 @@ function newItem() {
 }
 
 export default function Expenses() {
-  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [config, setConfig] = useState(DEFAULT_EXPENSE_CONFIG);
   const [reportForm, setReportForm] = useState({ name: "", email: "", company: "", eventId: "", approvedBy: "" });
   const [evoEvents, setEvoEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
@@ -320,19 +335,24 @@ export default function Expenses() {
   useEffect(() => {
     fetch("/api/expense-config")
       .then((r) => r.json())
-      .then((c) => setConfig({ ...DEFAULT_CONFIG, ...c, labels: { ...DEFAULT_CONFIG.labels, ...(c.labels || {}) } }))
+      .then((c) => setConfig(mergeExpenseConfig(c)))
       .catch(() => {});
   }, []);
 
+  // Which companies need an event is configurable now, rather than a hardcoded
+  // check for "EVO".
+  const needsEvent = isFieldOn(config, "event")
+    && (config.eventCompanies || []).includes(reportForm.company);
+
   useEffect(() => {
-    if (reportForm.company !== "EVO") { setEvoEvents([]); return; }
+    if (!needsEvent) { setEvoEvents([]); return; }
     setLoadingEvents(true);
     sbFetch("events?status=eq.active&order=date")
       .then((evs) => evs.length > 0 ? evs : sbFetch("events?status=eq.upcoming&order=date"))
       .then(setEvoEvents)
       .catch(() => {})
       .finally(() => setLoadingEvents(false));
-  }, [reportForm.company]);
+  }, [needsEvent]);
 
   const setRF = (field) => (e) => setReportForm((f) => ({ ...f, [field]: e.target.value }));
 
@@ -349,38 +369,67 @@ export default function Expenses() {
   }
 
   const mileageRate = config.mileageRate || 0.70;
+  const mileageCat = config.mileageCategory || "";
+  const isMileageItem = (item) => !!mileageCat && item.category === mileageCat;
+  const calcAmount = config.mileageCalculatesAmount !== false;
   const reportTotal = lineItems.reduce((sum, item) => {
-    if (item.category === "Mileage" && item.totalKMs) {
-      return sum + parseFloat(item.totalKMs) * mileageRate;
+    if (isMileageItem(item)) {
+      // With the calculator off there is no figure to add — the distance is
+      // priced by accounting after submission.
+      return sum + (calcAmount && item.totalKMs ? parseFloat(item.totalKMs) * mileageRate : 0);
     }
     return sum + (parseFloat(item.amount) || 0);
   }, 0);
+  // Mileage lines left for accounting to price, so the total can say so rather
+  // than quietly reading low.
+  const unpricedKMs = calcAmount ? 0 : lineItems
+    .filter((i) => isMileageItem(i) && parseFloat(i.totalKMs) > 0)
+    .reduce((s, i) => s + parseFloat(i.totalKMs), 0);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
+    // Validation follows the configured labels and toggles, so an admin renaming
+    // a field also renames it in the error messages, and a field switched off is
+    // never demanded.
+    const lbl = (key) => config.fields[key]?.label || key;
+    const on = (key) => isFieldOn(config, key);
+    const req = (key) => isFieldRequired(config, key);
+
     if (!reportForm.name.trim() || !reportForm.email.trim() || !reportForm.company) {
-      setError("Please fill in your name, email, and company."); return;
+      setError(`Please fill in ${lbl("name")}, ${lbl("email")}, and ${lbl("company")}.`); return;
     }
-    if (!reportForm.approvedBy) {
-      setError("Please select who approved this expense report."); return;
+    if (req("approvedBy") && !reportForm.approvedBy) {
+      setError(`Please select ${lbl("approvedBy")}.`); return;
     }
-    if (reportForm.company === "EVO" && !reportForm.eventId) {
-      setError("Please select an event for EVO expenses."); return;
+    if (needsEvent && req("event") && !reportForm.eventId) {
+      setError(`Please select an ${lbl("event")} for ${reportForm.company} expenses.`); return;
     }
 
+    const itemLabel = config.text.lineItemLabel;
     for (let i = 0; i < lineItems.length; i++) {
       const item = lineItems[i];
       const n = i + 1;
-      if (!item.category) { setError(`Expense #${n}: please select a category.`); return; }
-      if (!item.date) { setError(`Expense #${n}: please select a date.`); return; }
-      if (item.category === "Mileage") {
-        if (!item.fromPlace || !item.toPlace) { setError(`Expense #${n}: please select both start and end addresses from the suggestions.`); return; }
-        if (!item.totalKMs || parseFloat(item.totalKMs) <= 0) { setError(`Expense #${n}: please enter a valid KM amount.`); return; }
+      if (!item.category) { setError(`${itemLabel} #${n}: please select a ${lbl("category").toLowerCase()}.`); return; }
+      if (!item.date) { setError(`${itemLabel} #${n}: please select a ${lbl("date").toLowerCase()}.`); return; }
+      if (req("description") && !item.description.trim()) {
+        setError(`${itemLabel} #${n}: please enter a ${lbl("description").toLowerCase()}.`); return;
+      }
+      if (isMileageItem(item)) {
+        if (on("startLocation") && req("startLocation") && !item.fromPlace) {
+          setError(`${itemLabel} #${n}: please pick ${lbl("startLocation")} from the suggestions.`); return;
+        }
+        if (on("endLocation") && req("endLocation") && !item.toPlace) {
+          setError(`${itemLabel} #${n}: please pick ${lbl("endLocation")} from the suggestions.`); return;
+        }
+        if (!item.totalKMs || parseFloat(item.totalKMs) <= 0) { setError(`${itemLabel} #${n}: please enter a valid ${lbl("totalKMs")} value.`); return; }
       } else {
         if (!item.amount || isNaN(parseFloat(item.amount)) || parseFloat(item.amount) <= 0) {
-          setError(`Expense #${n}: please enter a valid amount.`); return;
+          setError(`${itemLabel} #${n}: please enter a valid ${lbl("amount").toLowerCase()}.`); return;
+        }
+        if (req("receipt") && !item.receipt) {
+          setError(`${itemLabel} #${n}: please attach a ${lbl("receipt").toLowerCase()}.`); return;
         }
       }
     }
@@ -400,9 +449,12 @@ export default function Expenses() {
               reader.readAsDataURL(item.receipt);
             });
           }
-          const isMileage = item.category === "Mileage";
+          const isMileage = isMileageItem(item);
+          // With the calculator off the line is submitted at zero and priced by
+          // accounting. The backend rejects a null amount, so zero is the value
+          // that means "not yet priced" — the admin list flags these.
           const finalAmount = isMileage
-            ? parseFloat((parseFloat(item.totalKMs) * mileageRate).toFixed(2))
+            ? (calcAmount ? parseFloat((parseFloat(item.totalKMs) * mileageRate).toFixed(2)) : 0)
             : parseFloat(item.amount);
           return {
             category:     item.category,
@@ -411,10 +463,15 @@ export default function Expenses() {
             description:  item.description.trim(),
             receiptBase64, receiptMimeType, receiptFileName,
             ...(isMileage && {
-              startLocation: item.fromPlace.address,
-              endLocation:   item.toPlace.address,
+              // The address fields can be switched off, in which case staff type
+              // the distance in by hand and there is no address to send.
+              ...(item.fromPlace && { startLocation: item.fromPlace.address }),
+              ...(item.toPlace   && { endLocation:   item.toPlace.address }),
               totalKMs:      parseFloat(item.totalKMs),
-              mileageRate,
+              // Only record a rate when one was actually applied. Storing the
+              // configured rate against a line nobody priced with it would be
+              // misleading to whoever reads the row later.
+              ...(calcAmount && { mileageRate }),
             }),
           };
         })
@@ -460,21 +517,21 @@ export default function Expenses() {
       <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", minHeight: "100vh", background: "#f8f9fb", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
         <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "40px 32px", maxWidth: 480, width: "100%", textAlign: "center" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a2e", margin: "0 0 8px" }}>Expenses Submitted</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a2e", margin: "0 0 8px" }}>{config.text.successTitle}</h2>
           <p style={{ color: "#6b7280", fontSize: 15, margin: "0 0 28px" }}>
-            Your expense report has been received. Bookmark the link below to check your reimbursement status.
+            {config.text.successBody}
           </p>
           <div style={{ background: "#f8f9fb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 16px", marginBottom: 20, wordBreak: "break-all", fontSize: 13, color: "#374151" }}>
             {statusUrl}
           </div>
           <button onClick={() => navigator.clipboard.writeText(statusUrl)} style={{ ...primaryBtn, marginBottom: 12 }}>
-            Copy Status Link
+            {config.text.copyLink}
           </button>
           <button
             onClick={resetForm}
             style={{ background: "none", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontFamily: "inherit", width: "100%", color: "#374151" }}
           >
-            Submit Another Expense Report
+            {config.text.submitAnother}
           </button>
         </div>
       </div>
@@ -494,13 +551,13 @@ export default function Expenses() {
         <form onSubmit={handleSubmit}>
           {/* Report header — submitter info */}
           <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "20px 20px 4px", marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a2e", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Your Information</div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a2e", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>{config.text.submitterSection}</div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <Field label={config.labels.name} required>
-                <input style={inputStyle} value={reportForm.name} onChange={setRF("name")} placeholder="Full name" />
+              <Field label={config.fields.name.label} required hint={config.fields.name.hint}>
+                <input style={inputStyle} value={reportForm.name} onChange={setRF("name")} placeholder={config.fields.name.placeholder} />
               </Field>
-              <Field label={config.labels.company} required>
+              <Field label={config.fields.company.label} required hint={config.fields.company.hint}>
                 <select
                   style={inputStyle}
                   value={reportForm.company}
@@ -512,19 +569,21 @@ export default function Expenses() {
               </Field>
             </div>
 
-            <Field label={config.labels.email} required>
-              <input style={inputStyle} type="email" value={reportForm.email} onChange={setRF("email")} placeholder="you@example.com" />
+            <Field label={config.fields.email.label} required hint={config.fields.email.hint}>
+              <input style={inputStyle} type="email" value={reportForm.email} onChange={setRF("email")} placeholder={config.fields.email.placeholder} />
             </Field>
 
-            <Field label="Approved By" required>
-              <select style={inputStyle} value={reportForm.approvedBy} onChange={setRF("approvedBy")}>
-                <option value="">Select approver…</option>
-                {(config.approvers || []).map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </Field>
+            {isFieldOn(config, "approvedBy") && (
+              <Field label={config.fields.approvedBy.label} required={isFieldRequired(config, "approvedBy")} hint={config.fields.approvedBy.hint}>
+                <select style={inputStyle} value={reportForm.approvedBy} onChange={setRF("approvedBy")}>
+                  <option value="">Select approver…</option>
+                  {(config.approvers || []).map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </Field>
+            )}
 
-            {reportForm.company === "EVO" && (
-              <Field label="Event" required>
+            {needsEvent && (
+              <Field label={config.fields.event.label} required={isFieldRequired(config, "event")} hint={config.fields.event.hint}>
                 <select
                   style={inputStyle}
                   value={reportForm.eventId}
@@ -566,15 +625,26 @@ export default function Expenses() {
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#1a1a2e"; e.currentTarget.style.color = "#1a1a2e"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#6b7280"; }}
           >
-            + Add Another Expense
+            {config.text.addItem}
           </button>
 
           {/* Total + submit */}
           <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "20px 20px 20px" }}>
-            {reportTotal > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid #f3f4f6" }}>
-                <span style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>Report Total</span>
-                <span style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e" }}>${reportTotal.toFixed(2)}</span>
+            {(reportTotal > 0 || unpricedKMs > 0) && (
+              <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid #f3f4f6" }}>
+                {reportTotal > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{config.text.totalLabel}</span>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e" }}>${reportTotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {unpricedKMs > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: reportTotal > 0 ? 10 : 0 }}>
+                    <span style={{ fontSize: 13, color: "#6b7280" }}>
+                      Plus {unpricedKMs.toFixed(1)} km — reimbursement worked out by accounting
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -585,7 +655,9 @@ export default function Expenses() {
             )}
 
             <button type="submit" style={primaryBtn} disabled={loading}>
-              {loading ? "Submitting…" : `Submit ${lineItems.length > 1 ? `${lineItems.length} Expenses` : "Expense"}`}
+              {loading
+                ? "Submitting…"
+                : `${config.text.submitButton} ${lineItems.length > 1 ? `${lineItems.length} ${config.text.lineItemLabel}s` : config.text.lineItemLabel}`}
             </button>
           </div>
         </form>

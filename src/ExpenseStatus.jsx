@@ -108,7 +108,11 @@ export default function ExpenseStatus() {
                       {item.expenseDate ? new Date(item.expenseDate + "T00:00:00").toLocaleDateString("en-CA") : "—"}
                     </span>
                     <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e", textAlign: "right", whiteSpace: "nowrap" }}>
-                      ${parseFloat(item.amount).toFixed(2)}
+                      {/* A distance submitted with no amount hasn't been priced
+                          yet. "$0.00" would read as "you get nothing". */}
+                      {item.totalKMs != null && !parseFloat(item.amount)
+                        ? <span style={{ fontWeight: 500, color: "#6b7280", fontSize: 13 }}>To be calculated</span>
+                        : `$${parseFloat(item.amount).toFixed(2)}`}
                     </span>
                   </div>
                   {item.receiptURL && (

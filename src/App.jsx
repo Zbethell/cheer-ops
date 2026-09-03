@@ -268,6 +268,13 @@ const api = {
   deleteKitItemsByKit: (kitId) => sb(`kit_items?kit_id=eq.${kitId}`, { method: "DELETE" }),
   // Venue check-in (/checkin). Separate roster from `employees` so payroll and
   // venue attendance stay independent — see sql/event_checkins.sql.
+  getKioskSettings: () => sb("kiosk_settings"),
+  setKioskSetting: (path, require_code) => sb("kiosk_settings", {
+    method: "POST",
+    prefer: "return=representation,resolution=merge-duplicates",
+    body: JSON.stringify({ path, require_code, updated_at: new Date().toISOString() }),
+  }),
+
   getEventStaff: () => sb("event_staff?order=name"),
   addEventStaff: (s) => sb("event_staff", { method: "POST", body: JSON.stringify(s) }),
   updateEventStaff: (id, patch) => sb(`event_staff?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -1609,17 +1616,79 @@ function ContainerManager({ containers, setContainers, containerItems, setContai
 }
 
 // ─── Clock Page (kiosk) ───────────────────────────────────────────────────────
+// ─── Kiosk activation gate ────────────────────────────────────────────────────
+// Which kiosks ask for the activation code. These defaults match the behaviour
+// from before the toggle existed; a row in kiosk_settings overrides them.
+// If that table is missing or the lookup fails the defaults stand, so a bad
+// network call can never lock the warehouse out of /pack or quietly drop the
+// gate on /clock.
+const KIOSK_CODE_DEFAULTS = { "/clock": true, "/checkin": true, "/pack": false };
+
+const kioskAlreadyUnlocked = () => {
+  if (localStorage.getItem("cheerops_kiosk") === KIOSK_CODE) return true;
+  try {
+    const s = JSON.parse(localStorage.getItem("sb_session") || "{}");
+    return (s.expires_at || 0) > Math.floor(Date.now() / 1000) + 60;
+  } catch { return false; }
+};
+
+function useKioskGate(path) {
+  const [requireCode, setRequireCode] = useState(KIOSK_CODE_DEFAULTS[path] !== false);
+  const [ready, setReady] = useState(false);
+  const [unlocked, setUnlocked] = useState(kioskAlreadyUnlocked);
+
+  useEffect(() => {
+    let alive = true;
+    api.getKioskSettings()
+      .then(rows => {
+        if (!alive) return;
+        const row = (rows || []).find(r => r.path === path);
+        if (row) setRequireCode(row.require_code !== false);
+      })
+      .catch(() => { /* table not created yet — keep the built-in default */ })
+      .finally(() => { if (alive) setReady(true); });
+    return () => { alive = false; };
+  }, [path]);
+
+  return { ready, locked: requireCode && !unlocked, unlock: () => setUnlocked(true) };
+}
+
+function KioskCodeScreen({ onUnlock }) {
+  const [input, setInput] = useState("");
+  const [err, setErr] = useState("");
+  const submit = () => {
+    if (input === KIOSK_CODE) {
+      localStorage.setItem("cheerops_kiosk", KIOSK_CODE);
+      onUnlock();
+    } else { setErr("Incorrect activation code."); setInput(""); }
+  };
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8f9fb", fontFamily: "'DM Sans','Segoe UI',sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 18, border: "1px solid #e5e7eb", padding: 32, width: "100%", maxWidth: 420 }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 8 }}>Kiosk Setup</div>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>Enter the activation code to set up this device.</div>
+        </div>
+        <input type="password" value={input} autoFocus
+          onChange={e => { setInput(e.target.value); setErr(""); }}
+          onKeyDown={e => e.key === "Enter" && submit()}
+          placeholder="Activation code"
+          style={{ width: "100%", padding: "14px 16px", border: "1px solid #d1d5db", borderRadius: 12, fontSize: 17, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 12 }} />
+        {err && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 12 }}>{err}</div>}
+        <button onClick={submit} style={{ width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: 14, fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Activate Device</button>
+        <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: "16px 0 0" }}>This device stays activated until browser storage is cleared.</p>
+      </div>
+    </div>
+  );
+}
+
+const KioskLoading = () => (
+  <div style={{ minHeight: "100vh", background: "#f8f9fb", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans','Segoe UI',sans-serif", color: "#9ca3af" }}>Loading…</div>
+);
+
 function ClockPage() {
   const [digits, setDigits] = useState([]);
-  const [kioskUnlocked] = useState(() => {
-    if (localStorage.getItem("cheerops_kiosk") === KIOSK_CODE) return true;
-    try {
-      const s = JSON.parse(localStorage.getItem("sb_session") || "{}");
-      return (s.expires_at || 0) > Math.floor(Date.now() / 1000) + 60;
-    } catch { return false; }
-  });
-  const [kioskInput, setKioskInput] = useState("");
-  const [kioskError, setKioskError] = useState("");
+  const gate = useKioskGate("/clock");
 
   const [screen, setScreen] = useState("code"); // code | company | switch | resolve | dashboard | manual | stat | success
   const [employee, setEmployee] = useState(null);
@@ -1842,16 +1911,6 @@ function ClockPage() {
     setLoading(false);
   };
 
-  const submitKioskCode = () => {
-    if (kioskInput === KIOSK_CODE) {
-      localStorage.setItem("cheerops_kiosk", KIOSK_CODE);
-      window.location.reload();
-    } else {
-      setKioskError("Incorrect activation code.");
-      setKioskInput("");
-    }
-  };
-
   const submitResolve = async () => {
     if (!resolveForm.date || !resolveForm.time) { setError("Please enter when you finished."); return; }
     setLoading(true); setError("");
@@ -1917,28 +1976,8 @@ function ClockPage() {
   const base = { fontFamily: "DM Sans, sans-serif", minHeight: "100vh", background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 };
   const card = { background: "#fff", borderRadius: 20, padding: "40px 36px", width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" };
 
-  if (!kioskUnlocked) return (
-    <div style={base}>
-      <div style={card}>
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 8 }}>Kiosk Setup</div>
-          <div style={{ fontSize: 14, color: "#6b7280" }}>Enter the activation code to set up this device.</div>
-        </div>
-        <input
-          type="password"
-          value={kioskInput}
-          onChange={e => { setKioskInput(e.target.value); setKioskError(""); }}
-          onKeyDown={e => e.key === "Enter" && submitKioskCode()}
-          style={{ ...inputStyle, fontSize: 16, marginBottom: 12 }}
-          placeholder="Activation code"
-          autoFocus
-        />
-        {kioskError && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 12 }}>{kioskError}</div>}
-        <button onClick={submitKioskCode} style={{ width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Activate Device</button>
-        <p style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", margin: "16px 0 0" }}>This device will stay activated until browser storage is cleared.</p>
-      </div>
-    </div>
-  );
+  if (!gate.ready) return <KioskLoading />;
+  if (gate.locked) return <KioskCodeScreen onUnlock={gate.unlock} />;
 
   if (screen === "success") return (
     <div style={base}>
@@ -6009,15 +6048,7 @@ function ScanMode({ event, trailer, packing, setPacking, containers, onClose, sh
 // attendance log, not a timesheet, and it writes to event_checkins rather than
 // time_entries (see sql/event_checkins.sql for why that separation matters).
 function CheckInKiosk() {
-  const [kioskUnlocked, setKioskUnlocked] = useState(() => {
-    if (localStorage.getItem("cheerops_kiosk") === KIOSK_CODE) return true;
-    try {
-      const s = JSON.parse(localStorage.getItem("sb_session") || "{}");
-      return (s.expires_at || 0) > Math.floor(Date.now() / 1000) + 60;
-    } catch { return false; }
-  });
-  const [kioskInput, setKioskInput] = useState("");
-  const [kioskError, setKioskError] = useState("");
+  const gate = useKioskGate("/checkin");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -6105,37 +6136,12 @@ function CheckInKiosk() {
     setBusyId(null);
   }
 
-  function submitKioskCode() {
-    if (kioskInput === KIOSK_CODE) {
-      localStorage.setItem("cheerops_kiosk", KIOSK_CODE);
-      setKioskUnlocked(true);
-      setKioskInput("");
-      setKioskError("");
-    } else setKioskError("Incorrect code.");
-  }
-
   const base = { minHeight: "100vh", background: "#f8f9fb", fontFamily: "'DM Sans','Segoe UI',sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 };
   const card = { background: "#fff", borderRadius: 18, border: "1px solid #e5e7eb", padding: 32, width: "100%", maxWidth: 480 };
   const iStyle = { width: "100%", padding: "14px 16px", border: "1px solid #d1d5db", borderRadius: 12, fontSize: 17, fontFamily: "inherit", boxSizing: "border-box", color: "#1a1a2e" };
 
-  // The roster lists real people's names, so this screen is gated the same way
-  // the time clock is rather than left fully open like /pack.
-  if (!kioskUnlocked) return (
-    <div style={base}>
-      <div style={card}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2e", marginBottom: 8 }}>Kiosk Setup</div>
-          <div style={{ fontSize: 14, color: "#6b7280" }}>Enter the activation code to set up this device.</div>
-        </div>
-        <input type="password" value={kioskInput} autoFocus
-          onChange={e => { setKioskInput(e.target.value); setKioskError(""); }}
-          onKeyDown={e => e.key === "Enter" && submitKioskCode()}
-          style={{ ...iStyle, marginBottom: 12 }} placeholder="Activation code" />
-        {kioskError && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 12 }}>{kioskError}</div>}
-        <button onClick={submitKioskCode} style={{ width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: 14, fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Activate Device</button>
-      </div>
-    </div>
-  );
+  if (!gate.ready) return <KioskLoading />;
+  if (gate.locked) return <KioskCodeScreen onUnlock={gate.unlock} />;
 
   if (loading) return <div style={{ ...base, color: "#9ca3af" }}>Loading…</div>;
   if (error) return <div style={{ ...base, color: "#dc2626" }}>{error}</div>;
@@ -6249,6 +6255,9 @@ function CheckInKiosk() {
 }
 
 function KioskPack() {
+  // /pack had no gate at all before this was made configurable; it stays off by
+  // default so the warehouse workflow is unchanged unless it is switched on.
+  const gate = useKioskGate("/pack");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [events, setEvents] = useState([]);
@@ -6375,6 +6384,8 @@ function KioskPack() {
   const headBtn = { background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 15, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, color: "#e2e8f0" };
   const wrap = { position: "fixed", inset: 0, background: BG, zIndex: 400, fontFamily: "'DM Sans','Segoe UI',sans-serif", color: "#f1f5f9", display: "flex", flexDirection: "column", overflow: "hidden" };
 
+  if (!gate.ready) return <KioskLoading />;
+  if (gate.locked) return <KioskCodeScreen onUnlock={gate.unlock} />;
   if (loading) return <div style={{ ...wrap, alignItems: "center", justifyContent: "center", color: MUTED, fontSize: 18 }}>Loading…</div>;
   if (error) return <div style={{ ...wrap, alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 14 }}><div style={{ fontSize: 40 }}>⚠️</div><div style={{ color: MUTED }}>{error}</div></div>;
 
@@ -8750,6 +8761,14 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   // Kept masked by default so the code isn't sitting on screen during a
   // screen-share or over someone's shoulder.
   const [showKioskCode, setShowKioskCode] = useState(false);
+  const [kioskSettings, setKioskSettings] = useState({});   // { "/clock": true, ... }
+  const [savingKiosk, setSavingKiosk] = useState(null);
+
+  useEffect(() => {
+    api.getKioskSettings()
+      .then(rows => setKioskSettings(Object.fromEntries((rows || []).map(r => [r.path, r.require_code !== false]))))
+      .catch(() => { /* table not created yet — the built-in defaults are shown */ });
+  }, []);
   const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
@@ -8806,10 +8825,27 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   // admin-only. Note this is a convenience reference, not a secret store — see
   // the caveat rendered with it.
   const KIOSKS = [
-    { path: "/checkin", label: "Venue Check-in", sub: "Staff tap their name on arrival", gated: true },
-    { path: "/clock",   label: "Time Clock",     sub: "Clock in and out, 4-digit staff codes", gated: true },
-    { path: "/pack",    label: "Warehouse Pack", sub: "Scan containers onto a trailer", gated: false },
+    { path: "/checkin", label: "Venue Check-in", sub: "Staff tap their name on arrival" },
+    { path: "/clock",   label: "Time Clock",     sub: "Clock in and out, 4-digit staff codes" },
+    { path: "/pack",    label: "Warehouse Pack", sub: "Scan containers onto a trailer" },
   ];
+
+  const kioskNeedsCode = (path) =>
+    kioskSettings[path] !== undefined ? kioskSettings[path] : KIOSK_CODE_DEFAULTS[path] !== false;
+
+  async function toggleKioskCode(path) {
+    const next = !kioskNeedsCode(path);
+    setKioskSettings(s => ({ ...s, [path]: next }));           // optimistic
+    setSavingKiosk(path);
+    try {
+      await api.setKioskSetting(path, next);
+      showToast(next ? `${path} now needs the code` : `${path} no longer needs the code`);
+    } catch {
+      setKioskSettings(s => ({ ...s, [path]: !next }));        // roll back
+      showToast("Could not save — is sql/kiosk_settings.sql run?");
+    }
+    setSavingKiosk(null);
+  }
 
   const PERM_ROWS = [
     { key: "can_view_dashboard",      label: "Dashboard",              sub: "Event overview and stats"         },
@@ -8860,9 +8896,20 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
               <div style={{ fontSize: 12, color: "#9ca3af" }}>{k.sub}</div>
             </div>
             <code style={{ fontSize: 12, color: "#6b7280" }}>{k.path}</code>
-            <span className="pill" style={{ background: k.gated ? "#f0f9ff" : "#f3f4f6", color: k.gated ? "#0369a1" : "#9ca3af", fontSize: 11 }}>
-              {k.gated ? "needs code" : "no code"}
-            </span>
+            <label
+              title={kioskNeedsCode(k.path) ? "Anyone opening this link must enter the activation code" : "This link opens straight into the kiosk"}
+              style={{ display: "flex", alignItems: "center", gap: 8, cursor: savingKiosk === k.path ? "wait" : "pointer", opacity: savingKiosk === k.path ? 0.6 : 1 }}
+            >
+              <span style={{ fontSize: 12, color: kioskNeedsCode(k.path) ? "#0369a1" : "#9ca3af", minWidth: 62, textAlign: "right" }}>
+                {kioskNeedsCode(k.path) ? "needs code" : "no code"}
+              </span>
+              <span
+                onClick={() => savingKiosk !== k.path && toggleKioskCode(k.path)}
+                style={{ width: 38, height: 22, borderRadius: 99, flexShrink: 0, background: kioskNeedsCode(k.path) ? "#1a1a2e" : "#e5e7eb", position: "relative", transition: "background 0.2s" }}
+              >
+                <span style={{ position: "absolute", top: 3, left: kioskNeedsCode(k.path) ? 19 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+              </span>
+            </label>
             <button
               onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}${k.path}`); showToast(`${k.label} link copied`); }}
               style={{ ...ghostBtn, fontSize: 12, padding: "6px 10px" }}

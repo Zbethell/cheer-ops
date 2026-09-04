@@ -196,6 +196,11 @@ const api = {
   getTechSetups: () => sb("tech_setups?order=created_at"),
   addTechSetup: (s) => sb("tech_setups", { method: "POST", body: JSON.stringify(s) }),
   updateTechSetup: (id, patch) => sb(`tech_setups?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  getTechAnnotations: () => sb("tech_annotations?order=created_at"),
+  addTechAnnotation: (a) => sb("tech_annotations", { method: "POST", body: JSON.stringify(a) }),
+  updateTechAnnotation: (id, patch) => sb(`tech_annotations?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteTechAnnotation: (id) => sb(`tech_annotations?id=eq.${id}`, { method: "DELETE" }),
+
   getTechDevices: () => sb("tech_devices?order=created_at"),
   addTechDevice: (d) => sb("tech_devices", { method: "POST", body: JSON.stringify(d) }),
   updateTechDevice: (id, patch) => sb(`tech_devices?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -7426,6 +7431,14 @@ const CONN_TYPES = {
   wifi:     { label: "WiFi",         dash: "2,6", color: "#059669" },
 };
 
+// Annotation tools for the tech diagram: plain ink, not network equipment.
+const SHAPE_TOOLS = [
+  { kind: "rect",    icon: "▭", label: "Box" },
+  { kind: "ellipse", icon: "◯", label: "Circle" },
+  { kind: "text",    icon: "T", label: "Text" },
+];
+const ANN_COLORS = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#1a1a2e"];
+
 function TechSetups({ isMobile: m, events, showToast }) {
   const [setups, setSetups] = useState([]);
   const [devices, setDevices] = useState([]);
@@ -7436,6 +7449,14 @@ function TechSetups({ isMobile: m, events, showToast }) {
   const [placingType, setPlacingType] = useState(null);
   const [connectingFrom, setConnectingFrom] = useState(null);
   const [dragging, setDragging] = useState(null);
+  // Annotations: shapes and text drawn over the floor plan.
+  const [annotations, setAnnotations] = useState([]);
+  const [placingShape, setPlacingShape] = useState(null);   // 'rect' | 'ellipse' | 'text'
+  const [selectedAnn, setSelectedAnn] = useState(null);
+  const [annDrag, setAnnDrag] = useState(null);             // { id, mode: 'move' | 'resize', ... }
+  const [showAnnModal, setShowAnnModal] = useState(false);
+  const [annForm, setAnnForm] = useState({ label: "", color: "#2563eb" });
+  const [pendingAnn, setPendingAnn] = useState(null);
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [pendingPos, setPendingPos] = useState(null);
   const [showConnModal, setShowConnModal] = useState(false);
@@ -7459,11 +7480,17 @@ function TechSetups({ isMobile: m, events, showToast }) {
     Promise.all([api.getTechSetups(), api.getTechDevices(), api.getTechConnections()])
       .then(([s, d, c]) => { setSetups(s); setDevices(d); setConnections(c); })
       .finally(() => setLoading(false));
+    // Optional: a missing table just means no annotations, and the diagram keeps
+    // working exactly as before.
+    api.getTechAnnotations().then(setAnnotations).catch(() => setAnnotations([]));
   }, []);
 
   const selectedSetup = setups.find(s => s.event_id === selectedEventId);
   const setupDevices = selectedSetup ? devices.filter(d => d.setup_id === selectedSetup.id) : [];
   const setupConns = selectedSetup ? connections.filter(c => c.setup_id === selectedSetup.id) : [];
+  // setup_id is stored as text, so compare as text — the ids come back typed.
+  const setupAnnotations = selectedSetup ? annotations.filter(a => String(a.setup_id) === String(selectedSetup.id)) : [];
+  const selectedAnnotation = setupAnnotations.find(a => a.id === selectedAnn) || null;
   const selectedEvent = events.find(e => e.id === selectedEventId);
 
   const ensureSetup = async () => {
@@ -7473,18 +7500,94 @@ function TechSetups({ isMobile: m, events, showToast }) {
     return s;
   };
 
+  // Viewport pixels -> canvas percentages, undoing pan and zoom.
+  const canvasPct = (clientX, clientY) => {
+    const rect = viewportRef.current.getBoundingClientRect();
+    return {
+      x_pct: ((clientX - rect.left - panX) / zoom / rect.width) * 100,
+      y_pct: ((clientY - rect.top - panY) / zoom / rect.height) * 100,
+    };
+  };
+
   const handleCanvasClick = (e) => {
     if (didDragRef.current) { didDragRef.current = false; return; }
-    if (!placingType || !selectedEventId) return;
-    const rect = viewportRef.current.getBoundingClientRect();
-    const vx = e.clientX - rect.left;
-    const vy = e.clientY - rect.top;
-    const x_pct = ((vx - panX) / zoom / rect.width) * 100;
-    const y_pct = ((vy - panY) / zoom / rect.height) * 100;
+    if (!selectedEventId) return;
+
+    if (placingShape) {
+      const { x_pct, y_pct } = canvasPct(e.clientX, e.clientY);
+      if (x_pct < 0 || x_pct > 100 || y_pct < 0 || y_pct > 100) return;
+      if (placingShape === "text") {
+        // Text is worthless empty, so ask for it before creating the row.
+        setPendingAnn({ kind: "text", x_pct, y_pct });
+        setAnnForm({ label: "", color: "#1a1a2e" });
+        setShowAnnModal(true);
+      } else {
+        addAnnotation({ kind: placingShape, x_pct, y_pct });
+      }
+      return;
+    }
+
+    if (!placingType) { setSelectedAnn(null); return; }
+    const { x_pct, y_pct } = canvasPct(e.clientX, e.clientY);
     if (x_pct < 0 || x_pct > 100 || y_pct < 0 || y_pct > 100) return;
     setPendingPos({ type: placingType, x_pct, y_pct });
     setDeviceForm({ label: DEVICE_TYPES[placingType].label, network: "main", notes: "" });
     setShowDeviceModal(true);
+  };
+
+  // Shapes are centred on the click and sized so they're immediately grabbable.
+  const addAnnotation = async ({ kind, x_pct, y_pct, label = null, color }) => {
+    try {
+      const setup = await ensureSetup();
+      const w = kind === "text" ? 24 : 24;
+      const h = kind === "text" ? 8 : 16;
+      const [a] = await api.addTechAnnotation({
+        setup_id: setup.id, kind,
+        x_pct: Math.max(2, Math.min(98, x_pct)),
+        y_pct: Math.max(2, Math.min(98, y_pct)),
+        w_pct: w, h_pct: h,
+        label, color: color || (kind === "text" ? "#1a1a2e" : "#2563eb"),
+      });
+      setAnnotations(prev => [...prev, a]);
+      setPlacingShape(null);
+      setSelectedAnn(a.id);
+    } catch { showToast("Error adding — is sql/tech_annotations.sql run?"); }
+  };
+
+  const saveAnnotationText = async () => {
+    if (!annForm.label.trim()) return;
+    setSaving(true);
+    await addAnnotation({ ...pendingAnn, label: annForm.label.trim(), color: annForm.color });
+    setShowAnnModal(false);
+    setPendingAnn(null);
+    setSaving(false);
+  };
+
+  const patchAnnotation = async (id, patch) => {
+    setAnnotations(prev => prev.map(a => (a.id === id ? { ...a, ...patch } : a)));
+    try { await api.updateTechAnnotation(id, patch); }
+    catch { showToast("Error saving"); }
+  };
+
+  const deleteAnnotation = async (id) => {
+    setAnnotations(prev => prev.filter(a => a.id !== id));
+    setSelectedAnn(null);
+    try { await api.deleteTechAnnotation(id); }
+    catch { showToast("Error removing"); }
+  };
+
+  const startAnnDrag = (e, ann, mode) => {
+    if (placingType || placingShape) return;
+    e.stopPropagation();
+    didDragRef.current = false;
+    const rect = viewportRef.current.getBoundingClientRect();
+    setSelectedAnn(ann.id);
+    setAnnDrag({
+      id: ann.id, mode,
+      startX: e.clientX, startY: e.clientY,
+      origX: ann.x_pct, origY: ann.y_pct, origW: ann.w_pct, origH: ann.h_pct,
+      viewportW: rect.width, viewportH: rect.height,
+    });
   };
 
   const saveDevice = async () => {
@@ -7567,6 +7670,19 @@ function TechSetups({ isMobile: m, events, showToast }) {
   };
 
   const onMouseMove = (e) => {
+    if (annDrag) {
+      const dx = ((e.clientX - annDrag.startX) / zoom / annDrag.viewportW) * 100;
+      const dy = ((e.clientY - annDrag.startY) / zoom / annDrag.viewportH) * 100;
+      if (Math.abs(e.clientX - annDrag.startX) > 3 || Math.abs(e.clientY - annDrag.startY) > 3) didDragRef.current = true;
+      setAnnotations(prev => prev.map(a => {
+        if (a.id !== annDrag.id) return a;
+        return annDrag.mode === "resize"
+          // Floor of 4% so a shape can't be collapsed to something unclickable.
+          ? { ...a, w_pct: Math.max(4, Math.min(100, annDrag.origW + dx)), h_pct: Math.max(4, Math.min(100, annDrag.origH + dy)) }
+          : { ...a, x_pct: Math.max(1, Math.min(99, annDrag.origX + dx)), y_pct: Math.max(1, Math.min(99, annDrag.origY + dy)) };
+      }));
+      return;
+    }
     if (!dragging) return;
     const dx = e.clientX - dragging.startX;
     const dy = e.clientY - dragging.startY;
@@ -7577,6 +7693,19 @@ function TechSetups({ isMobile: m, events, showToast }) {
   };
 
   const onMouseUp = async () => {
+    if (annDrag) {
+      const a = annotations.find(x => x.id === annDrag.id);
+      const moved = didDragRef.current;
+      setAnnDrag(null);
+      if (a && moved) {
+        try {
+          await api.updateTechAnnotation(a.id, annDrag.mode === "resize"
+            ? { w_pct: a.w_pct, h_pct: a.h_pct }
+            : { x_pct: a.x_pct, y_pct: a.y_pct });
+        } catch { showToast("Error saving position"); }
+      }
+      return;
+    }
     if (!dragging) return;
     const device = devices.find(d => d.id === dragging.id);
     if (device && didDragRef.current) {
@@ -7672,7 +7801,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}
-      onKeyDown={e => { if (e.key === "Escape") { setPlacingType(null); setConnectingFrom(null); } }} tabIndex={-1}>
+      onKeyDown={e => { if (e.key === "Escape") { setPlacingType(null); setPlacingShape(null); setSelectedAnn(null); setConnectingFrom(null); } }} tabIndex={-1}>
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -7691,7 +7820,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
       {/* Event selector */}
       <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px" }}>
         <label style={{ ...labelStyle, display: "block", marginBottom: 8 }}>Select Event</label>
-        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setPlacingType(null); setConnectingFrom(null); setZoom(1); setPanX(0); setPanY(0); }} style={iStyle}>
+        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setPlacingType(null); setPlacingShape(null); setSelectedAnn(null); setConnectingFrom(null); setZoom(1); setPanX(0); setPanY(0); }} style={iStyle}>
           <option value="">— Choose an event —</option>
           {events.map(e => <option key={e.id} value={e.id}>{e.name}{e.date ? ` · ${e.date}` : ""}</option>)}
         </select>
@@ -7709,7 +7838,9 @@ function TechSetups({ isMobile: m, events, showToast }) {
           {/* Device palette */}
           <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px" }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
-              {placingType
+              {placingShape
+                ? `Placing: ${SHAPE_TOOLS.find(s => s.kind === placingShape)?.label} — click the diagram`
+                : placingType
                 ? `Placing: ${DEVICE_TYPES[placingType].icon} ${DEVICE_TYPES[placingType].label} — click the diagram`
                 : connectingFrom
                 ? `Connecting from: ${setupDevices.find(d => d.id === connectingFrom)?.label || "?"} — click target device (Esc to cancel)`
@@ -7718,7 +7849,7 @@ function TechSetups({ isMobile: m, events, showToast }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {Object.entries(DEVICE_TYPES).map(([type, cfg]) => (
                 <button key={type}
-                  onClick={() => { setPlacingType(placingType === type ? null : type); setConnectingFrom(null); }}
+                  onClick={() => { setPlacingType(placingType === type ? null : type); setPlacingShape(null); setConnectingFrom(null); }}
                   style={{ padding: "6px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500,
                     border: `1px solid ${placingType === type ? cfg.color : "#e5e7eb"}`,
                     background: placingType === type ? cfg.color + "18" : "#fff",
@@ -7726,7 +7857,43 @@ function TechSetups({ isMobile: m, events, showToast }) {
                   {cfg.icon} {cfg.label}
                 </button>
               ))}
+              <span style={{ width: 1, background: "#e5e7eb", margin: "0 2px" }} />
+              {SHAPE_TOOLS.map(s => (
+                <button key={s.kind}
+                  onClick={() => { setPlacingShape(placingShape === s.kind ? null : s.kind); setPlacingType(null); setConnectingFrom(null); }}
+                  style={{ padding: "6px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: 500,
+                    border: `1px solid ${placingShape === s.kind ? "#7c3aed" : "#e5e7eb"}`,
+                    background: placingShape === s.kind ? "#7c3aed18" : "#fff",
+                    color: placingShape === s.kind ? "#7c3aed" : "#374151" }}>
+                  {s.icon} {s.label}
+                </button>
+              ))}
             </div>
+
+            {/* Controls for whichever annotation is selected */}
+            {selectedAnnotation && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap", padding: "8px 10px", background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#6b21a8" }}>
+                  {SHAPE_TOOLS.find(s => s.kind === selectedAnnotation.kind)?.label || "Shape"} selected
+                </span>
+                {ANN_COLORS.map(c => (
+                  <button key={c} onClick={() => patchAnnotation(selectedAnnotation.id, { color: c })}
+                    title="Colour"
+                    style={{ width: 20, height: 20, borderRadius: "50%", background: c, cursor: "pointer",
+                      border: selectedAnnotation.color === c ? "3px solid #1a1a2e" : "1px solid #d1d5db" }} />
+                ))}
+                <button style={{ ...ghostBtn, fontSize: 12, padding: "5px 10px" }}
+                  onClick={() => {
+                    const next = prompt(selectedAnnotation.kind === "text" ? "Text:" : "Label (optional):", selectedAnnotation.label || "");
+                    if (next !== null) patchAnnotation(selectedAnnotation.id, { label: next.trim() || null });
+                  }}>Edit text</button>
+                <button style={{ ...dangerBtn, fontSize: 12, padding: "5px 10px" }}
+                  onClick={() => deleteAnnotation(selectedAnnotation.id)}>Delete</button>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>
+                  {selectedAnnotation.kind === "text" ? "Drag to move" : "Drag to move · drag the corner to resize"}
+                </span>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, color: "#9ca3af" }}>Floor plan:</span>
               <button style={{ ...ghostBtn, fontSize: 12, padding: "5px 10px" }} onClick={() => fpRef.current.click()} disabled={uploadingFP}>
@@ -7756,8 +7923,8 @@ function TechSetups({ isMobile: m, events, showToast }) {
             style={{
               position: "relative", width: "100%", aspectRatio: m ? "4/3" : "16/9",
               overflow: "hidden", borderRadius: 12, userSelect: "none",
-              border: `2px ${placingType ? "dashed #2563eb" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`,
-              cursor: placingType ? "crosshair" : connectingFrom ? "cell" : zoom > 1 ? "grab" : "default",
+              border: `2px ${placingType ? "dashed #2563eb" : placingShape ? "dashed #7c3aed" : connectingFrom ? "dashed #d97706" : "solid #e5e7eb"}`,
+              cursor: placingType || placingShape ? "crosshair" : connectingFrom ? "cell" : zoom > 1 ? "grab" : "default",
               background: "#f1f5f9",
             }}
             onMouseDown={handleViewportMouseDown}
@@ -7778,6 +7945,66 @@ function TechSetups({ isMobile: m, events, showToast }) {
               <img src={floorPlanUrl} alt="" draggable={false}
                 style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
             )}
+
+            {/* Annotations. Drawn under the connections and devices so a zone
+                box never covers the equipment it is drawn around. */}
+            {setupAnnotations.map(ann => {
+              const sel = selectedAnn === ann.id;
+              const isText = ann.kind === "text";
+              const base = {
+                position: "absolute",
+                left: `${ann.x_pct}%`, top: `${ann.y_pct}%`,
+                width: `${ann.w_pct}%`, height: `${ann.h_pct}%`,
+                transform: "translate(-50%,-50%)",
+                cursor: placingType || placingShape ? "inherit" : "move",
+                zIndex: sel ? 4 : 1,
+              };
+              return (
+                <div key={ann.id}
+                  onMouseDown={e => startAnnDrag(e, ann, "move")}
+                  onClick={e => { e.stopPropagation(); if (!didDragRef.current) setSelectedAnn(ann.id); }}
+                  style={base}>
+                  {isText ? (
+                    <div style={{
+                      width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+                      color: ann.color, fontWeight: 700, textAlign: "center", lineHeight: 1.2,
+                      fontSize: Math.round(13 * iconScale), padding: "2px 4px",
+                      textShadow: "0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff",
+                      outline: sel ? `2px dashed ${ann.color}` : "none", outlineOffset: 2,
+                      overflow: "hidden",
+                    }}>{ann.label}</div>
+                  ) : (
+                    <div style={{
+                      width: "100%", height: "100%",
+                      border: `2.5px solid ${ann.color}`,
+                      borderRadius: ann.kind === "ellipse" ? "50%" : 8,
+                      background: `${ann.color}14`,
+                      boxShadow: sel ? `0 0 0 2px ${ann.color}66` : "none",
+                    }}>
+                      {ann.label && (
+                        <div style={{
+                          position: "absolute", top: 2, left: 0, right: 0, textAlign: "center",
+                          fontSize: Math.round(11 * iconScale), fontWeight: 700, color: ann.color,
+                          textShadow: "0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff",
+                          pointerEvents: "none", overflow: "hidden", whiteSpace: "nowrap",
+                        }}>{ann.label}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {sel && !isText && (
+                    <div
+                      onMouseDown={e => startAnnDrag(e, ann, "resize")}
+                      title="Drag to resize"
+                      style={{
+                        position: "absolute", right: -7, bottom: -7, width: 14, height: 14,
+                        borderRadius: 3, background: "#fff", border: `2px solid ${ann.color}`,
+                        cursor: "nwse-resize", zIndex: 6,
+                      }} />
+                  )}
+                </div>
+              );
+            })}
 
             {/* Grid (no floor plan) */}
             {!floorPlanUrl && (
@@ -8012,6 +8239,25 @@ function TechSetups({ isMobile: m, events, showToast }) {
       )}
 
       {/* Add Device modal */}
+      {showAnnModal && (
+        <Modal title="Add text" onClose={() => { setShowAnnModal(false); setPendingAnn(null); setPlacingShape(null); }}
+          onSave={saveAnnotationText} saveLabel="Add" saving={saving} isMobile={m}>
+          <label style={labelStyle}>Text</label>
+          <input value={annForm.label} autoFocus
+            onChange={e => setAnnForm(f => ({ ...f, label: e.target.value }))}
+            onKeyDown={e => e.key === "Enter" && annForm.label.trim() && saveAnnotationText()}
+            style={iStyle} placeholder="e.g. Warm-up area" />
+          <label style={labelStyle}>Colour</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {ANN_COLORS.map(c => (
+              <button key={c} type="button" onClick={() => setAnnForm(f => ({ ...f, color: c }))}
+                style={{ width: 26, height: 26, borderRadius: "50%", background: c, cursor: "pointer",
+                  border: annForm.color === c ? "3px solid #1a1a2e" : "1px solid #d1d5db" }} />
+            ))}
+          </div>
+        </Modal>
+      )}
+
       {showDeviceModal && (
         <Modal title={`Add ${DEVICE_TYPES[pendingPos?.type]?.label || "Device"}`} onClose={() => { setShowDeviceModal(false); setPlacingType(null); }} onSave={saveDevice} saveLabel="Add to Diagram" saving={saving} isMobile={m}>
           <label style={labelStyle}>Label</label>

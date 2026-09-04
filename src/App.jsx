@@ -7856,8 +7856,10 @@ function TechSetups({ isMobile: m, events, showToast }) {
               );
             })}
 
-            {/* Empty state */}
-            {setupDevices.length === 0 && !placingType && (
+            {/* Empty state. Suppressed once a floor plan is loaded — it sits in
+                the middle of the canvas and covers the diagram you just uploaded,
+                and the same instruction is already in the toolbar above. */}
+            {setupDevices.length === 0 && !placingType && !floorPlanUrl && (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
                 <div style={{ textAlign: "center", color: "#94a3b8" }}>
                   <div style={{ fontSize: 40, marginBottom: 10 }}>📶</div>

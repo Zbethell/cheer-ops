@@ -13,11 +13,6 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SEASON = "2026-27";
 const PRIOR_SEASON = "2025-2026";
 
-// Provincial bodies whose certification Canadian Cheer accepts in place of a
-// coaching credential and a vulnerable sector check — they vet their own
-// coaches. "Other" keeps the list from silently excluding a body we haven't
-// listed; the name typed there is recorded as-is.
-const PROVINCIAL_BODIES = ["OCF — Ontario Cheerleading Federation", "FCQ — Fédération de Cheerleading du Québec", "Other"];
 
 const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf";
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -122,8 +117,6 @@ export default function Credentials() {
   });
   const [hadCard, setHadCard] = useState(null);    // coaches only
   const [hasProvincial, setHasProvincial] = useState(null);  // coaches only
-  const [provincialBody, setProvincialBody] = useState(PROVINCIAL_BODIES[0]);
-  const [otherBody, setOtherBody] = useState("");
   const [programQuery, setProgramQuery] = useState("");
   const [files, setFiles] = useState({});          // field -> File
   const [progress, setProgress] = useState({});    // field -> 0..100
@@ -148,7 +141,6 @@ export default function Credentials() {
   // A provincial body has already vetted the coach, so their certificate stands
   // in for the coaching credential and the vulnerable sector check both.
   const viaProvincial = isCoach && hasProvincial === true;
-  const bodyName = provincialBody === "Other" ? otherBody.trim() : provincialBody;
 
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const pick = (field) => (file) => {
@@ -188,7 +180,6 @@ export default function Credentials() {
       if (!form.birthdate) return "Please enter your date of birth.";
       if (age == null || age < 5 || age > 100) return "Please check your date of birth.";
       if (hasProvincial === null) return "Please tell us whether you hold a provincial body certification.";
-      if (viaProvincial && !bodyName) return "Please tell us which provincial body certified you.";
       if (hadCard === null) return `Please tell us whether you had a ${PRIOR_SEASON} credential card.`;
     }
     for (const f of requiredFiles()) if (!files[f]) return "Please attach every required document.";
@@ -210,7 +201,7 @@ export default function Credentials() {
           action: "start",
           role, program: form.program,
           firstName: form.firstName, lastName: form.lastName, email: form.email,
-          ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard, ...(viaProvincial ? { provincialBody: bodyName } : {}) } : {}),
+          ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard, provincialCertified: viaProvincial } : {}),
           files: declared,
         }),
       });
@@ -257,7 +248,7 @@ export default function Credentials() {
           <p style={{ color: "#9ca3af", fontSize: 13, marginBottom: 22 }}>A confirmation has been sent to {form.email.trim()}.</p>
           <button style={ghost} onClick={() => {
             setStep("role"); setRole(null); setHadCard(null); setFiles({}); setProgress({});
-            setHasProvincial(null); setProvincialBody(PROVINCIAL_BODIES[0]); setOtherBody("");
+            setHasProvincial(null);
             setForm({ program: "", firstName: "", lastName: "", email: "", birthdate: "" });
             setProgramQuery("");
           }}>Submit for another person</button>
@@ -370,20 +361,6 @@ export default function Credentials() {
                   selected={hasProvincial === true} onClick={() => setHasProvincial(true)} />
                 <Choice title="No" sub="You'll upload a coaching credential and a vulnerable sector check"
                   selected={hasProvincial === false} onClick={() => setHasProvincial(false)} />
-
-                {hasProvincial === true && (
-                  <div style={{ marginTop: 6 }}>
-                    <div style={label}>Which body? <span style={{ color: "#ef4444" }}>*</span></div>
-                    <select style={input} value={provincialBody} onChange={(e) => setProvincialBody(e.target.value)}>
-                      {PROVINCIAL_BODIES.map((b) => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                    {provincialBody === "Other" && (
-                      <input style={{ ...input, marginTop: 10 }} value={otherBody}
-                        onChange={(e) => setOtherBody(e.target.value)}
-                        placeholder="Name of the provincial body" />
-                    )}
-                  </div>
-                )}
               </div>
             )}
 
@@ -408,7 +385,7 @@ export default function Credentials() {
 
                 {viaProvincial ? (
                   <>
-                    <FileField id="provincialCert" title={`${bodyName || "Provincial"} certification`}
+                    <FileField id="provincialCert" title="Provincial certification"
                       hint="Proof of your provincial certification — a certificate, card or screenshot showing your name."
                       file={files.provincialCert} onPick={pick("provincialCert")} progress={progress.provincialCert} />
                     {isMinor && (

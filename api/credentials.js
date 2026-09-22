@@ -103,7 +103,7 @@ async function list(req, res) {
           hadCard: !!f.HadCard2526,
           needsSelfie: !!f.NeedsSelfie,
           credentialLevel: f.CredentialLevel || "",
-          provincialBody: f.ProvincialBody || "",
+          provincialCertified: !!f.ProvincialCertified,
           provincialCertUrl: f.ProvincialCertUrl || "",
           status: f.Status || "Incomplete",
           folderUrl: f.FolderUrl || "",
@@ -147,7 +147,7 @@ async function verify(req, res) {
 async function start(req, res) {
   const {
     role, program, firstName, lastName, email,
-    birthdate, hadCard2526, credentialLevel, provincialBody, files,
+    birthdate, hadCard2526, credentialLevel, provincialCertified, files,
   } = req.body || {};
 
   if (!["coach", "gym_admin"].includes(role)) return res.status(400).json({ error: "Invalid role" });
@@ -172,9 +172,10 @@ async function start(req, res) {
 
   // A provincial body (OCF, FCQ and the like) has already vetted the coach, so
   // their certificate stands in for both the coaching credential and the
-  // vulnerable sector check. Proof of age is unaffected — it establishes age,
-  // not competence, and a minor still has to evidence it.
-  const viaProvincial = isCoach && !!String(provincialBody || "").trim();
+  // vulnerable sector check. Which body issued it isn't recorded — the
+  // certificate itself is the evidence. Proof of age is unaffected: it
+  // establishes age, not competence, and a minor still has to evidence it.
+  const viaProvincial = isCoach && provincialCertified === true;
 
   const required = new Set();
   if (isCoach) {
@@ -229,7 +230,7 @@ async function start(req, res) {
       FolderUrl: folderPath,
       ...(isCoach && birthdate ? { Birthdate: `${birthdate}T00:00:00Z` } : {}),
       ...(credentialLevel ? { CredentialLevel: String(credentialLevel).slice(0, 120) } : {}),
-      ...(viaProvincial ? { ProvincialBody: String(provincialBody).trim().slice(0, 120) } : {}),
+      ...(isCoach ? { ProvincialCertified: viaProvincial } : {}),
     };
 
     const created = await fetch(`${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items`, {

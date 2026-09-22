@@ -5788,7 +5788,7 @@ function CredentialsPage({ isMobile: m, showToast }) {
       "Under 18": r.isMinor ? "Yes" : "No",
       "Had 25-26 card": r.hadCard ? "Yes" : "No",
       "Needs card": r.needsSelfie ? "Yes" : "No",
-      "Provincial body": r.provincialBody || "",
+      "Provincially certified": r.provincialCertified ? "Yes" : "No",
       Submitted: r.submittedAt ? new Date(r.submittedAt).toLocaleString("en-CA") : "",
     }));
     const wb = XLSX.utils.book_new();
@@ -5905,7 +5905,7 @@ function CredentialsPage({ isMobile: m, showToast }) {
                       <span className="pill" style={{ background: st.bg, color: st.fg, fontSize: 11 }}>{r.status}</span>
                       <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>{r.role}</span>
                       {r.isMinor && <span className="pill" style={{ background: "#fee2e2", color: "#b91c1c", fontSize: 11 }}>Under 18</span>}
-                      {r.provincialBody && <span className="pill" style={{ background: "#ecfdf5", color: "#065f46", fontSize: 11 }}>{r.provincialBody.split(" — ")[0]}</span>}
+                      {r.provincialCertified && <span className="pill" style={{ background: "#ecfdf5", color: "#065f46", fontSize: 11 }}>Provincially certified</span>}
                       {r.needsSelfie
                         ? <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11 }}>Needs card</span>
                         : <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Has 25-26 card</span>}
@@ -5922,10 +5922,10 @@ function CredentialsPage({ isMobile: m, showToast }) {
                 {expanded && (
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f3f4f6" }}>
                     <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", alignItems: "center" }}>
-                      {r.provincialBody
-                        ? docLink(r.provincialCertUrl, `${r.provincialBody.split(" — ")[0]} certification`)
+                      {r.provincialCertified
+                        ? docLink(r.provincialCertUrl, "Provincial certification")
                         : docLink(r.credentialUrl, "Coaching credential")}
-                      {!r.provincialBody && docLink(r.vscUrl, "Vulnerable sector check")}
+                      {!r.provincialCertified && docLink(r.vscUrl, "Vulnerable sector check")}
                       {docLink(r.proofOfAgeUrl, "Proof of age")}
                       {docLink(r.selfieUrl, "Photo")}
                     </div>

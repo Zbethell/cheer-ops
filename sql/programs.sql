@@ -21,10 +21,11 @@ create table if not exists public.programs (
   updated_at  timestamptz default now()
 );
 
--- Partial: rows added by hand may have no Themis id, and several nulls must not
--- collide with each other.
+-- Rows added by hand may have no Themis id. A plain unique index already allows
+-- any number of NULLs, so no partial predicate is needed — and a partial index
+-- can't be used as an ON CONFLICT target, which is worth avoiding.
 create unique index if not exists programs_themis_id_unique
-  on public.programs (themis_id) where themis_id is not null;
+  on public.programs (themis_id);
 
 create index if not exists programs_name on public.programs (name);
 

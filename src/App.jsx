@@ -277,13 +277,7 @@ const api = {
   addProgram: (p) => sb("programs", { method: "POST", body: JSON.stringify(p) }),
   updateProgram: (id, patch) => sb(`programs?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteProgram: (id) => sb(`programs?id=eq.${id}`, { method: "DELETE" }),
-  // Upsert on the Themis id so a re-import updates a renamed gym instead of
-  // creating a second row for it.
-  upsertPrograms: (rows) => sb("programs?on_conflict=themis_id", {
-    method: "POST",
-    prefer: "return=representation,resolution=merge-duplicates",
-    body: JSON.stringify(rows),
-  }),
+  addPrograms: (rows) => sb("programs", { method: "POST", body: JSON.stringify(rows) }),
 
   getKioskSettings: () => sb("kiosk_settings"),
   setKioskSetting: (path, require_code) => sb("kiosk_settings", {
@@ -6021,21 +6015,49 @@ function ProgramsManager({ isMobile: m, showToast }) {
       });
       if (parsed.length === 0) throw new Error("no usable rows");
 
-      const before = new Set(rows.map(r => r.themis_id).filter(Boolean));
-      const withId = parsed.filter(p => p.themis_id);
-      const withoutId = parsed.filter(p => !p.themis_id);
+      // Matched here rather than with a database upsert: the unique index on
+      // themis_id is one Postgres won't accept as an ON CONFLICT target, and
+      // splitting the work also means an unchanged row costs no write at all —
+      // a re-import of 263 gyms with two renames sends two requests, not 263.
+      const byThemisId = new Map(rows.filter(r => r.themis_id).map(r => [r.themis_id, r]));
+      const byName = new Map(rows.map(r => [r.name.toLowerCase(), r]));
 
-      if (withId.length) await api.upsertPrograms(withId);
-      // No Themis id means nothing to upsert against; only add genuinely new names.
-      const existingNames = new Set(rows.map(r => r.name.toLowerCase()));
-      const newOnes = withoutId.filter(p => !existingNames.has(p.name.toLowerCase()));
-      if (newOnes.length) await api.addProgram(newOnes);
+      const toInsert = [];
+      const toUpdate = [];
+      for (const p of parsed) {
+        const match = (p.themis_id && byThemisId.get(p.themis_id)) || byName.get(p.name.toLowerCase());
+        if (!match) { toInsert.push(p); continue; }
+        const changed = match.name !== p.name || (match.city || null) !== p.city
+          || (match.province || null) !== p.province || (match.country || null) !== p.country
+          || (!match.themis_id && !!p.themis_id);
+        if (changed) toUpdate.push([match.id, p]);
+      }
 
-      const added = withId.filter(p => !before.has(p.themis_id)).length + newOnes.length;
-      setResult({ total: parsed.length, added, updated: parsed.length - added - (withoutId.length - newOnes.length), skipped: withoutId.length - newOnes.length });
+      // Chunked so one oversized request can't fail the whole import.
+      for (let i = 0; i < toInsert.length; i += 100) {
+        await api.addPrograms(toInsert.slice(i, i + 100));
+      }
+      for (const [id, p] of toUpdate) {
+        await api.updateProgram(id, {
+          name: p.name, city: p.city, province: p.province,
+          country: p.country, themis_id: p.themis_id, updated_at: p.updated_at,
+        });
+      }
+
+      setResult({
+        total: parsed.length,
+        added: toInsert.length,
+        updated: toUpdate.length,
+        unchanged: parsed.length - toInsert.length - toUpdate.length,
+      });
       load();
     } catch (e) {
-      showToast(`Import failed: ${e.message}`);
+      // The raw PostgREST body is far more useful than "import failed" when
+      // something is wrong with the table or the file.
+      let msg = String(e.message || "");
+      try { const j = JSON.parse(msg); msg = j.message || j.hint || msg; } catch { /* not JSON */ }
+      setResult(null);
+      showToast(`Import failed: ${msg.slice(0, 140)}`);
     }
     setImporting(false);
   }
@@ -6084,7 +6106,7 @@ function ProgramsManager({ isMobile: m, showToast }) {
       {result && (
         <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#065f46", marginBottom: 12 }}>
           Imported {result.total} rows — {result.added} new, {result.updated} updated
-          {result.skipped > 0 && `, ${result.skipped} already present without a Themis id`}.
+          {result.unchanged > 0 && `, ${result.unchanged} unchanged`}.
         </div>
       )}
 

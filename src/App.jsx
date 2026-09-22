@@ -3008,7 +3008,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
+  const [userPerms, setUserPerms] = useState({ can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true, can_view_credentials: true });
 
   useEffect(() => {
     const stored = localStorage.getItem("sb_session");
@@ -3131,6 +3131,7 @@ export default function App() {
   const canViewReports   = isAdmin || ok(userPerms.can_view_reports);
   const canViewAwards    = isAdmin || ok(userPerms.can_view_awards);
   const canViewEventStaff = isAdmin || ok(userPerms.can_view_event_staff);
+  const canViewCredentials = isAdmin || ok(userPerms.can_view_credentials);
   const canViewTech      = isAdmin || !!userPerms.can_view_tech;
   const canViewContainers = isAdmin || ok(userPerms.can_view_containers);
   const canViewEmployeeHours = isAdmin || !!userPerms.can_view_employee_hours;
@@ -3181,6 +3182,7 @@ export default function App() {
           {canViewReports && <button className={`nav-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}>Reports</button>}
           {canViewAwards && <button className={`nav-btn ${view === "awards" ? "active" : ""}`} onClick={() => setView("awards")}>Awards</button>}
           {canViewEventStaff && <button className={`nav-btn ${view === "event-staff" ? "active" : ""}`} onClick={() => setView("event-staff")}>Event Staff</button>}
+          {canViewCredentials && <button className={`nav-btn ${view === "credentials" ? "active" : ""}`} onClick={() => setView("credentials")}>Credentials</button>}
           {canViewEmployeeHours && <button className={`nav-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}>Employee Hours</button>}
           {canViewTech && <button className={`nav-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}>Tech Setups</button>}
           {canViewExpenses && <button className={`nav-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}>Expenses</button>}
@@ -3202,6 +3204,7 @@ export default function App() {
         {view === "reports" && canViewReports && <Reports isMobile={m} reports={reports} setReports={setReports} reportItems={reportItems} events={events} areas={areas} setAreas={setAreas} areaItems={areaItems} setAreaItems={setAreaItems} items={items} setItems={setItems} showToast={showToast} />}
         {view === "awards" && canViewAwards && <Awards isMobile={m} events={events} showToast={showToast} />}
         {view === "event-staff" && canViewEventStaff && <EventStaffPage isMobile={m} events={events} showToast={showToast} />}
+        {view === "credentials" && canViewCredentials && <CredentialsPage isMobile={m} showToast={showToast} />}
         {view === "tech" && canViewTech && <TechSetups isMobile={m} events={events} showToast={showToast} />}
         {view === "employee-hours" && canViewEmployeeHours && <EmployeeHours isMobile={m} showToast={showToast} />}
         {view === "expenses" && canViewExpenses && <ExpensesAdmin isMobile={m} showToast={showToast} />}
@@ -3217,6 +3220,7 @@ export default function App() {
           {canViewReports && <button className={`tab-btn ${view === "reports" ? "active" : ""}`} onClick={() => setView("reports")}><span className="tab-icon">📋</span>Reports</button>}
           {canViewAwards && <button className={`tab-btn ${view === "awards" ? "active" : ""}`} onClick={() => setView("awards")}><span className="tab-icon">🏅</span>Awards</button>}
           {canViewEventStaff && <button className={`tab-btn ${view === "event-staff" ? "active" : ""}`} onClick={() => setView("event-staff")}><span className="tab-icon">🕘</span>Staff</button>}
+          {canViewCredentials && <button className={`tab-btn ${view === "credentials" ? "active" : ""}`} onClick={() => setView("credentials")}><span className="tab-icon">🪪</span>Creds</button>}
           {canViewEmployeeHours && <button className={`tab-btn ${view === "employee-hours" ? "active" : ""}`} onClick={() => setView("employee-hours")}><span className="tab-icon">⏱️</span>Hours</button>}
           {canViewTech && <button className={`tab-btn ${view === "tech" ? "active" : ""}`} onClick={() => setView("tech")}><span className="tab-icon">📶</span>Tech</button>}
           {canViewExpenses && <button className={`tab-btn ${view === "expenses" ? "active" : ""}`} onClick={() => setView("expenses")}><span className="tab-icon">💳</span>Expenses</button>}
@@ -5738,6 +5742,224 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   );
 }
 
+// ─── Coach / Admin Credentials ────────────────────────────────────────────────
+// Submitted credential forms, read from the SharePoint list. The documents
+// themselves stay in SharePoint — these are links, never copies.
+function CredentialsPage({ isMobile: m, showToast }) {
+  const [section, setSection] = useState("submissions");
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("All");
+  const [role, setRole] = useState("All");
+  const [open, setOpen] = useState(null);      // expanded submission id
+  const [busy, setBusy] = useState(null);
+
+  const post = (body) => fetch("/api/credentials", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+    body: JSON.stringify(body),
+  });
+
+  const load = useCallback(() => {
+    setLoading(true); setErr("");
+    post({ action: "list" })
+      .then(async (r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
+      .then((d) => setRows(Array.isArray(d) ? d : []))
+      .catch(() => setErr("Could not load submissions."))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function setStatusFor(row, next) {
+    setBusy(row.id);
+    const prev = row.status;
+    setRows((p) => p.map((x) => (x.id === row.id ? { ...x, status: next } : x)));
+    try {
+      const r = await post({ action: "verify", itemId: row.id, status: next });
+      if (!r.ok) throw new Error();
+      showToast(next === "Verified" ? `${row.firstName} ${row.lastName} marked verified` : "Marked unverified");
+    } catch {
+      setRows((p) => p.map((x) => (x.id === row.id ? { ...x, status: prev } : x)));
+      showToast("Could not update");
+    }
+    setBusy(null);
+  }
+
+  function exportXlsx() {
+    const sheet = filtered.map((r) => ({
+      Status: r.status, Role: r.role, Program: r.program,
+      "Last name": r.lastName, "First name": r.firstName, Email: r.email,
+      "Under 18": r.isMinor ? "Yes" : "No",
+      "Had 25-26 card": r.hadCard ? "Yes" : "No",
+      "Needs card": r.needsSelfie ? "Yes" : "No",
+      "Credential level": r.credentialLevel,
+      Submitted: r.submittedAt ? new Date(r.submittedAt).toLocaleString("en-CA") : "",
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), "Credentials");
+    XLSX.writeFile(wb, "coach-credentials-26-27.xlsx");
+  }
+
+  const needle = q.trim().toLowerCase();
+  const filtered = rows
+    .filter((r) => status === "All" || r.status === status)
+    .filter((r) => role === "All" || r.role === role)
+    .filter((r) => !needle
+      || `${r.firstName} ${r.lastName}`.toLowerCase().includes(needle)
+      || (r.program || "").toLowerCase().includes(needle)
+      || (r.email || "").toLowerCase().includes(needle));
+
+  const counts = {
+    all: rows.length,
+    Incomplete: rows.filter((r) => r.status === "Incomplete").length,
+    Submitted: rows.filter((r) => r.status === "Submitted").length,
+    Verified: rows.filter((r) => r.status === "Verified").length,
+    minors: rows.filter((r) => r.isMinor).length,
+    needCard: rows.filter((r) => r.needsSelfie && r.status !== "Verified").length,
+  };
+
+  const STATUS_STYLE = {
+    Incomplete: { bg: "#fef2f2", fg: "#b91c1c" },
+    Submitted:  { bg: "#fef3c7", fg: "#92400e" },
+    Verified:   { bg: "#d1fae5", fg: "#065f46" },
+  };
+
+  const chip = (label, active, onClick, count) => (
+    <button key={label} onClick={onClick} style={{
+      padding: "7px 14px", borderRadius: 8, border: "1px solid", fontFamily: "inherit",
+      fontSize: 13, fontWeight: 500, cursor: "pointer",
+      background: active ? "#1a1a2e" : "#fff", color: active ? "#fff" : "#374151",
+      borderColor: active ? "#1a1a2e" : "#e5e7eb",
+    }}>
+      {label}{count != null && <span style={{ marginLeft: 6, opacity: 0.7 }}>{count}</span>}
+    </button>
+  );
+
+  const docLink = (url, label) => url
+    ? <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563eb", textDecoration: "none", fontWeight: 500, marginRight: 14 }}>{label} →</a>
+    : <span style={{ fontSize: 12, color: "#d1d5db", marginRight: 14 }}>{label} —</span>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ fontSize: m ? 20 : 22, fontWeight: 600, marginBottom: 4 }}>Coach/Admin Credentials</h1>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>Submitted credential forms for the 2026-27 season</p>
+        </div>
+        <button
+          onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/credentials`); showToast("Form link copied"); }}
+          style={{ ...ghostBtn, fontSize: 13 }}>🔗 Copy form link</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {chip("Submissions", section === "submissions", () => setSection("submissions"))}
+        {chip("Programs", section === "programs", () => setSection("programs"))}
+      </div>
+
+      {section === "programs" ? <ProgramsManager isMobile={m} showToast={showToast} /> : (
+        <>
+          {counts.needCard > 0 && (
+            <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px", background: "#fffbeb", borderColor: "#fde68a" }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#92400e" }}>
+                {counts.needCard} {counts.needCard === 1 ? "person needs" : "people need"} a 2026-27 card printed
+              </div>
+              <div style={{ fontSize: 13, color: "#b45309", marginTop: 2 }}>
+                They had no 2025-2026 card, so they submitted a photo and collect their card at their first event.
+                {counts.minors > 0 && ` ${counts.minors} submission${counts.minors === 1 ? " is" : "s are"} from under-18s.`}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {["All", "Incomplete", "Submitted", "Verified"].map((s) =>
+              chip(s, status === s, () => setStatus(s), s === "All" ? counts.all : counts[s]))}
+            <span style={{ width: 1, height: 22, background: "#e5e7eb" }} />
+            {["All", "Coach", "Gym Admin"].map((r) => chip(r, role === r, () => setRole(r)))}
+            <div style={{ flex: 1 }} />
+            <button onClick={load} style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px" }}>↻ Refresh</button>
+            <button onClick={exportXlsx} disabled={filtered.length === 0}
+              style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px", opacity: filtered.length === 0 ? 0.5 : 1 }}>↓ Export</button>
+          </div>
+
+          <input style={inputStyle} value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by name, program or email…" />
+
+          {err && (
+            <div className="card" style={{ padding: 16, background: "#fef2f2", borderColor: "#fecaca", color: "#b91c1c", fontSize: 13 }}>
+              {err} If this is the first time, check that the SharePoint list exists.
+            </div>
+          )}
+
+          {loading ? (
+            <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>Loading submissions…</div>
+          ) : filtered.length === 0 ? (
+            <div className="card" style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>
+              {rows.length === 0 ? "No submissions yet. Share the form link to start collecting." : "No submissions match those filters."}
+            </div>
+          ) : filtered.map((r) => {
+            const st = STATUS_STYLE[r.status] || STATUS_STYLE.Submitted;
+            const expanded = open === r.id;
+            return (
+              <div key={r.id} className="card" style={{ padding: m ? "12px 14px" : "14px 18px" }}>
+                <div onClick={() => setOpen(expanded ? null : r.id)}
+                  style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+                      <span style={{ fontWeight: 600, fontSize: m ? 14 : 15 }}>{r.lastName}, {r.firstName}</span>
+                      <span className="pill" style={{ background: st.bg, color: st.fg, fontSize: 11 }}>{r.status}</span>
+                      <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>{r.role}</span>
+                      {r.isMinor && <span className="pill" style={{ background: "#fee2e2", color: "#b91c1c", fontSize: 11 }}>Under 18</span>}
+                      {r.needsSelfie
+                        ? <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11 }}>Needs card</span>
+                        : <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Has 25-26 card</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      <span>{r.program}</span>
+                      <span>{r.email}</span>
+                      {r.submittedAt && <span>{new Date(r.submittedAt).toLocaleDateString("en-CA")}</span>}
+                    </div>
+                  </div>
+                  <span style={{ color: "#d1d5db", fontSize: 13, flexShrink: 0 }}>{expanded ? "▲" : "▼"}</span>
+                </div>
+
+                {expanded && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f3f4f6" }}>
+                    <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+                      {docLink(r.credentialUrl, "Coaching credential")}
+                      {docLink(r.vscUrl, "Vulnerable sector check")}
+                      {docLink(r.proofOfAgeUrl, "Proof of age")}
+                      {docLink(r.selfieUrl, "Photo")}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
+                      {r.credentialLevel && <>Level: <strong style={{ color: "#374151" }}>{r.credentialLevel}</strong> · </>}
+                      {r.birthdate && <>DOB: {new Date(r.birthdate).toLocaleDateString("en-CA")} · </>}
+                      {r.submissionId && <span style={{ color: "#c3c7ce" }}>{r.submissionId.slice(0, 8)}</span>}
+                    </div>
+                    {r.status !== "Incomplete" && (
+                      <button onClick={() => setStatusFor(r, r.status === "Verified" ? "Submitted" : "Verified")}
+                        disabled={busy === r.id}
+                        style={{ ...(r.status === "Verified" ? ghostBtn : primaryBtn), padding: "7px 14px", fontSize: 13, width: "auto" }}>
+                        {busy === r.id ? "Saving…" : r.status === "Verified" ? "Mark unverified" : "Mark verified at event"}
+                      </button>
+                    )}
+                    {r.status === "Incomplete" && (
+                      <div style={{ fontSize: 12, color: "#b91c1c" }}>
+                        This submission never finished uploading — the documents may be missing.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Programs (gyms) ──────────────────────────────────────────────────────────
 // Reference list behind the public credential form's gym picker. Seeded from
 // Themis' Connected Programs export, which lists every program connected to us
@@ -5950,7 +6172,6 @@ function EventStaffPage({ isMobile: m, events, showToast }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {segBtn("log", "Check-in Log")}
         {segBtn("roster", "Staff Roster")}
-        {segBtn("programs", "Programs")}
       </div>
 
       {section === "log" ? (
@@ -5973,8 +6194,6 @@ function EventStaffPage({ isMobile: m, events, showToast }) {
             ? <EventCheckins event={event} isMobile={m} showToast={showToast} hideWhenEmpty={false} />
             : <div className="card" style={{ padding: 30, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet.</div>}
         </>
-      ) : section === "programs" ? (
-        <ProgramsManager isMobile={m} showToast={showToast} />
       ) : (
         <div className="card" style={{ padding: m ? 16 : "20px 24px" }}>
           <EventStaffManager showToast={showToast} isMobile={m} />
@@ -9533,7 +9752,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
       .then(rows => setKioskSettings(Object.fromEntries((rows || []).map(r => [r.path, r.require_code !== false]))))
       .catch(() => { /* table not created yet — the built-in defaults are shown */ });
   }, []);
-  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
+  const [form, setForm] = useState({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true, can_view_credentials: true });
   const [saving, setSaving] = useState(false);
   const iStyle = m ? inputStyleMobile : inputStyle;
 
@@ -9544,13 +9763,13 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
   }, []);
 
   const openAdd = () => {
-    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true });
+    setForm({ email: "", display_name: "", can_view_dashboard: true, can_view_inventory: true, can_view_containers: true, can_view_events: true, can_view_reports: true, can_view_tech: false, can_view_employee_hours: false, can_view_pro: false, can_view_expenses: false, can_view_awards: true, can_view_event_staff: true, can_view_credentials: true });
     setEditUser(null);
     setShowModal(true);
   };
 
   const openEdit = (user) => {
-    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses, can_view_awards: user.can_view_awards !== false, can_view_event_staff: user.can_view_event_staff !== false });
+    setForm({ email: user.email, display_name: user.display_name || "", can_view_dashboard: user.can_view_dashboard !== false, can_view_inventory: user.can_view_inventory !== false, can_view_containers: user.can_view_containers !== false, can_view_events: user.can_view_events !== false, can_view_reports: user.can_view_reports !== false, can_view_tech: !!user.can_view_tech, can_view_employee_hours: !!user.can_view_employee_hours, can_view_pro: !!user.can_view_pro, can_view_expenses: !!user.can_view_expenses, can_view_awards: user.can_view_awards !== false, can_view_event_staff: user.can_view_event_staff !== false, can_view_credentials: user.can_view_credentials !== false });
     setEditUser(user);
     setShowModal(true);
   };
@@ -9560,11 +9779,11 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     setSaving(true);
     try {
       if (editUser) {
-        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards, can_view_event_staff: form.can_view_event_staff });
+        await api.updateUserPerm(editUser.id, { display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards, can_view_event_staff: form.can_view_event_staff, can_view_credentials: form.can_view_credentials });
         setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, ...form } : u));
         showToast("User updated");
       } else {
-        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards, can_view_event_staff: form.can_view_event_staff });
+        const [created] = await api.addUserPerm({ email: form.email.trim().toLowerCase(), display_name: form.display_name, can_view_dashboard: form.can_view_dashboard, can_view_inventory: form.can_view_inventory, can_view_containers: form.can_view_containers, can_view_events: form.can_view_events, can_view_reports: form.can_view_reports, can_view_tech: form.can_view_tech, can_view_employee_hours: form.can_view_employee_hours, can_view_pro: form.can_view_pro, can_view_expenses: form.can_view_expenses, can_view_awards: form.can_view_awards, can_view_event_staff: form.can_view_event_staff, can_view_credentials: form.can_view_credentials });
         setUsers(prev => [...prev, created]);
         showToast("User added");
       }
@@ -9623,6 +9842,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
     { key: "can_view_expenses",       label: "Expenses",               sub: "Expense submission review and approval" },
     { key: "can_view_awards",         label: "Awards",                 sub: "Banner, pin & medal calculator" },
     { key: "can_view_event_staff",    label: "Event Staff",            sub: "Venue check-in log and staff roster" },
+    { key: "can_view_credentials",    label: "Coach/Admin Credentials", sub: "Submitted credential forms and the program list" },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>Loading users...</div>;
@@ -9738,6 +9958,7 @@ function UserManagement({ isMobile: m, showToast, currentUserEmail }) {
                 {user.can_view_expenses && <span className="pill" style={{ background: "#fef3c7", color: "#d97706", fontSize: 11 }}>Expenses</span>}
                 {user.can_view_awards !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Awards</span>}
                 {user.can_view_event_staff !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Event Staff</span>}
+                {user.can_view_credentials !== false && <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Credentials</span>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

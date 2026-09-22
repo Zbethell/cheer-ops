@@ -21,7 +21,7 @@
 
 import { randomUUID } from "crypto";
 import {
-  getMicrosoftToken, sendMail, SITE_ID,
+  getMicrosoftToken, sendMail, requireAdmin, SITE_ID,
   EVENT_DOCS_DRIVE_ID, CREDENTIALS_FOLDER, CREDENTIALS_LIST_ID,
 } from "./_lib.js";
 
@@ -63,9 +63,81 @@ function ageOn(dob, on) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const action = req.body?.action;
+  // start/finish are the public form. list/verify are the admin side and are
+  // gated — they read personal data. Everything shares one function because the
+  // Hobby plan allows 12 and the project is at 12.
   if (action === "start") return start(req, res);
   if (action === "finish") return finish(req, res);
-  return res.status(400).json({ error: "action must be 'start' or 'finish'" });
+  if (action === "list" || action === "verify") {
+    if (!await requireAdmin(req, res)) return;
+    return action === "list" ? list(req, res) : verify(req, res);
+  }
+  return res.status(400).json({ error: "Unknown action" });
+}
+
+async function list(req, res) {
+  try {
+    const msToken = await getMicrosoftToken();
+    const out = [];
+    let url = `${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items?$expand=fields&$top=200`;
+    // Follow paging rather than trusting one page — a season's worth of coaches
+    // will exceed any single response.
+    while (url) {
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${msToken}` } });
+      if (!r.ok) throw new Error(await r.text());
+      const d = await r.json();
+      for (const i of d.value || []) {
+        const f = i.fields || {};
+        out.push({
+          id: i.id,
+          submissionId: f.SubmissionId || "",
+          role: f.Role || "",
+          program: f.Program || "",
+          firstName: f.FirstName || "",
+          lastName: f.LastName || "",
+          email: f.Email || "",
+          birthdate: f.Birthdate || null,
+          isMinor: !!f.IsMinor,
+          hadCard: !!f.HadCard2526,
+          needsSelfie: !!f.NeedsSelfie,
+          credentialLevel: f.CredentialLevel || "",
+          status: f.Status || "Incomplete",
+          folderUrl: f.FolderUrl || "",
+          vscUrl: f.VSCUrl || "",
+          proofOfAgeUrl: f.ProofOfAgeUrl || "",
+          credentialUrl: f.CredentialUrl || "",
+          selfieUrl: f.SelfieUrl || "",
+          submittedAt: f.SubmittedAt || f.Created || i.createdDateTime || null,
+        });
+      }
+      url = d["@odata.nextLink"] || null;
+    }
+    out.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+    res.json(out);
+  } catch (e) {
+    console.error("credential list error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+async function verify(req, res) {
+  const { itemId, status } = req.body || {};
+  if (!itemId || !["Submitted", "Verified"].includes(status)) {
+    return res.status(400).json({ error: "itemId and a valid status are required" });
+  }
+  try {
+    const msToken = await getMicrosoftToken();
+    const r = await fetch(`${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items/${itemId}/fields`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${msToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ Status: status }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    res.json({ ok: true, status });
+  } catch (e) {
+    console.error("credential verify error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 }
 
 async function start(req, res) {

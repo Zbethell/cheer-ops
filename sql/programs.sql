@@ -35,3 +35,9 @@ alter table public.programs enable row level security;
 drop policy if exists "programs_all" on public.programs;
 create policy "programs_all" on public.programs
   for all using (true) with check (true);
+
+-- ─── Permission ───────────────────────────────────────────────────────────────
+-- Per-user toggle for the Coach/Admin Credentials tab. Read as "visible unless
+-- explicitly false", so existing users keep working before the column exists.
+alter table public.user_permissions
+  add column if not exists can_view_credentials boolean default true;

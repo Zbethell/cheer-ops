@@ -93,11 +93,15 @@ export async function requireAdmin(req, res) {
   return { authenticated: true };
 }
 
-export async function sendMail(msToken, { to, subject, html }) {
-  const from = EXPENSE_FROM_EMAIL;
-  if (!from || !to) return;
+// `from` picks the sending mailbox. Left out, it falls back to the expense
+// mailbox, which is what every expense email wants; the credential form passes
+// its own. Trimmed because an address pasted into a dashboard can arrive with
+// whitespace, and Graph puts it straight into a URL.
+export async function sendMail(msToken, { to, subject, html, from }) {
+  const sender = String(from || EXPENSE_FROM_EMAIL || "").trim();
+  if (!sender || !to) return;
   const r = await fetch(
-    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${msToken}`, "Content-Type": "application/json" },

@@ -27,6 +27,11 @@ import {
 
 const G = "https://graph.microsoft.com/v1.0";
 
+// Credential confirmations come from Zack rather than the accounting mailbox —
+// a coach asked for their passport should recognise the sender. Overridable by
+// env so it can be changed without a deploy.
+const CREDENTIALS_FROM = (process.env.CREDENTIALS_FROM_EMAIL || "zack@canadiancheer.com").trim();
+
 const ALLOWED = {
   "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
   "image/heic": "heic", "image/heif": "heif", "image/webp": "webp",
@@ -292,6 +297,7 @@ async function finish(req, res) {
     // never fail the submission.
     if (saved.Email) {
       sendMail(msToken, {
+        from: CREDENTIALS_FROM,
         to: saved.Email,
         subject: "Coach credential submission received — Canadian Cheer",
         html: confirmationHtml(saved),

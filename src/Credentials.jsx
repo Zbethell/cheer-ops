@@ -2,8 +2,8 @@
 // with coaches and gym owners for the season.
 //
 // Files go browser -> SharePoint directly via Graph upload sessions minted by
-// /api/credential-start. They never pass through Vercel, which caps request
-// bodies at 4.5MB, and never touch Supabase.
+// /api/credentials. They never pass through Vercel, which caps request bodies
+// at 4.5MB, and never touch Supabase.
 
 import { useState, useEffect, useRef } from "react";
 
@@ -191,9 +191,10 @@ export default function Credentials() {
         field, mimeType: files[field].type || "application/octet-stream", size: files[field].size,
       }));
 
-      const startRes = await fetch("/api/credential-start", {
+      const startRes = await fetch("/api/credentials", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "start",
           role, program: form.program,
           firstName: form.firstName, lastName: form.lastName, email: form.email,
           ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard, credentialLevel: form.credentialLevel } : {}),
@@ -208,9 +209,10 @@ export default function Credentials() {
           setProgress((p) => ({ ...p, [u.field]: pct })));
       }
 
-      const finishRes = await fetch("/api/credential-finish", {
+      const finishRes = await fetch("/api/credentials", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "finish",
           itemId: start.itemId, folderPath: start.folderPath,
           files: start.uploads.map((u) => ({ field: u.field, name: u.name })),
         }),

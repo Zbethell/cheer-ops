@@ -13,6 +13,10 @@ export const EXPENSES_LIST_ID = "33fd6b8c-b4df-47bd-af5b-b17ee2bfcf51";
 export const SHAREPOINT_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_LkVJJY25OMISagOm60QPCvf";
 // The "IT" document library, where the check-in backup workbook lives.
 export const IT_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_LlhtsFPVPnTQKkZTxnVtTGN";
+// Event Documents library, and the coach-credential intake inside it.
+export const EVENT_DOCS_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_Lk2URJDx_NlT4GaXXo9oR5N";
+export const CREDENTIALS_FOLDER = "2026/Forms 26-27/Coach Credential Storage Data";
+export const CREDENTIALS_LIST_ID = "bfbf5bb4-450e-4219-b145-4be3f566057f";
 
 export async function getMicrosoftToken() {
   const res = await fetch(

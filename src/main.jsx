@@ -5,6 +5,7 @@ import Report from './Report.jsx'
 import Expenses from './Expenses.jsx'
 import ExpenseStatus from './ExpenseStatus.jsx'
 import ContainerView from './ContainerView.jsx'
+import Credentials from './Credentials.jsx'
 
 const path = window.location.pathname;
 
@@ -12,6 +13,7 @@ function Root() {
   if (path === '/report') return <Report />;
   if (path === '/expenses') return <Expenses />;
   if (path === '/expenses-status') return <ExpenseStatus />;
+  if (path === '/credentials') return <Credentials />;
   if (path.startsWith('/container/')) return <ContainerView />;
   return <App />;
 }

@@ -273,6 +273,18 @@ const api = {
   deleteKitItemsByKit: (kitId) => sb(`kit_items?kit_id=eq.${kitId}`, { method: "DELETE" }),
   // Venue check-in (/checkin). Separate roster from `employees` so payroll and
   // venue attendance stay independent — see sql/event_checkins.sql.
+  getPrograms: () => sb("programs?order=name"),
+  addProgram: (p) => sb("programs", { method: "POST", body: JSON.stringify(p) }),
+  updateProgram: (id, patch) => sb(`programs?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteProgram: (id) => sb(`programs?id=eq.${id}`, { method: "DELETE" }),
+  // Upsert on the Themis id so a re-import updates a renamed gym instead of
+  // creating a second row for it.
+  upsertPrograms: (rows) => sb("programs?on_conflict=themis_id", {
+    method: "POST",
+    prefer: "return=representation,resolution=merge-duplicates",
+    body: JSON.stringify(rows),
+  }),
+
   getKioskSettings: () => sb("kiosk_settings"),
   setKioskSetting: (path, require_code) => sb("kiosk_settings", {
     method: "POST",
@@ -5726,6 +5738,171 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   );
 }
 
+// ─── Programs (gyms) ──────────────────────────────────────────────────────────
+// Reference list behind the public credential form's gym picker. Seeded from
+// Themis' Connected Programs export, which lists every program connected to us
+// as producer — not just this season's competitors.
+function ProgramsManager({ isMobile: m, showToast }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+  const [q, setQ] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const fileRef = useRef();
+
+  const load = () => {
+    setLoading(true);
+    api.getPrograms()
+      .then(r => { setRows(r); setMissing(false); })
+      .catch(() => setMissing(true))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  async function importCsv(file) {
+    setImporting(true); setResult(null);
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (json.length === 0) throw new Error("empty file");
+
+      // Match headers loosely — the export's column names have shifted before.
+      const keys = Object.keys(json[0]);
+      const find = (...names) => keys.find(k => names.some(n => k.toLowerCase().trim() === n))
+        || keys.find(k => names.some(n => k.toLowerCase().includes(n)));
+      const kName = find("program", "program name");
+      const kId   = find("program id", "programid", "pid");
+      const kCity = find("city");
+      const kProv = find("state", "province");
+      const kCtry = find("country");
+      if (!kName) throw new Error("no Program column found");
+
+      const seen = new Set();
+      const parsed = json.map(r => ({
+        themis_id: String(r[kId] || "").trim() || null,
+        name: String(r[kName] || "").trim(),
+        city: kCity ? String(r[kCity] || "").trim() || null : null,
+        province: kProv ? String(r[kProv] || "").trim() || null : null,
+        country: kCtry ? String(r[kCtry] || "").trim() || null : null,
+        active: true,
+        updated_at: new Date().toISOString(),
+      })).filter(p => {
+        if (!p.name) return false;
+        // The upsert targets themis_id, so the same id twice in one payload
+        // would make Postgres reject the whole batch.
+        const key = p.themis_id || `name:${p.name.toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (parsed.length === 0) throw new Error("no usable rows");
+
+      const before = new Set(rows.map(r => r.themis_id).filter(Boolean));
+      const withId = parsed.filter(p => p.themis_id);
+      const withoutId = parsed.filter(p => !p.themis_id);
+
+      if (withId.length) await api.upsertPrograms(withId);
+      // No Themis id means nothing to upsert against; only add genuinely new names.
+      const existingNames = new Set(rows.map(r => r.name.toLowerCase()));
+      const newOnes = withoutId.filter(p => !existingNames.has(p.name.toLowerCase()));
+      if (newOnes.length) await api.addProgram(newOnes);
+
+      const added = withId.filter(p => !before.has(p.themis_id)).length + newOnes.length;
+      setResult({ total: parsed.length, added, updated: parsed.length - added - (withoutId.length - newOnes.length), skipped: withoutId.length - newOnes.length });
+      load();
+    } catch (e) {
+      showToast(`Import failed: ${e.message}`);
+    }
+    setImporting(false);
+  }
+
+  async function toggle(p) {
+    const next = p.active === false;
+    setRows(prev => prev.map(x => x.id === p.id ? { ...x, active: next } : x));
+    try { await api.updateProgram(p.id, { active: next }); } catch { showToast("Could not update"); load(); }
+  }
+
+  const filtered = q.trim().length === 0 ? rows
+    : rows.filter(p => p.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const activeCount = rows.filter(p => p.active !== false).length;
+
+  if (missing) return (
+    <div className="card" style={{ padding: m ? 14 : 18, background: "#fffbeb", borderColor: "#fde68a", fontSize: 13, color: "#92400e" }}>
+      Run <code>sql/programs.sql</code> in the Supabase SQL editor to enable the program list.
+    </div>
+  );
+
+  return (
+    <div className="card" style={{ padding: m ? 16 : "20px 24px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: m ? 15 : 16 }}>Programs</div>
+          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+            {activeCount} active of {rows.length} · shown in the credential form's gym picker
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px" }} onClick={load}>↻ Refresh</button>
+          <button style={{ ...primaryBtn, padding: "7px 14px", fontSize: 13, opacity: importing ? 0.6 : 1 }}
+            disabled={importing} onClick={() => fileRef.current?.click()}>
+            {importing ? "Importing…" : "↑ Import Themis export"}
+          </button>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) importCsv(f); e.target.value = ""; }} />
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
+        Upload Themis' <strong>Connected Programs</strong> export. Matching is on Themis' program id, so a gym that
+        changed its name is updated rather than duplicated, and nothing is ever removed automatically.
+      </div>
+
+      {result && (
+        <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#065f46", marginBottom: 12 }}>
+          Imported {result.total} rows — {result.added} new, {result.updated} updated
+          {result.skipped > 0 && `, ${result.skipped} already present without a Themis id`}.
+        </div>
+      )}
+
+      <input style={{ ...inputStyle, marginBottom: 10 }} value={q} onChange={e => setQ(e.target.value)}
+        placeholder={`Search ${rows.length} programs…`} />
+
+      {loading ? (
+        <div style={{ fontSize: 13, color: "#9ca3af" }}>Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ fontSize: 13, color: "#9ca3af", padding: "18px 0", textAlign: "center" }}>
+          {rows.length === 0 ? "No programs yet — import the Themis export above." : `No program matching “${q}”.`}
+        </div>
+      ) : (
+        <div style={{ maxHeight: 420, overflowY: "auto" }}>
+          {filtered.slice(0, 300).map(p => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid #f8f9fb" }}>
+              <div style={{ flex: 1, minWidth: 0, opacity: p.active === false ? 0.45 : 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                  {[p.city, p.province].filter(Boolean).join(", ")}
+                  {p.themis_id && <span style={{ marginLeft: 8, color: "#c3c7ce" }}>{p.themis_id}</span>}
+                </div>
+              </div>
+              <button onClick={() => toggle(p)}
+                style={{ ...ghostBtn, fontSize: 12, padding: "5px 10px", flexShrink: 0 }}>
+                {p.active === false ? "Show" : "Hide"}
+              </button>
+            </div>
+          ))}
+          {filtered.length > 300 && (
+            <div style={{ fontSize: 12, color: "#9ca3af", padding: "10px 0", textAlign: "center" }}>
+              Showing the first 300 — search to narrow it down.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Event Staff tab ──────────────────────────────────────────────────────────
 // The admin side of the /checkin kiosk: arrival timestamps per event, and the
 // roster of people the kiosk offers.
@@ -5773,6 +5950,7 @@ function EventStaffPage({ isMobile: m, events, showToast }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {segBtn("log", "Check-in Log")}
         {segBtn("roster", "Staff Roster")}
+        {segBtn("programs", "Programs")}
       </div>
 
       {section === "log" ? (
@@ -5795,6 +5973,8 @@ function EventStaffPage({ isMobile: m, events, showToast }) {
             ? <EventCheckins event={event} isMobile={m} showToast={showToast} hideWhenEmpty={false} />
             : <div className="card" style={{ padding: 30, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No events yet.</div>}
         </>
+      ) : section === "programs" ? (
+        <ProgramsManager isMobile={m} showToast={showToast} />
       ) : (
         <div className="card" style={{ padding: m ? 16 : "20px 24px" }}>
           <EventStaffManager showToast={showToast} isMobile={m} />

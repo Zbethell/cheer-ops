@@ -5954,6 +5954,25 @@ function CredentialsPage({ isMobile: m, showToast }) {
   );
 }
 
+// Decodes CSV bytes to text, choosing the encoding rather than assuming one.
+//
+// Themis exports UTF-8 with no byte-order mark, so there's nothing in the file
+// announcing its encoding; anything that guesses will mangle "Québec",
+// "Collège de Lévis" and "Trois-Rivières". UTF-8 is strict enough to detect —
+// invalid sequences throw — so a file that isn't UTF-8 is almost certainly a
+// Windows-1252 export from Excel, which is the fallback.
+function decodeCsvText(buf) {
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return new TextDecoder("utf-8").decode(bytes.subarray(3));
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("windows-1252").decode(bytes);
+  }
+}
+
 // ─── Programs (gyms) ──────────────────────────────────────────────────────────
 // Reference list behind the public credential form's gym picker. Seeded from
 // Themis' Connected Programs export, which lists every program connected to us
@@ -5979,7 +5998,15 @@ function ProgramsManager({ isMobile: m, showToast }) {
   async function importCsv(file) {
     setImporting(true); setResult(null);
     try {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      // A CSV is decoded here rather than handed to SheetJS as raw bytes. Given
+      // a buffer with no byte-order mark it falls back to a Windows codepage,
+      // which turns every UTF-8 accent into mojibake — "Québec" arrives as
+      // "QuÃ©bec". Spreadsheets are binary and still go in as a buffer.
+      const buf = await file.arrayBuffer();
+      const isCsv = /\.csv$/i.test(file.name) || /csv|text\/plain/.test(file.type || "");
+      const wb = isCsv
+        ? XLSX.read(decodeCsvText(buf), { type: "string" })
+        : XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
       if (json.length === 0) throw new Error("empty file");

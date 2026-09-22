@@ -35,14 +35,16 @@ const ALLOWED = {
 const MAX_BYTES = 25 * 1024 * 1024;
 
 const FIELDS = {
-  vsc:        "Vulnerable-Sector-Check",
-  proofOfAge: "Proof-of-Age",
-  credential: "Coaching-Credential",
-  selfie:     "Selfie",
+  vsc:            "Vulnerable-Sector-Check",
+  proofOfAge:     "Proof-of-Age",
+  credential:     "Coaching-Credential",
+  provincialCert: "Provincial-Certification",
+  selfie:         "Selfie",
 };
 const URL_FIELD = {
   vsc: "VSCUrl", proofOfAge: "ProofOfAgeUrl",
-  credential: "CredentialUrl", selfie: "SelfieUrl",
+  credential: "CredentialUrl", provincialCert: "ProvincialCertUrl",
+  selfie: "SelfieUrl",
 };
 
 // Strips anything that could escape the folder or upset SharePoint.
@@ -101,6 +103,8 @@ async function list(req, res) {
           hadCard: !!f.HadCard2526,
           needsSelfie: !!f.NeedsSelfie,
           credentialLevel: f.CredentialLevel || "",
+          provincialBody: f.ProvincialBody || "",
+          provincialCertUrl: f.ProvincialCertUrl || "",
           status: f.Status || "Incomplete",
           folderUrl: f.FolderUrl || "",
           vscUrl: f.VSCUrl || "",
@@ -143,7 +147,7 @@ async function verify(req, res) {
 async function start(req, res) {
   const {
     role, program, firstName, lastName, email,
-    birthdate, hadCard2526, credentialLevel, files,
+    birthdate, hadCard2526, credentialLevel, provincialBody, files,
   } = req.body || {};
 
   if (!["coach", "gym_admin"].includes(role)) return res.status(400).json({ error: "Invalid role" });
@@ -166,10 +170,21 @@ async function start(req, res) {
   const hadCard = isCoach ? !!hadCard2526 : false;
   const needsSelfie = !hadCard;
 
+  // A provincial body (OCF, FCQ and the like) has already vetted the coach, so
+  // their certificate stands in for both the coaching credential and the
+  // vulnerable sector check. Proof of age is unaffected — it establishes age,
+  // not competence, and a minor still has to evidence it.
+  const viaProvincial = isCoach && !!String(provincialBody || "").trim();
+
   const required = new Set();
   if (isCoach) {
-    required.add("credential");
-    required.add(isMinor ? "proofOfAge" : "vsc");
+    if (viaProvincial) {
+      required.add("provincialCert");
+      if (isMinor) required.add("proofOfAge");
+    } else {
+      required.add("credential");
+      required.add(isMinor ? "proofOfAge" : "vsc");
+    }
   } else {
     required.add("vsc");
   }
@@ -214,6 +229,7 @@ async function start(req, res) {
       FolderUrl: folderPath,
       ...(isCoach && birthdate ? { Birthdate: `${birthdate}T00:00:00Z` } : {}),
       ...(credentialLevel ? { CredentialLevel: String(credentialLevel).slice(0, 120) } : {}),
+      ...(viaProvincial ? { ProvincialBody: String(provincialBody).trim().slice(0, 120) } : {}),
     };
 
     const created = await fetch(`${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items`, {

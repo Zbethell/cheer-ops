@@ -13,6 +13,12 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SEASON = "2026-27";
 const PRIOR_SEASON = "2025-2026";
 
+// Provincial bodies whose certification Canadian Cheer accepts in place of a
+// coaching credential and a vulnerable sector check — they vet their own
+// coaches. "Other" keeps the list from silently excluding a body we haven't
+// listed; the name typed there is recorded as-is.
+const PROVINCIAL_BODIES = ["OCF — Ontario Cheerleading Federation", "FCQ — Fédération de Cheerleading du Québec", "Other"];
+
 const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf";
 const MAX_BYTES = 25 * 1024 * 1024;
 // Graph requires chunks in multiples of 320 KiB; 5 MiB keeps the request count
@@ -115,6 +121,9 @@ export default function Credentials() {
     program: "", firstName: "", lastName: "", email: "", birthdate: "",
   });
   const [hadCard, setHadCard] = useState(null);    // coaches only
+  const [hasProvincial, setHasProvincial] = useState(null);  // coaches only
+  const [provincialBody, setProvincialBody] = useState(PROVINCIAL_BODIES[0]);
+  const [otherBody, setOtherBody] = useState("");
   const [programQuery, setProgramQuery] = useState("");
   const [files, setFiles] = useState({});          // field -> File
   const [progress, setProgress] = useState({});    // field -> 0..100
@@ -136,6 +145,10 @@ export default function Credentials() {
   const isMinor = isCoach && age != null && age < 18;
   // Gym admin cards start this season, so no admin can hold a prior card.
   const needsSelfie = isCoach ? hadCard === false : true;
+  // A provincial body has already vetted the coach, so their certificate stands
+  // in for the coaching credential and the vulnerable sector check both.
+  const viaProvincial = isCoach && hasProvincial === true;
+  const bodyName = provincialBody === "Other" ? otherBody.trim() : provincialBody;
 
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const pick = (field) => (file) => {
@@ -151,8 +164,15 @@ export default function Credentials() {
   function requiredFiles() {
     const need = [];
     if (isCoach) {
-      need.push("credential");
-      need.push(isMinor ? "proofOfAge" : "vsc");
+      if (viaProvincial) {
+        need.push("provincialCert");
+        // Age still has to be evidenced — a provincial certificate proves
+        // competence, not that someone is over 18.
+        if (isMinor) need.push("proofOfAge");
+      } else {
+        need.push("credential");
+        need.push(isMinor ? "proofOfAge" : "vsc");
+      }
     } else {
       need.push("vsc");
     }
@@ -167,6 +187,8 @@ export default function Credentials() {
     if (isCoach) {
       if (!form.birthdate) return "Please enter your date of birth.";
       if (age == null || age < 5 || age > 100) return "Please check your date of birth.";
+      if (hasProvincial === null) return "Please tell us whether you hold a provincial body certification.";
+      if (viaProvincial && !bodyName) return "Please tell us which provincial body certified you.";
       if (hadCard === null) return `Please tell us whether you had a ${PRIOR_SEASON} credential card.`;
     }
     for (const f of requiredFiles()) if (!files[f]) return "Please attach every required document.";
@@ -188,7 +210,7 @@ export default function Credentials() {
           action: "start",
           role, program: form.program,
           firstName: form.firstName, lastName: form.lastName, email: form.email,
-          ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard } : {}),
+          ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard, ...(viaProvincial ? { provincialBody: bodyName } : {}) } : {}),
           files: declared,
         }),
       });
@@ -235,6 +257,7 @@ export default function Credentials() {
           <p style={{ color: "#9ca3af", fontSize: 13, marginBottom: 22 }}>A confirmation has been sent to {form.email.trim()}.</p>
           <button style={ghost} onClick={() => {
             setStep("role"); setRole(null); setHadCard(null); setFiles({}); setProgress({});
+            setHasProvincial(null); setProvincialBody(PROVINCIAL_BODIES[0]); setOtherBody("");
             setForm({ program: "", firstName: "", lastName: "", email: "", birthdate: "" });
             setProgramQuery("");
           }}>Submit for another person</button>
@@ -269,7 +292,7 @@ export default function Credentials() {
                 <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                   {isCoach ? "Coach" : "Gym Admin"}
                 </div>
-                <button type="button" onClick={() => { setStep("role"); setError(""); }}
+                <button type="button" onClick={() => { setStep("role"); setError(""); setHasProvincial(null); }}
                   style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Change</button>
               </div>
 
@@ -337,6 +360,36 @@ export default function Credentials() {
             {isCoach && (
               <div style={card}>
                 <div style={{ ...label, marginBottom: 4 }}>
+                  Are you certified by a provincial body?
+                </div>
+                <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
+                  Such as OCF or FCQ. If you are, we accept that certification instead of a coaching
+                  credential and a vulnerable sector check.
+                </div>
+                <Choice title="Yes, I'm provincially certified" sub="You'll upload proof of that certification"
+                  selected={hasProvincial === true} onClick={() => setHasProvincial(true)} />
+                <Choice title="No" sub="You'll upload a coaching credential and a vulnerable sector check"
+                  selected={hasProvincial === false} onClick={() => setHasProvincial(false)} />
+
+                {hasProvincial === true && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={label}>Which body? <span style={{ color: "#ef4444" }}>*</span></div>
+                    <select style={input} value={provincialBody} onChange={(e) => setProvincialBody(e.target.value)}>
+                      {PROVINCIAL_BODIES.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    {provincialBody === "Other" && (
+                      <input style={{ ...input, marginTop: 10 }} value={otherBody}
+                        onChange={(e) => setOtherBody(e.target.value)}
+                        placeholder="Name of the provincial body" />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isCoach && hasProvincial !== null && (
+              <div style={card}>
+                <div style={{ ...label, marginBottom: 4 }}>
                   Did you get a Coaching Credential Card during the {PRIOR_SEASON} season?
                 </div>
                 <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
@@ -349,22 +402,36 @@ export default function Credentials() {
               </div>
             )}
 
-            {(!isCoach || hadCard !== null) && (
+            {(!isCoach || (hasProvincial !== null && hadCard !== null)) && (
               <div style={card}>
                 <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Documents</div>
 
-                {isCoach && (
+                {viaProvincial ? (
+                  <>
+                    <FileField id="provincialCert" title={`${bodyName || "Provincial"} certification`}
+                      hint="Proof of your provincial certification — a certificate, card or screenshot showing your name."
+                      file={files.provincialCert} onPick={pick("provincialCert")} progress={progress.provincialCert} />
+                    {isMinor && (
+                      <FileField id="proofOfAge" title="Proof of age"
+                        hint="Photo of a government ID, passport or birth certificate showing your date of birth."
+                        file={files.proofOfAge} onPick={pick("proofOfAge")} progress={progress.proofOfAge} />
+                    )}
+                  </>
+                ) : isCoach ? (
                   <>
                     <FileField id="credential" title="Coaching credential"
                       hint="Upload the credential you hold — minimum Novice Level 1. A certificate, card or screenshot showing your name and level."
                       file={files.credential} onPick={pick("credential")} progress={progress.credential} />
+                    {isMinor ? (
+                      <FileField id="proofOfAge" title="Proof of age"
+                        hint="Photo of a government ID, passport or birth certificate showing your date of birth."
+                        file={files.proofOfAge} onPick={pick("proofOfAge")} progress={progress.proofOfAge} />
+                    ) : (
+                      <FileField id="vsc" title="Vulnerable Sector Check"
+                        hint="A photo or PDF of your current vulnerable sector check."
+                        file={files.vsc} onPick={pick("vsc")} progress={progress.vsc} />
+                    )}
                   </>
-                )}
-
-                {isCoach && isMinor ? (
-                  <FileField id="proofOfAge" title="Proof of age"
-                    hint="Photo of a government ID, passport or birth certificate showing your date of birth."
-                    file={files.proofOfAge} onPick={pick("proofOfAge")} progress={progress.proofOfAge} />
                 ) : (
                   <FileField id="vsc" title="Vulnerable Sector Check"
                     hint="A photo or PDF of your current vulnerable sector check."

@@ -13,14 +13,6 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SEASON = "2026-27";
 const PRIOR_SEASON = "2025-2026";
 
-const CREDENTIAL_LEVELS = [
-  "Novice Level 1",
-  "Novice Level 2",
-  "Intermediate",
-  "Advanced",
-  "Other / not listed",
-];
-
 const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf";
 const MAX_BYTES = 25 * 1024 * 1024;
 // Graph requires chunks in multiples of 320 KiB; 5 MiB keeps the request count
@@ -120,8 +112,7 @@ export default function Credentials() {
   const [step, setStep] = useState("role");        // role | details | done
   const [role, setRole] = useState(null);          // 'coach' | 'gym_admin'
   const [form, setForm] = useState({
-    program: "", firstName: "", lastName: "", email: "",
-    birthdate: "", credentialLevel: CREDENTIAL_LEVELS[0],
+    program: "", firstName: "", lastName: "", email: "", birthdate: "",
   });
   const [hadCard, setHadCard] = useState(null);    // coaches only
   const [programQuery, setProgramQuery] = useState("");
@@ -197,7 +188,7 @@ export default function Credentials() {
           action: "start",
           role, program: form.program,
           firstName: form.firstName, lastName: form.lastName, email: form.email,
-          ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard, credentialLevel: form.credentialLevel } : {}),
+          ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard } : {}),
           files: declared,
         }),
       });
@@ -244,7 +235,7 @@ export default function Credentials() {
           <p style={{ color: "#9ca3af", fontSize: 13, marginBottom: 22 }}>A confirmation has been sent to {form.email.trim()}.</p>
           <button style={ghost} onClick={() => {
             setStep("role"); setRole(null); setHadCard(null); setFiles({}); setProgress({});
-            setForm({ program: "", firstName: "", lastName: "", email: "", birthdate: "", credentialLevel: CREDENTIAL_LEVELS[0] });
+            setForm({ program: "", firstName: "", lastName: "", email: "", birthdate: "" });
             setProgramQuery("");
           }}>Submit for another person</button>
         </div>
@@ -364,14 +355,8 @@ export default function Credentials() {
 
                 {isCoach && (
                   <>
-                    <div style={{ marginBottom: 18 }}>
-                      <div style={label}>Coaching credential level <span style={{ color: "#ef4444" }}>*</span></div>
-                      <select style={input} value={form.credentialLevel} onChange={setF("credentialLevel")}>
-                        {CREDENTIAL_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-                      </select>
-                    </div>
-                    <FileField id="credential" title="Proof of coaching credential"
-                      hint="Minimum Novice Level 1 — a certificate, card or screenshot showing your name and level."
+                    <FileField id="credential" title="Coaching credential"
+                      hint="Upload the credential you hold — minimum Novice Level 1. A certificate, card or screenshot showing your name and level."
                       file={files.credential} onPick={pick("credential")} progress={progress.credential} />
                   </>
                 )}

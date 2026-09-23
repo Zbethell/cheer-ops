@@ -10,6 +10,14 @@ import { useState, useEffect, useRef } from "react";
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
 
+// Canadian Cheer red, sampled straight from the logo rather than eyeballed —
+// the mark is a single flat #cc0000, so the page matches it exactly.
+const RED = "#cc0000";
+const RED_DARK = "#a30000";
+const RED_TINT = "#fdf2f2";
+const RED_BORDER = "#f2cfcf";
+const LOGO = "https://peylonukcwsqdknchxda.supabase.co/storage/v1/object/public/logos/org-logo.png";
+
 const SEASON = "2026-27";
 const PRIOR_SEASON = "2025-2026";
 
@@ -23,7 +31,7 @@ const CHUNK = 5 * 320 * 1024;
 const card = { background: "#fff", borderRadius: 14, border: "1px solid #e5e7eb", padding: "24px 22px", marginBottom: 16 };
 const input = { width: "100%", padding: "12px 14px", border: "1px solid #d1d5db", borderRadius: 10, fontSize: 16, fontFamily: "inherit", boxSizing: "border-box", color: "#1a1a2e", background: "#fff" };
 const label = { display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 };
-const primary = { width: "100%", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 12, padding: 15, fontSize: 16, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" };
+const primary = { width: "100%", background: RED, color: "#fff", border: "none", borderRadius: 12, padding: 15, fontSize: 16, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" };
 const ghost = { width: "100%", background: "none", border: "1px solid #d1d5db", borderRadius: 12, padding: 13, fontSize: 15, color: "#374151", fontFamily: "inherit", cursor: "pointer" };
 
 // Whole years — a birthday later this year must not round someone up to 18.
@@ -43,9 +51,10 @@ function Choice({ selected, onClick, title, sub }) {
       style={{
         display: "block", width: "100%", textAlign: "left", marginBottom: 10,
         padding: "16px 18px", borderRadius: 12, cursor: "pointer", fontFamily: "inherit",
-        background: selected ? "#1a1a2e" : "#fff",
+        background: selected ? RED : "#fff",
         color: selected ? "#fff" : "#1a1a2e",
-        border: `1px solid ${selected ? "#1a1a2e" : "#d7dae0"}`,
+        border: `1px solid ${selected ? RED : "#d7dae0"}`,
+        boxShadow: selected ? "0 1px 4px rgba(204,0,0,0.25)" : "none",
       }}>
       <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
       {sub && <div style={{ fontSize: 13, opacity: selected ? 0.75 : 0.6, marginTop: 3 }}>{sub}</div>}
@@ -57,12 +66,12 @@ function FileField({ id, title, hint, file, onPick, progress }) {
   const ref = useRef();
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={label}>{title} <span style={{ color: "#ef4444" }}>*</span></div>
+      <div style={label}>{title} <span style={{ color: RED }}>*</span></div>
       {hint && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>{hint}</div>}
       <div onClick={() => ref.current?.click()}
         style={{
-          border: `2px dashed ${file ? "#1a1a2e" : "#d1d5db"}`, borderRadius: 10,
-          padding: 16, textAlign: "center", cursor: "pointer", background: "#fafafa",
+          border: `2px dashed ${file ? RED : "#d1d5db"}`, borderRadius: 10,
+          padding: 16, textAlign: "center", cursor: "pointer", background: file ? RED_TINT : "#fafafa",
         }}>
         {file
           ? <div style={{ fontSize: 14, color: "#374151", wordBreak: "break-all" }}>
@@ -76,7 +85,7 @@ function FileField({ id, title, hint, file, onPick, progress }) {
       </div>
       {progress != null && (
         <div style={{ height: 6, background: "#e5e7eb", borderRadius: 99, marginTop: 8, overflow: "hidden" }}>
-          <div style={{ width: `${progress}%`, height: "100%", background: "#1a1a2e", transition: "width .2s" }} />
+          <div style={{ width: `${progress}%`, height: "100%", background: RED, transition: "width .2s" }} />
         </div>
       )}
       <input ref={ref} id={id} type="file" accept={ACCEPT} capture="environment"
@@ -105,6 +114,26 @@ async function uploadFile(uploadUrl, file, onProgress) {
     start = end;
     onProgress(Math.round((start / file.size) * 100));
   }
+}
+
+function Masthead({ title, sub }) {
+  return (
+    <div style={{ background: RED, borderRadius: 16, padding: "22px 20px 20px", marginBottom: 18, textAlign: "center" }}>
+      <div style={{
+        width: 64, height: 64, margin: "0 auto 12px", background: "#fff", borderRadius: 16,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+      }}>
+        {/* Decorative: the heading beside it already names the organisation. */}
+        <img src={LOGO} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} />
+      </div>
+      <div style={{ color: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+        Canadian Cheer
+      </div>
+      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0, lineHeight: 1.25 }}>{title}</h1>
+      {sub && <p style={{ color: "rgba(255,255,255,0.92)", fontSize: 14, margin: "6px 0 0" }}>{sub}</p>}
+    </div>
+  );
 }
 
 export default function Credentials() {
@@ -235,11 +264,16 @@ export default function Credentials() {
   if (step === "done") return (
     <div style={wrap}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
-      <div style={{ ...inner, textAlign: "center", paddingTop: 40 }}>
-        <div style={{ ...card, padding: "40px 28px" }}>
-          <div style={{ fontSize: 48, marginBottom: 14 }}>✅</div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a2e", marginBottom: 10 }}>Submitted</h2>
-          <p style={{ color: "#6b7280", fontSize: 15, lineHeight: 1.55, marginBottom: 22 }}>
+      <div style={{ ...inner, paddingTop: 20 }}>
+        <Masthead title="Submitted" />
+        <div style={{ ...card, padding: "32px 26px", textAlign: "center" }}>
+          <div style={{
+            width: 54, height: 54, margin: "0 auto 14px", borderRadius: "50%",
+            background: RED_TINT, border: `2px solid ${RED_BORDER}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: RED, fontSize: 26, fontWeight: 700, lineHeight: 1,
+          }}>✓</div>
+          <p style={{ color: "#374151", fontSize: 15, lineHeight: 1.55, marginBottom: 22 }}>
             Thanks {form.firstName.trim()} — your documents are with us.{" "}
             {needsSelfie
               ? `You'll collect your ${SEASON} Coaching Credential Card at the first event you attend.`
@@ -261,10 +295,7 @@ export default function Credentials() {
     <div style={wrap}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
       <div style={inner}>
-        <div style={{ textAlign: "center", marginBottom: 22 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", marginBottom: 6 }}>Coach Credentials {SEASON}</h1>
-          <p style={{ color: "#6b7280", fontSize: 15 }}>One submission per person, once per season.</p>
-        </div>
+        <Masthead title={`Coach Credentials ${SEASON}`} sub="One submission per person, once per season." />
 
         {step === "role" && (
           <div style={card}>
@@ -280,7 +311,7 @@ export default function Credentials() {
           <>
             <div style={card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em", color: RED }}>
                   {isCoach ? "Coach" : "Gym Admin"}
                 </div>
                 <button type="button" onClick={() => { setStep("role"); setError(""); setHasProvincial(null); }}
@@ -288,9 +319,9 @@ export default function Credentials() {
               </div>
 
               <div style={{ marginBottom: 18, position: "relative" }}>
-                <div style={label}>{isCoach ? "Your gym / program" : "Your program"} <span style={{ color: "#ef4444" }}>*</span></div>
+                <div style={label}>{isCoach ? "Your gym / program" : "Your program"} <span style={{ color: RED }}>*</span></div>
                 {form.program ? (
-                  <div style={{ ...input, display: "flex", justifyContent: "space-between", alignItems: "center", borderColor: "#1a1a2e" }}>
+                  <div style={{ ...input, display: "flex", justifyContent: "space-between", alignItems: "center", borderColor: RED, background: RED_TINT }}>
                     <span>{form.program}</span>
                     <button type="button" onClick={() => { setForm((f) => ({ ...f, program: "" })); setProgramQuery(""); }}
                       style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Change</button>
@@ -321,23 +352,23 @@ export default function Credentials() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
                 <div>
-                  <div style={label}>First name <span style={{ color: "#ef4444" }}>*</span></div>
+                  <div style={label}>First name <span style={{ color: RED }}>*</span></div>
                   <input style={input} value={form.firstName} onChange={setF("firstName")} />
                 </div>
                 <div>
-                  <div style={label}>Last name <span style={{ color: "#ef4444" }}>*</span></div>
+                  <div style={label}>Last name <span style={{ color: RED }}>*</span></div>
                   <input style={input} value={form.lastName} onChange={setF("lastName")} />
                 </div>
               </div>
 
               <div style={{ marginBottom: isCoach ? 18 : 0 }}>
-                <div style={label}>Email <span style={{ color: "#ef4444" }}>*</span></div>
+                <div style={label}>Email <span style={{ color: RED }}>*</span></div>
                 <input style={input} type="email" value={form.email} onChange={setF("email")} placeholder="you@example.com" />
               </div>
 
               {isCoach && (
                 <div>
-                  <div style={label}>Date of birth <span style={{ color: "#ef4444" }}>*</span></div>
+                  <div style={label}>Date of birth <span style={{ color: RED }}>*</span></div>
                   <input style={input} type="date" value={form.birthdate} onChange={setF("birthdate")} />
                   {age != null && age >= 5 && age <= 100 && (
                     <div style={{ fontSize: 13, color: isMinor ? "#b45309" : "#059669", marginTop: 8 }}>
@@ -381,7 +412,7 @@ export default function Credentials() {
 
             {(!isCoach || (hasProvincial !== null && hadCard !== null)) && (
               <div style={card}>
-                <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Documents</div>
+                <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16, color: RED }}>Documents</div>
 
                 {viaProvincial ? (
                   <>
@@ -422,7 +453,7 @@ export default function Credentials() {
                 )}
 
                 {error && (
-                  <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "11px 14px", color: "#dc2626", fontSize: 14, marginBottom: 14 }}>
+                  <div style={{ background: RED_TINT, border: `1px solid ${RED_BORDER}`, borderRadius: 10, padding: "11px 14px", color: RED_DARK, fontSize: 14, marginBottom: 14 }}>
                     {error}
                   </div>
                 )}

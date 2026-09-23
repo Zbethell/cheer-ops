@@ -5789,6 +5789,7 @@ function CredentialsPage({ isMobile: m, showToast }) {
       "Had 25-26 card": r.hadCard ? "Yes" : "No",
       "Needs card": r.needsSelfie ? "Yes" : "No",
       "Provincially certified": r.provincialCertified ? "Yes" : "No",
+      "Unlisted program": r.programUnlisted ? "Yes" : "No",
       Submitted: r.submittedAt ? new Date(r.submittedAt).toLocaleString("en-CA") : "",
     }));
     const wb = XLSX.utils.book_new();
@@ -5798,7 +5799,9 @@ function CredentialsPage({ isMobile: m, showToast }) {
 
   const needle = q.trim().toLowerCase();
   const filtered = rows
-    .filter((r) => status === "All" || r.status === status)
+    .filter((r) => status === "All" ? true
+      : status === "Unlisted program" ? r.programUnlisted
+      : r.status === status)
     .filter((r) => role === "All" || r.role === role)
     .filter((r) => !needle
       || `${r.firstName} ${r.lastName}`.toLowerCase().includes(needle)
@@ -5812,6 +5815,7 @@ function CredentialsPage({ isMobile: m, showToast }) {
     Verified: rows.filter((r) => r.status === "Verified").length,
     minors: rows.filter((r) => r.isMinor).length,
     needCard: rows.filter((r) => r.needsSelfie && r.status !== "Verified").length,
+    unlisted: rows.filter((r) => r.programUnlisted).length,
   };
 
   const STATUS_STYLE = {
@@ -5867,8 +5871,10 @@ function CredentialsPage({ isMobile: m, showToast }) {
           )}
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {["All", "Incomplete", "Submitted", "Verified"].map((s) =>
-              chip(s, status === s, () => setStatus(s), s === "All" ? counts.all : counts[s]))}
+            {["All", "Incomplete", "Submitted", "Verified",
+              ...(counts.unlisted > 0 ? ["Unlisted program"] : [])].map((s) =>
+              chip(s, status === s, () => setStatus(s),
+                s === "All" ? counts.all : s === "Unlisted program" ? counts.unlisted : counts[s]))}
             <span style={{ width: 1, height: 22, background: "#e5e7eb" }} />
             {["All", "Coach", "Gym Admin"].map((r) => chip(r, role === r, () => setRole(r)))}
             <div style={{ flex: 1 }} />
@@ -5906,6 +5912,7 @@ function CredentialsPage({ isMobile: m, showToast }) {
                       <span className="pill" style={{ background: "#ede9fe", color: "#6d28d9", fontSize: 11 }}>{r.role}</span>
                       {r.isMinor && <span className="pill" style={{ background: "#fee2e2", color: "#b91c1c", fontSize: 11 }}>Under 18</span>}
                       {r.provincialCertified && <span className="pill" style={{ background: "#ecfdf5", color: "#065f46", fontSize: 11 }}>Provincially certified</span>}
+                      {r.programUnlisted && <span className="pill" style={{ background: "#fffbeb", color: "#92400e", fontSize: 11 }}>⚠ Unlisted program</span>}
                       {r.needsSelfie
                         ? <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11 }}>Needs card</span>
                         : <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Has 25-26 card</span>}
@@ -5929,6 +5936,12 @@ function CredentialsPage({ isMobile: m, showToast }) {
                       {docLink(r.proofOfAgeUrl, "Proof of age")}
                       {docLink(r.selfieUrl, "Photo")}
                     </div>
+                    {r.programUnlisted && (
+                      <div style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                        “{r.program}” was typed in — it wasn't on the program list. Check it's a real gym and
+                        not another spelling of one already there, then add it under Programs if it belongs.
+                      </div>
+                    )}
                     <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
                       {r.credentialLevel && <>Level: <strong style={{ color: "#374151" }}>{r.credentialLevel}</strong> · </>}
                       {r.birthdate && <>DOB: {new Date(r.birthdate).toLocaleDateString("en-CA")} · </>}

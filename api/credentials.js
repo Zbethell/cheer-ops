@@ -100,6 +100,7 @@ async function list(req, res) {
           submissionId: f.SubmissionId || "",
           role: f.Role || "",
           program: f.Program || "",
+          programUnlisted: !!f.ProgramUnlisted,
           firstName: f.FirstName || "",
           lastName: f.LastName || "",
           email: f.Email || "",
@@ -151,7 +152,7 @@ async function verify(req, res) {
 
 async function start(req, res) {
   const {
-    role, program, firstName, lastName, email,
+    role, program, programUnlisted, firstName, lastName, email,
     birthdate, hadCard2526, credentialLevel, provincialCertified, files,
   } = req.body || {};
 
@@ -233,6 +234,9 @@ async function start(req, res) {
       NeedsSelfie: needsSelfie,
       Status: "Incomplete",
       FolderUrl: folderPath,
+      // Typed by hand rather than picked from the list, so it needs a human to
+      // confirm it is a real program and not a fourth spelling of an existing one.
+      ProgramUnlisted: programUnlisted === true,
       ...(isCoach && birthdate ? { Birthdate: `${birthdate}T00:00:00Z` } : {}),
       ...(credentialLevel ? { CredentialLevel: String(credentialLevel).slice(0, 120) } : {}),
       ...(isCoach ? { ProvincialCertified: viaProvincial } : {}),

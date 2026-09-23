@@ -147,6 +147,11 @@ export default function Credentials() {
   const [hadCard, setHadCard] = useState(null);    // coaches only
   const [hasProvincial, setHasProvincial] = useState(null);  // coaches only
   const [programQuery, setProgramQuery] = useState("");
+  // Typed by hand because the search found nothing. Kept distinct from a picked
+  // program so the submission can be flagged rather than quietly inventing a
+  // new gym, which is how a curated list turns back into three spellings of the
+  // same name.
+  const [programUnlisted, setProgramUnlisted] = useState(false);
   const [files, setFiles] = useState({});          // field -> File
   const [progress, setProgress] = useState({});    // field -> 0..100
   const [busy, setBusy] = useState(false);
@@ -228,7 +233,7 @@ export default function Credentials() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "start",
-          role, program: form.program,
+          role, program: form.program, programUnlisted,
           firstName: form.firstName, lastName: form.lastName, email: form.email,
           ...(isCoach ? { birthdate: form.birthdate, hadCard2526: hadCard, provincialCertified: viaProvincial } : {}),
           files: declared,
@@ -282,7 +287,7 @@ export default function Credentials() {
           <p style={{ color: "#9ca3af", fontSize: 13, marginBottom: 22 }}>A confirmation has been sent to {form.email.trim()}.</p>
           <button style={ghost} onClick={() => {
             setStep("role"); setRole(null); setHadCard(null); setFiles({}); setProgress({});
-            setHasProvincial(null);
+            setHasProvincial(null); setProgramUnlisted(false);
             setForm({ program: "", firstName: "", lastName: "", email: "", birthdate: "" });
             setProgramQuery("");
           }}>Submit for another person</button>
@@ -322,8 +327,11 @@ export default function Credentials() {
                 <div style={label}>{isCoach ? "Your gym / program" : "Your program"} <span style={{ color: RED }}>*</span></div>
                 {form.program ? (
                   <div style={{ ...input, display: "flex", justifyContent: "space-between", alignItems: "center", borderColor: RED, background: RED_TINT }}>
-                    <span>{form.program}</span>
-                    <button type="button" onClick={() => { setForm((f) => ({ ...f, program: "" })); setProgramQuery(""); }}
+                    <span>
+                      {form.program}
+                      {programUnlisted && <span style={{ color: "#92400e", fontSize: 12, marginLeft: 8 }}>we'll confirm this one</span>}
+                    </span>
+                    <button type="button" onClick={() => { setForm((f) => ({ ...f, program: "" })); setProgramQuery(""); setProgramUnlisted(false); }}
                       style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Change</button>
                   </div>
                 ) : (
@@ -342,8 +350,16 @@ export default function Credentials() {
                       </div>
                     )}
                     {programQuery.trim().length >= 2 && matches.length === 0 && !loadingPrograms && (
-                      <div style={{ fontSize: 13, color: "#b45309", marginTop: 8 }}>
-                        No program matches that. Check the spelling, or contact us if your gym is missing.
+                      <div style={{ marginTop: 10, padding: "12px 14px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10 }}>
+                        <div style={{ fontSize: 13, color: "#92400e", marginBottom: 10 }}>
+                          No program matches “{programQuery.trim()}”. Check the spelling first — most gyms are listed.
+                        </div>
+                        <button type="button"
+                          onClick={() => { setForm((f) => ({ ...f, program: programQuery.trim() })); setProgramUnlisted(true); setProgramQuery(""); }}
+                          style={{ width: "100%", background: "#fff", border: `1px solid ${RED_BORDER}`, color: RED_DARK,
+                            borderRadius: 10, padding: "10px 12px", fontSize: 14, fontWeight: 500, fontFamily: "inherit", cursor: "pointer" }}>
+                          Use “{programQuery.trim()}” anyway
+                        </button>
                       </div>
                     )}
                   </>

@@ -34,6 +34,13 @@ const label = { display: "block", fontSize: 13, fontWeight: 600, color: "#374151
 const primary = { width: "100%", background: RED, color: "#fff", border: "none", borderRadius: 12, padding: 15, fontSize: 16, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" };
 const ghost = { width: "100%", background: "none", border: "1px solid #d1d5db", borderRadius: 12, padding: 13, fontSize: 15, color: "#374151", fontFamily: "inherit", cursor: "pointer" };
 
+// Strips accents and punctuation for searching. 65 of the 250 programs carry
+// one or the other, so a coach typing "zenith", "ecole" or "cheersport" finds
+// nothing against "Zénith", "École secondaire du Phare" or "Cheer Sport Sharks"
+// unless both sides are folded the same way.
+const fold = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .toLowerCase().replace(/[^a-z0-9]+/g, "");
+
 // Whole years — a birthday later this year must not round someone up to 18.
 function ageFrom(dateStr) {
   const dob = new Date(`${dateStr}T00:00:00`);
@@ -183,8 +190,15 @@ export default function Credentials() {
     setFiles((p) => ({ ...p, [field]: file }));
   };
 
-  const matches = programQuery.trim().length < 2 ? [] : programs
-    .filter((p) => p.name.toLowerCase().includes(programQuery.trim().toLowerCase()))
+  const folded = fold(programQuery);
+  const matches = folded.length < 2 ? [] : programs
+    .filter((p) => fold(p.name).includes(folded))
+    // A name that starts with what was typed is almost always the one meant,
+    // so it shouldn't be buried under longer names that merely contain it.
+    .sort((a, b) => {
+      const sa = fold(a.name).startsWith(folded), sb = fold(b.name).startsWith(folded);
+      return sa === sb ? a.name.localeCompare(b.name) : (sa ? -1 : 1);
+    })
     .slice(0, 8);
 
   function requiredFiles() {
@@ -338,6 +352,10 @@ export default function Credentials() {
                   <>
                     <input style={input} value={programQuery} placeholder={loadingPrograms ? "Loading programs…" : "Start typing your gym's name…"}
                       disabled={loadingPrograms} onChange={(e) => setProgramQuery(e.target.value)} />
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 1.45 }}>
+                      Try the full name <em>and</em> the short form — some gyms are listed one way, some the other.
+                      Accents, punctuation and capitals don't matter.
+                    </div>
                     {matches.length > 0 && (
                       <div style={{ border: "1px solid #d1d5db", borderRadius: 10, marginTop: 6, overflow: "hidden" }}>
                         {matches.map((p) => (
@@ -349,7 +367,7 @@ export default function Credentials() {
                         ))}
                       </div>
                     )}
-                    {programQuery.trim().length >= 2 && matches.length === 0 && !loadingPrograms && (
+                    {folded.length >= 2 && matches.length === 0 && !loadingPrograms && (
                       <div style={{ marginTop: 10, padding: "12px 14px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10 }}>
                         <div style={{ fontSize: 13, color: "#92400e", marginBottom: 10 }}>
                           No program matches “{programQuery.trim()}”. Check the spelling first — most gyms are listed.

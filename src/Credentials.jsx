@@ -18,6 +18,12 @@ const RED_TINT = "#fdf2f2";
 const RED_BORDER = "#f2cfcf";
 const LOGO = "https://peylonukcwsqdknchxda.supabase.co/storage/v1/object/public/logos/org-logo.png";
 
+// Served from this origin rather than Supabase, so the first thing a coach sees
+// does not wait on a second host. Re-encoded from the 399KB PNG to 58KB at
+// 1120px, which is exactly twice the 560px the form is ever laid out at; the
+// source photograph is opaque, so nothing is lost to JPEG.
+const HEADER = "/credentials-header.jpg";
+
 const SEASON = "2026-27";
 const PRIOR_SEASON = "2025-2026";
 
@@ -121,6 +127,21 @@ async function uploadFile(uploadUrl, file, onProgress) {
     start = end;
     onProgress(Math.round((start / file.size) * 100));
   }
+}
+
+// The banner carries the wording itself, so it stands in for the heading. It is
+// still marked up as one, with the wording as alt text, so the page keeps a
+// heading for screen readers and for anyone whose images do not load.
+function Banner() {
+  return (
+    <h1 style={{ margin: "0 0 18px", lineHeight: 0 }}>
+      <img
+        src={HEADER}
+        alt={`Coach Credentials ${SEASON} — one submission per person, once per season.`}
+        style={{ width: "100%", height: "auto", display: "block", borderRadius: 16 }}
+      />
+    </h1>
+  );
 }
 
 function Masthead({ title, sub }) {
@@ -314,7 +335,7 @@ export default function Credentials() {
     <div style={wrap}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
       <div style={inner}>
-        <Masthead title={`Coach Credentials ${SEASON}`} sub="One submission per person, once per season." />
+        <Banner />
 
         {step === "role" && (
           <div style={card}>

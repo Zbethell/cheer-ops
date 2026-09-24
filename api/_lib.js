@@ -16,6 +16,32 @@ export const IT_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_LlhtsFPVP
 // Event Documents library, and the coach-credential intake inside it.
 export const EVENT_DOCS_DRIVE_ID = "b!4gHhPdHKAU248lgTJq1-8jsqjLI2JnlCnGq6NMXt_Lk2URJDx_NlT4GaXXo9oR5N";
 export const CREDENTIALS_FOLDER = "2026/Forms 26-27/Coach Credential Storage Data";
+
+// The Event Documents library as a browser sees it.
+//
+// Document locations are stored on the list relative to this, not as the
+// absolute webUrl Graph hands back. Those text columns cap at 255 characters,
+// SharePoint rejects an entire PATCH if any one field exceeds it, and for about
+// 30% of the programs on file the absolute URL is longer than that - so one long
+// gym name used to leave a submission stuck on Incomplete with no confirmation
+// email, even though every document had uploaded. The relative form tops out at
+// 189 characters across all 250 programs.
+export const EVENT_DOCS_WEB_BASE =
+  "https://canadiancheer.sharepoint.com/sites/CanadianCheer/Event%20Documents";
+
+// Single-line text columns in SharePoint.
+export const LIST_TEXT_MAX = 255;
+
+/**
+ * Turns a stored document location back into a link. Values written before the
+ * change are already absolute and pass straight through.
+ */
+export function sharePointUrl(stored) {
+  const s = String(stored || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  return `${EVENT_DOCS_WEB_BASE}/${encodeURI(s)}`;
+}
 export const CREDENTIALS_LIST_ID = "bfbf5bb4-450e-4219-b145-4be3f566057f";
 
 export async function getMicrosoftToken() {

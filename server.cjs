@@ -467,6 +467,27 @@ app.post("/api/expense-config", async (req, res) => {
   }
 });
 
+// The credential endpoints are not reimplemented here: this hands straight to
+// the same handler Vercel runs, so local dev exercises the real code rather
+// than a second copy that can drift from it.
+//
+// api/credentials.js is ESM inside a CommonJS package - Vercel detects that and
+// handles it, plain require() will not - so it is pulled in with a dynamic
+// import and cached.
+let credentialsHandler = null;
+app.post("/api/credentials", async (req, res) => {
+  try {
+    if (!credentialsHandler) {
+      const mod = await import("./api/credentials.js");
+      credentialsHandler = mod.default;
+    }
+    return credentialsHandler(req, res);
+  } catch (e) {
+    console.error("credentials handler error:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
 // Port is overridable so this can run alongside another local project already
 // holding 3001 (pro-crm uses the same default). Unset, it behaves as before.
 const PORT = process.env.PORT || 3001;

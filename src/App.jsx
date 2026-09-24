@@ -4,6 +4,15 @@ import {
   DEFAULT_EXPENSE_CONFIG, FIELD_DEFS, FIELD_GROUPS,
   mergeExpenseConfig, labelsFromFields,
 } from "./expenseForm.js";
+import {
+  drawCard, loadImage, TEMPLATE_URL, CARD_W, CARD_H, seasonEndYear,
+} from "./cardRender.js";
+// TensorFlow sits behind a dynamic import inside this module, so importing it
+// here does not pull the model or the runtime into the main bundle.
+import { autoFrame, adjustCrop } from "./faceFrame.js";
+import {
+  canRememberFolder, rememberFolder, recallFolder, forgetFolder, folderIsWritable,
+} from "./cardFolder.js";
 
 const SUPABASE_URL = "https://peylonukcwsqdknchxda.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBleWxvbnVrY3dzcWRrbmNoeGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDQxOTYsImV4cCI6MjA5MzQ4MDE5Nn0.fTgnQxWxBDcHk0Xq-4KQJZH9xi4bYwle27tdrjseQ3k";
@@ -5736,6 +5745,471 @@ function EventDetail({ isMobile: m, event, events, setEvents, items, eventPackin
   );
 }
 
+// ─── Credential card printing ─────────────────────────────────────────────────
+// Replaces the old routine of uploading each photo to Canva, cropping it by
+// hand, dropping it onto a template and printing through Bodno.
+//
+// Cards are composited here in the browser and written out as PNGs at exactly
+// 642x1014, then scripts/print-cards.ps1 sends the folder to the Magicard. The
+// browser does not print directly: it cannot be relied on to hold 1:1 scale,
+// and the driver defaults to landscape while the card is portrait.
+//
+// Built cards are kept as finished PNG blobs, not as decoded images. A decoded
+// phone photo runs to about 10MB, so a hundred of them would be a gigabyte; the
+// blobs are a few hundred KB each. The cost is that adjusting a crop has to
+// fetch that one photo again, which is much the rarer path.
+function CardPrinter({ isMobile: m, showToast, onPrinted }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState("todo");
+  const [verifiedOnly, setVerifiedOnly] = useState(true);
+  const [template, setTemplate] = useState(null);
+  const [cards, setCards] = useState({});          // itemId -> built card
+  const [progress, setProgress] = useState(null);  // { done, total }
+  const [skipped, setSkipped] = useState(new Set());
+  const [adjusting, setAdjusting] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const [folder, setFolder] = useState(null);       // remembered directory handle
+  const [folderReady, setFolderReady] = useState(false);
+
+  const post = (body) => fetch("/api/credentials", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+    body: JSON.stringify(body),
+  });
+
+  const load = useCallback(() => {
+    setLoading(true); setErr("");
+    post({ action: "list" })
+      .then(async (r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
+      .then((d) => setRows(Array.isArray(d) ? d : []))
+      .catch(() => setErr("Could not load submissions."))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    let alive = true;
+    loadImage(TEMPLATE_URL)
+      .then((t) => { if (alive) setTemplate(t); })
+      .catch(() => setErr("Could not load the card template."));
+    return () => { alive = false; };
+  }, []);
+
+  // Silently, because a permission prompt outside a click is refused anyway.
+  // Save asks properly when the time comes.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const h = await recallFolder();
+      if (!alive || !h) return;
+      setFolder(h);
+      setFolderReady(await folderIsWritable(h));
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // Thumbnails are object URLs handed to <img>; without this they leak for the
+  // life of the tab.
+  const cardsRef = useRef(cards);
+  cardsRef.current = cards;
+  useEffect(() => () => {
+    Object.values(cardsRef.current).forEach((c) => c.thumbUrl && URL.revokeObjectURL(c.thumbUrl));
+  }, []);
+
+  const needsCard = (r) => r.needsSelfie && !!r.selfieUrl;
+  const visible = rows.filter((r) => {
+    if (!needsCard(r)) return false;
+    if (verifiedOnly && r.status !== "Verified") return false;
+    if (filter === "todo") return !r.cardPrinted;
+    if (filter === "printed") return r.cardPrinted;
+    return true;
+  });
+
+  const counts = {
+    todo: rows.filter((r) => needsCard(r) && !r.cardPrinted && (!verifiedOnly || r.status === "Verified")).length,
+    printed: rows.filter((r) => needsCard(r) && r.cardPrinted && (!verifiedOnly || r.status === "Verified")).length,
+    waiting: rows.filter((r) => needsCard(r) && !r.cardPrinted && r.status !== "Verified").length,
+  };
+
+  async function fetchPhoto(itemId) {
+    const r = await post({ action: "photo", itemId });
+    if (!r.ok) {
+      let detail = `${r.status}`;
+      try { detail = (await r.json()).error || detail; } catch { /* not json */ }
+      throw new Error(detail);
+    }
+    return loadImage(URL.createObjectURL(await r.blob()));
+  }
+
+  // Renders at full size, keeps a PNG blob and a small preview, and lets the
+  // full-size canvas go.
+  async function composite(row, photo, crop) {
+    const canvas = document.createElement("canvas");
+    canvas.width = CARD_W; canvas.height = CARD_H;
+    drawCard(canvas.getContext("2d"), {
+      template, photo, crop,
+      program: row.program, firstName: row.firstName, lastName: row.lastName,
+      expiryYear: seasonEndYear(),
+    });
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+
+    const thumb = document.createElement("canvas");
+    thumb.width = 200; thumb.height = Math.round(200 * CARD_H / CARD_W);
+    thumb.getContext("2d").drawImage(canvas, 0, 0, thumb.width, thumb.height);
+    const thumbBlob = await new Promise((res) => thumb.toBlob(res, "image/png"));
+    return { blob, thumbUrl: URL.createObjectURL(thumbBlob) };
+  }
+
+  async function buildAll() {
+    if (!template) return;
+    const todo = visible.filter((r) => !cards[r.id]);
+    if (!todo.length) { showToast("Nothing left to build"); return; }
+    setProgress({ done: 0, total: todo.length });
+
+    // Sequential on purpose: the detector is the slow part and running several
+    // at once on one GPU context makes the whole batch slower, not faster.
+    for (let i = 0; i < todo.length; i++) {
+      const row = todo[i];
+      try {
+        const photo = await fetchPhoto(row.id);
+        const framed = await autoFrame(photo);
+        const { blob, thumbUrl } = await composite(row, photo, framed.crop);
+        setCards((p) => ({ ...p, [row.id]: {
+          blob, thumbUrl, crop: framed.crop,
+          source: framed.source, confidence: framed.confidence, error: framed.error || "",
+          plausible: framed.plausible, reasons: framed.reasons || [],
+        } }));
+      } catch (e) {
+        // One unreadable photo must not stop the batch.
+        setCards((p) => ({ ...p, [row.id]: { failed: true, error: e.message } }));
+      }
+      setProgress({ done: i + 1, total: todo.length });
+    }
+    setProgress(null);
+  }
+
+  const chosen = visible.filter((r) => cards[r.id]?.blob && !skipped.has(r.id));
+
+  function toggleSkip(id) {
+    setSkipped((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+
+  const fileNameFor = (row, i) => {
+    const clean = (s) => String(s || "").normalize("NFKD").replace(/[^\w\s-]/g, "").trim() || "unknown";
+    return `${String(i + 1).padStart(3, "0")} ${clean(row.lastName)} ${clean(row.firstName)}.png`;
+  };
+
+  async function pickFolder() {
+    const dir = await window.showDirectoryPicker({ mode: "readwrite", id: "cheer-ops-cards" });
+    await rememberFolder(dir);
+    setFolder(dir);
+    setFolderReady(true);
+    return dir;
+  }
+
+  async function saveBatch() {
+    if (!chosen.length) return;
+    setSaving(true);
+    try {
+      // Straight into the folder the printer watches, rather than a pile of
+      // browser downloads. The folder is remembered between visits so that
+      // printing a batch is one click and no file dialogs.
+      if (window.showDirectoryPicker) {
+        let dir = folder;
+        // Asking has to happen inside the click, which is where we are.
+        if (dir && !(await folderIsWritable(dir, { prompt: true }))) dir = null;
+        if (!dir) dir = await pickFolder();
+
+        for (let i = 0; i < chosen.length; i++) {
+          const fh = await dir.getFileHandle(fileNameFor(chosen[i], i), { create: true });
+          const w = await fh.createWritable();
+          await w.write(cards[chosen[i].id].blob);
+          await w.close();
+        }
+        showToast(`Saved ${chosen.length} card${chosen.length === 1 ? "" : "s"} — they should start printing`);
+      } else {
+        for (let i = 0; i < chosen.length; i++) {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(cards[chosen[i].id].blob);
+          a.download = fileNameFor(chosen[i], i);
+          a.click();
+          URL.revokeObjectURL(a.href);
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        showToast(`Downloaded ${chosen.length} card${chosen.length === 1 ? "" : "s"}`);
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") showToast(`Could not save: ${e.message}`);
+    }
+    setSaving(false);
+  }
+
+  // Deliberately a separate step from saving. A file being written says nothing
+  // about whether a card came out of the printer, and a card marked printed by
+  // mistake is a card nobody ever makes.
+  async function markPrinted() {
+    if (!chosen.length) return;
+    setMarking(true);
+    try {
+      const r = await post({ action: "printed", itemIds: chosen.map((c) => c.id) });
+      const body = await r.json();
+      if (!r.ok && r.status !== 207) throw new Error(body.error || `${r.status}`);
+      const done = new Set((body.updated || []).map(String));
+      setRows((p) => p.map((x) => (done.has(String(x.id))
+        ? { ...x, cardPrinted: true, cardPrintedOn: body.printedOn } : x)));
+      // The submissions list is a sibling holding its own copy of these rows and
+      // is not remounted when the tab changes, so it has to be told; otherwise
+      // it keeps showing "Needs card" for cards that have just been printed.
+      onPrinted?.(Array.from(done), body.printedOn);
+      showToast((body.failed || []).length
+        ? `Marked ${done.size} printed, ${body.failed.length} failed`
+        : `Marked ${done.size} printed`);
+    } catch (e) {
+      showToast(`Could not mark printed: ${e.message}`);
+    }
+    setMarking(false);
+  }
+
+  // The detector's own score is not a trust signal: it scores a printed test
+  // card at 99% and the Ontario Cheer logo at 89%. What separates those from a
+  // real face is whether the landmarks are arranged like one, so that is what
+  // gets reported. The number is kept in the tooltip rather than on the badge,
+  // where it reads as a guarantee.
+  const badgeFor = (c) => {
+    if (!c) return null;
+    if (c.failed) return { text: "no photo", bg: "#fef2f2", fg: "#b91c1c", title: c.error };
+    if (c.source === "manual") return { text: "adjusted by hand", bg: "#eff6ff", fg: "#1d4ed8" };
+    if (c.source === "face" && c.plausible) {
+      return { text: "face found", bg: "#ecfdf5", fg: "#047857",
+               title: `detector score ${Math.round(c.confidence * 100)}%` };
+    }
+    if (c.source === "face") {
+      return { text: "check framing", bg: "#fffbeb", fg: "#b45309",
+               title: `Scored ${Math.round(c.confidence * 100)}%, but ${(c.reasons || []).join(", ")} — this may not be a face.` };
+    }
+    if (c.source === "center") {
+      return { text: "no face — check", bg: "#fffbeb", fg: "#b45309",
+               title: "Nothing recognisable as a face; the photo was centred instead." };
+    }
+    return { text: "detector failed — check", bg: "#fffbeb", fg: "#b45309", title: c.error };
+  };
+
+  const chip = (label, active, onClick, count) => (
+    <button key={label} onClick={onClick} style={{
+      padding: "7px 14px", borderRadius: 8, border: "1px solid", fontFamily: "inherit",
+      fontSize: 13, fontWeight: 500, cursor: "pointer",
+      background: active ? "#1a1a2e" : "#fff", color: active ? "#fff" : "#374151",
+      borderColor: active ? "#1a1a2e" : "#e5e7eb",
+    }}>
+      {label}{count != null && <span style={{ marginLeft: 6, opacity: 0.7 }}>{count}</span>}
+    </button>
+  );
+
+  if (loading) return <div style={{ color: "#6b7280", fontSize: 14 }}>Loading…</div>;
+  if (err) return <div className="card" style={{ padding: 16, color: "#b91c1c", fontSize: 14 }}>{err}</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: m ? 14 : 18 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {chip("Needs a card", filter === "todo", () => setFilter("todo"), counts.todo)}
+        {chip("Already printed", filter === "printed", () => setFilter("printed"), counts.printed)}
+        {chip("All", filter === "all", () => setFilter("all"))}
+        <label style={{ fontSize: 13, color: "#374151", display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
+          <input type="checkbox" checked={verifiedOnly} onChange={(e) => setVerifiedOnly(e.target.checked)} />
+          Verified only
+        </label>
+      </div>
+
+      {verifiedOnly && counts.waiting > 0 && (
+        <div className="card" style={{ padding: "12px 16px", background: "#fffbeb", borderColor: "#fde68a" }}>
+          <div style={{ fontSize: 13, color: "#92400e" }}>
+            {counts.waiting} submission{counts.waiting === 1 ? " is" : "s are"} still unverified and hidden here.
+            Untick “Verified only” to print them anyway.
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{ padding: m ? "12px 14px" : "14px 18px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <button style={{ ...primaryBtn, opacity: progress || !template ? 0.5 : 1 }}
+          onClick={buildAll} disabled={!!progress || !template}>
+          {progress ? `Building ${progress.done}/${progress.total}…` : "Build cards"}
+        </button>
+        <button style={{ ...ghostBtn, opacity: chosen.length && !saving ? 1 : 0.5 }}
+          onClick={saveBatch} disabled={!chosen.length || saving}>
+          {saving ? "Saving…" : `Save ${chosen.length} card${chosen.length === 1 ? "" : "s"}`}
+        </button>
+        <button style={{ ...ghostBtn, opacity: chosen.length && !marking ? 1 : 0.5 }}
+          onClick={markPrinted} disabled={!chosen.length || marking}>
+          {marking ? "Marking…" : `Mark ${chosen.length} printed`}
+        </button>
+      </div>
+
+      <div className="card" style={{ padding: m ? "12px 14px" : "14px 18px", background: "#f9fafb" }}>
+        <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>
+          <strong>1.</strong> Build cards &nbsp;<strong>2.</strong> Check each photo looks right
+          &nbsp;<strong>3.</strong> Save &nbsp;<strong>4.</strong> Mark printed once they come out.
+        </div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+          {!canRememberFolder()
+            ? <>This browser cannot save straight to a folder, so the cards download instead.
+                Put them in the card folder and they will print. Chrome or Edge avoids that step.</>
+            : folder
+              ? <>Saving to <strong>{folder.name}</strong>{folderReady ? "" : " (you will be asked to allow it once)"}.
+                  Cards print by themselves once saved.{" "}
+                  <button onClick={async () => { await forgetFolder(); setFolder(null); setFolderReady(false); }}
+                    style={{ background: "none", border: "none", padding: 0, color: "#2563eb", fontSize: 12, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>
+                    Change folder
+                  </button></>
+              : <>The first time you press Save, choose the <strong>Cheer Ops Cards</strong> folder on this PC.
+                  It is remembered after that, and cards print by themselves.</>}
+        </div>
+      </div>
+
+      {!visible.length && (
+        <div className="card" style={{ padding: 20, color: "#6b7280", fontSize: 14 }}>
+          Nobody here. {filter === "todo" ? "Every card in this view has been printed." : "Try another filter."}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: m ? "repeat(auto-fill,minmax(140px,1fr))" : "repeat(auto-fill,minmax(180px,1fr))", gap: 14 }}>
+        {visible.map((row) => {
+          const c = cards[row.id];
+          const badge = badgeFor(c);
+          const off = skipped.has(row.id);
+          return (
+            <div key={row.id} className="card" style={{ padding: 10, opacity: off ? 0.45 : 1 }}>
+              <div style={{ position: "relative", background: "#f3f4f6", borderRadius: 6, overflow: "hidden", aspectRatio: `${CARD_W} / ${CARD_H}` }}>
+                {c?.thumbUrl
+                  ? <img src={c.thumbUrl} alt="" style={{ width: "100%", display: "block" }} />
+                  : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontSize: 12, color: "#9ca3af", textAlign: "center", padding: 8 }}>
+                      {c?.failed ? c.error : "not built yet"}
+                    </div>}
+                {row.cardPrinted && (
+                  <div style={{ position: "absolute", top: 6, right: 6, background: "#1a1a2e", color: "#fff", fontSize: 10, fontWeight: 600, padding: "3px 7px", borderRadius: 999 }}>printed</div>
+                )}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginTop: 8 }}>{row.firstName} {row.lastName}</div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6, lineHeight: 1.35 }}>{row.program}</div>
+              {badge && (
+                <span title={badge.title || ""} style={{ display: "inline-block", fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999, background: badge.bg, color: badge.fg, cursor: badge.title ? "help" : "default" }}>{badge.text}</span>
+              )}
+              {c?.blob && (
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <button style={{ ...ghostBtn, padding: "4px 9px", fontSize: 11, flex: 1 }}
+                    onClick={() => setAdjusting(row)}>Adjust</button>
+                  <button style={{ ...ghostBtn, padding: "4px 9px", fontSize: 11, flex: 1 }}
+                    onClick={() => toggleSkip(row.id)}>{off ? "Include" : "Skip"}</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {adjusting && (
+        <CropAdjuster
+          row={adjusting} template={template} isMobile={m}
+          baseCrop={cards[adjusting.id]?.crop}
+          fetchPhoto={fetchPhoto}
+          onClose={() => setAdjusting(null)}
+          onSave={async (photo, crop) => {
+            const prev = cards[adjusting.id];
+            const { blob, thumbUrl } = await composite(adjusting, photo, crop);
+            if (prev?.thumbUrl) URL.revokeObjectURL(prev.thumbUrl);
+            setCards((p) => ({ ...p, [adjusting.id]: { ...prev, blob, thumbUrl, crop, source: "manual", confidence: 1 } }));
+            setAdjusting(null);
+            showToast("Card updated");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// The escape hatch for photos the detector frames badly. It re-fetches the one
+// photo it needs, because built cards keep only the finished PNG.
+function CropAdjuster({ row, template, baseCrop, fetchPhoto, onClose, onSave, isMobile: m }) {
+  const [photo, setPhoto] = useState(null);
+  const [error, setError] = useState("");
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchPhoto(row.id)
+      .then((p) => { if (alive) setPhoto(p); })
+      .catch((e) => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [row.id]);
+
+  const crop = photo && baseCrop
+    ? adjustCrop(baseCrop, { zoom, panX, panY },
+        photo.naturalWidth || photo.width, photo.naturalHeight || photo.height)
+    : null;
+
+  useEffect(() => {
+    if (!photo || !template || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    canvas.width = CARD_W; canvas.height = CARD_H;
+    drawCard(canvas.getContext("2d"), {
+      template, photo, crop,
+      program: row.program, firstName: row.firstName, lastName: row.lastName,
+      expiryYear: seasonEndYear(),
+    });
+  }, [photo, template, crop, row]);
+
+  const slider = (label, value, setValue, min, max, step) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+      <span style={{ width: 74, color: "#6b7280" }}>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => setValue(parseFloat(e.target.value))} style={{ flex: 1 }} />
+    </label>
+  );
+
+  return (
+    <Modal
+      title={`Adjust ${row.firstName} ${row.lastName}`}
+      onClose={onClose}
+      saveLabel="Use this crop"
+      saving={saving}
+      wide
+      isMobile={m}
+      onSave={async () => {
+        if (!photo || !crop) return;
+        setSaving(true);
+        await onSave(photo, crop);
+        setSaving(false);
+      }}
+    >
+      {error && <div style={{ color: "#b91c1c", fontSize: 13 }}>Could not load the photo: {error}</div>}
+      {!photo && !error && <div style={{ color: "#6b7280", fontSize: 13 }}>Loading the photo…</div>}
+      {photo && (
+        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <canvas ref={canvasRef} style={{ width: 190, height: 300, borderRadius: 4, border: "1px solid #e5e7eb" }} />
+          <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 12 }}>
+            {slider("Zoom", zoom, setZoom, 0.5, 2.5, 0.01)}
+            {slider("Left / right", panX, setPanX, -0.5, 0.5, 0.01)}
+            {slider("Up / down", panY, setPanY, -0.5, 0.5, 0.01)}
+            <button style={ghostBtn} onClick={() => { setZoom(1); setPanX(0); setPanY(0); }}>
+              Reset to auto
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ─── Coach / Admin Credentials ────────────────────────────────────────────────
 // Submitted credential forms, read from the SharePoint list. The documents
 // themselves stay in SharePoint — these are links, never copies.
@@ -5766,6 +6240,14 @@ function CredentialsPage({ isMobile: m, showToast }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // Applied in place rather than by reloading: the card printer already knows
+  // which rows the list accepted, and a refetch would blank the table mid-task.
+  const applyPrinted = useCallback((ids, printedOn) => {
+    const done = new Set((ids || []).map(String));
+    setRows((p) => p.map((x) => (done.has(String(x.id))
+      ? { ...x, cardPrinted: true, cardPrintedOn: printedOn } : x)));
+  }, []);
+
   async function setStatusFor(row, next) {
     setBusy(row.id);
     const prev = row.status;
@@ -5787,7 +6269,9 @@ function CredentialsPage({ isMobile: m, showToast }) {
       "Last name": r.lastName, "First name": r.firstName, Email: r.email,
       "Under 18": r.isMinor ? "Yes" : "No",
       "Had 25-26 card": r.hadCard ? "Yes" : "No",
-      "Needs card": r.needsSelfie ? "Yes" : "No",
+      "Needs card": r.needsSelfie && !r.cardPrinted ? "Yes" : "No",
+      "Card printed": r.cardPrinted ? "Yes" : "No",
+      "Card printed on": r.cardPrintedOn ? new Date(r.cardPrintedOn).toLocaleDateString("en-CA") : "",
       "Provincially certified": r.provincialCertified ? "Yes" : "No",
       "Unlisted program": r.programUnlisted ? "Yes" : "No",
       Submitted: r.submittedAt ? new Date(r.submittedAt).toLocaleString("en-CA") : "",
@@ -5814,7 +6298,7 @@ function CredentialsPage({ isMobile: m, showToast }) {
     Submitted: rows.filter((r) => r.status === "Submitted").length,
     Verified: rows.filter((r) => r.status === "Verified").length,
     minors: rows.filter((r) => r.isMinor).length,
-    needCard: rows.filter((r) => r.needsSelfie && r.status !== "Verified").length,
+    needCard: rows.filter((r) => r.needsSelfie && !r.cardPrinted).length,
     unlisted: rows.filter((r) => r.programUnlisted).length,
   };
 
@@ -5853,10 +6337,12 @@ function CredentialsPage({ isMobile: m, showToast }) {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {chip("Submissions", section === "submissions", () => setSection("submissions"))}
+        {chip("Print cards", section === "cards", () => setSection("cards"))}
         {chip("Programs", section === "programs", () => setSection("programs"))}
       </div>
 
-      {section === "programs" ? <ProgramsManager isMobile={m} showToast={showToast} /> : (
+      {section === "programs" ? <ProgramsManager isMobile={m} showToast={showToast} />
+        : section === "cards" ? <CardPrinter isMobile={m} showToast={showToast} onPrinted={applyPrinted} /> : (
         <>
           {counts.needCard > 0 && (
             <div className="card" style={{ padding: m ? "12px 16px" : "14px 20px", background: "#fffbeb", borderColor: "#fde68a" }}>
@@ -5913,9 +6399,11 @@ function CredentialsPage({ isMobile: m, showToast }) {
                       {r.isMinor && <span className="pill" style={{ background: "#fee2e2", color: "#b91c1c", fontSize: 11 }}>Under 18</span>}
                       {r.provincialCertified && <span className="pill" style={{ background: "#ecfdf5", color: "#065f46", fontSize: 11 }}>Provincially certified</span>}
                       {r.programUnlisted && <span className="pill" style={{ background: "#fffbeb", color: "#92400e", fontSize: 11 }}>⚠ Unlisted program</span>}
-                      {r.needsSelfie
-                        ? <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11 }}>Needs card</span>
-                        : <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Has 25-26 card</span>}
+                      {!r.needsSelfie
+                        ? <span className="pill" style={{ background: "#f0f9ff", color: "#0369a1", fontSize: 11 }}>Has 25-26 card</span>
+                        : r.cardPrinted
+                          ? <span className="pill" title={r.cardPrintedOn ? `Printed ${new Date(r.cardPrintedOn).toLocaleDateString("en-CA")}` : "Printed"} style={{ background: "#ecfdf5", color: "#047857", fontSize: 11 }}>Card printed</span>
+                          : <span className="pill" style={{ background: "#fef3c7", color: "#92400e", fontSize: 11 }}>Needs card</span>}
                     </div>
                     <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, flexWrap: "wrap" }}>
                       <span>{r.program}</span>

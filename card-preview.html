@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<!--
+  Dev-only bench for the credential card renderer and the face auto-framing.
+
+  Vite serves this in dev but leaves it out of the production build, which only
+  ever takes index.html as its entry. It exists so card layout and framing can
+  be checked against real photographs without printing anything.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Card Renderer Bench</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: #f3f4f6; color: #1a1a2e;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+  p.sub { color: #6b7280; font-size: 14px; margin: 0 0 20px; }
+  .panel {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 18px; margin-bottom: 22px;
+  }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .grid { display: flex; gap: 22px; flex-wrap: wrap; }
+  figure { margin: 0; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; }
+  figcaption { font-size: 12px; color: #6b7280; margin-top: 10px; max-width: 250px; line-height: 1.45; }
+  figcaption b { color: #1a1a2e; font-weight: 600; }
+  canvas.card { display: block; width: 250px; height: 395px; border-radius: 4px; }
+  canvas#src { display: block; max-width: 340px; border-radius: 6px; border: 1px solid #e5e7eb; }
+  label.ctl { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 10px; }
+  label.ctl span { width: 54px; color: #6b7280; }
+  input[type=range] { width: 200px; }
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .ok   { background: #ecfdf5; color: #047857; }
+  .warn { background: #fffbeb; color: #b45309; }
+  .bad  { background: #fef2f2; color: #b91c1c; }
+  .note { font-size: 13px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
+          border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; }
+  button { font-family: inherit; font-size: 13px; padding: 7px 14px; border-radius: 8px;
+           border: 1px solid #e5e7eb; background: #fff; cursor: pointer; }
+  .legend { font-size: 12px; color: #6b7280; margin-top: 8px; line-height: 1.5; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+</style>
+</head>
+<body>
+<h1>Credential card bench</h1>
+<p class="sub">Cards render at 642&times;1014 (2.14&times;3.38in at 300dpi) and are shown here at about 39%.</p>
+
+<div class="note">
+  Compare the first sample card against <b>Downloads/CFTC Coach.png</b> &mdash; same program
+  and name, so type size and placement should line up.
+</div>
+
+<div class="panel">
+  <h2>Face auto-framing</h2>
+  <div class="row">
+    <div>
+      <label class="ctl"><span>Photo</span><input type="file" id="pick" accept="image/*" /></label>
+      <canvas id="src"></canvas>
+      <div class="legend">
+        <span class="swatch" style="background:#22c55e"></span>detected face &nbsp;
+        <span class="swatch" style="background:#2563eb"></span>crop sent to the card
+      </div>
+    </div>
+    <div style="flex:1; min-width:260px;">
+      <div id="detect" style="margin-bottom:14px; font-size:13px;">Pick a photo to run the detector.</div>
+      <label class="ctl"><span>Zoom</span><input type="range" id="zoom" min="0.5" max="2.5" step="0.01" value="1" disabled /><span id="zoomv" style="width:auto">1.00&times;</span></label>
+      <label class="ctl"><span>Left / right</span><input type="range" id="panx" min="-0.5" max="0.5" step="0.01" value="0" disabled /></label>
+      <label class="ctl"><span>Up / down</span><input type="range" id="pany" min="-0.5" max="0.5" step="0.01" value="0" disabled /></label>
+      <button id="reset" disabled>Reset to auto</button>
+    </div>
+    <div>
+      <canvas class="card" id="live"></canvas>
+    </div>
+  </div>
+</div>
+
+<h2>Layout samples</h2>
+<div class="grid" id="grid"></div>
+
+<script type="module">
+import { drawCard, loadImage, TEMPLATE_URL, CARD_W, CARD_H, HOLE, seasonEndYear, coverCrop }
+  from "/src/cardRender.js";
+import { autoFrame, adjustCrop } from "/src/faceFrame.js";
+
+const SAMPLES = [
+  { program: "Alpha Cheer & Tumbling", firstName: "Chloe", lastName: "Lorber",
+    note: "The reference card. Should match Downloads/CFTC Coach.png, except the expiry, which is drawn rather than baked in." },
+  { program: "Michael Power St. Joseph High School Varsity Cheer Team", firstName: "Alexandra", lastName: "Featherstonehaugh",
+    note: "The widest program on file (1309px at full size) with a long surname. Worst case for both lines." },
+  { program: "Patriotes de l'école secondaire de la Pointe-aux-Trembles", firstName: "Jean-François", lastName: "Thériault",
+    note: "Accents and hyphens, which the CSV import mangled once before." },
+  { program: "Cheer Sport Sharks", firstName: "Sam", lastName: "Ng",
+    note: "Short everything — the most common shape." },
+];
+
+function placeholderPhoto() {
+  const c = document.createElement("canvas");
+  c.width = 1200; c.height = 1600;
+  const g = c.getContext("2d");
+  const bg = g.createLinearGradient(0, 0, 0, 1600);
+  bg.addColorStop(0, "#8d2233"); bg.addColorStop(1, "#5c1622");
+  g.fillStyle = bg; g.fillRect(0, 0, 1200, 1600);
+  g.fillStyle = "#e8c4a0";
+  g.beginPath(); g.ellipse(600, 620, 230, 290, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#fff";
+  g.beginPath(); g.ellipse(520, 580, 46, 26, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(680, 580, 46, 26, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#2b2b2b";
+  g.beginPath(); g.ellipse(520, 582, 18, 18, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(680, 582, 18, 18, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#f5f5f5";
+  g.beginPath(); g.moveTo(600, 900); g.lineTo(980, 1600); g.lineTo(220, 1600); g.closePath(); g.fill();
+  g.fillStyle = "rgba(255,255,255,0.75)";
+  g.font = "600 46px 'Segoe UI', sans-serif"; g.textAlign = "center";
+  g.fillText("placeholder photo", 600, 120);
+  return c;
+}
+
+const $ = (id) => document.getElementById(id);
+let template = null;
+let photo = placeholderPhoto();
+let baseCrop = null;     // what the detector decided
+let lastFace = null;
+
+function renderSamples() {
+  $("grid").innerHTML = "";
+  const year = seasonEndYear();
+  for (const s of SAMPLES) {
+    const fig = document.createElement("figure");
+    const canvas = document.createElement("canvas");
+    canvas.className = "card";
+    canvas.width = CARD_W; canvas.height = CARD_H;
+    const fit = drawCard(canvas.getContext("2d"), {
+      ...s, template, photo, crop: currentCrop(), expiryYear: year,
+    });
+    const cap = document.createElement("figcaption");
+    cap.innerHTML = `<b>${fit.lines.length} line${fit.lines.length === 1 ? "" : "s"} at ${fit.size}px</b> `
+      + `(${(fit.size * 72 / 300).toFixed(1)}pt) &mdash; ${s.note}`;
+    fig.append(canvas, cap);
+    $("grid").append(fig);
+  }
+}
+
+function currentCrop() {
+  if (!baseCrop) return null;
+  const w = photo.naturalWidth || photo.width;
+  const h = photo.naturalHeight || photo.height;
+  return adjustCrop(baseCrop, {
+    zoom: parseFloat($("zoom").value),
+    panX: parseFloat($("panx").value),
+    panY: parseFloat($("pany").value),
+  }, w, h);
+}
+
+function drawSource() {
+  const w = photo.naturalWidth || photo.width;
+  const h = photo.naturalHeight || photo.height;
+  const c = $("src");
+  const scale = Math.min(340 / w, 440 / h, 1);
+  c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+  const g = c.getContext("2d");
+  g.drawImage(photo, 0, 0, c.width, c.height);
+
+  if (lastFace) {
+    g.strokeStyle = "#22c55e"; g.lineWidth = 2;
+    g.strokeRect(lastFace.x1 * scale, lastFace.y1 * scale,
+                 (lastFace.x2 - lastFace.x1) * scale, (lastFace.y2 - lastFace.y1) * scale);
+    for (const [lx, ly] of lastFace.landmarks || []) {
+      g.fillStyle = "#22c55e";
+      g.beginPath(); g.arc(lx * scale, ly * scale, 2.5, 0, Math.PI * 2); g.fill();
+    }
+  }
+  const cr = currentCrop();
+  if (cr) {
+    g.strokeStyle = "#2563eb"; g.lineWidth = 2;
+    g.strokeRect(cr.sx * scale, cr.sy * scale, cr.sw * scale, cr.sh * scale);
+  }
+}
+
+function renderLive() {
+  const canvas = $("live");
+  canvas.width = CARD_W; canvas.height = CARD_H;
+  drawCard(canvas.getContext("2d"), {
+    template, photo, crop: currentCrop(),
+    program: SAMPLES[0].program, firstName: SAMPLES[0].firstName, lastName: SAMPLES[0].lastName,
+    expiryYear: seasonEndYear(),
+  });
+}
+
+function refresh() {
+  $("zoomv").textContent = `${parseFloat($("zoom").value).toFixed(2)}×`;
+  drawSource(); renderLive(); renderSamples();
+}
+
+for (const id of ["zoom", "panx", "pany"]) $(id).addEventListener("input", refresh);
+$("reset").addEventListener("click", () => {
+  $("zoom").value = 1; $("panx").value = 0; $("pany").value = 0; refresh();
+});
+
+$("pick").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  $("detect").textContent = "loading the model and detecting…";
+  try {
+    photo = await loadImage(URL.createObjectURL(file));
+  } catch { $("detect").textContent = "could not read that image"; return; }
+
+  const t0 = performance.now();
+  const r = await autoFrame(photo);
+  const ms = Math.round(performance.now() - t0);
+  baseCrop = r.crop; lastFace = r.face;
+
+  const badge = r.source === "face" ? `<span class="badge ok">face found</span>`
+    : r.source === "center" ? `<span class="badge warn">no face — centred crop</span>`
+    : `<span class="badge bad">detector failed</span>`;
+  $("detect").innerHTML = `${badge}
+    <div style="margin-top:8px; color:#6b7280;">
+      ${photo.naturalWidth}×${photo.naturalHeight} source · ${ms}ms
+      ${r.source === "face" ? `· confidence ${(r.confidence * 100).toFixed(1)}%` : ""}
+      ${r.error ? `<br>${r.error}` : ""}
+    </div>`;
+
+  for (const id of ["zoom", "panx", "pany", "reset"]) $(id).disabled = false;
+  $("zoom").value = 1; $("panx").value = 0; $("pany").value = 0;
+  refresh();
+});
+
+try {
+  template = await loadImage(TEMPLATE_URL);
+  refresh();
+} catch (err) {
+  $("detect").textContent = `template failed to load from ${TEMPLATE_URL}: ${err.message}`;
+}
+</script>
+</body>
+</html>

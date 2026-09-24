@@ -1,14 +1,21 @@
-// Coach credential intake. Two actions in one function.
+// Coach credential intake and review. Six actions in one function.
 //
 // They were separate routes until the Hobby plan's 12-function ceiling refused
 // the deploy; the split bought nothing, since the browser always calls them in
-// sequence for the same submission.
+// sequence for the same submission. The project has been at 12 ever since, so
+// anything new arrives here as another action.
 //
 //   start  — validate the answers, create the SharePoint folder and the list row
 //            as Incomplete, and return one upload URL per file.
 //   finish — called once the browser has uploaded every file directly to
 //            SharePoint: resolve each file to a link, write those onto the row,
 //            flip it to Submitted and email the submitter.
+//   list   — every submission, for the admin table.
+//   verify — move one submission between Submitted and Verified.
+//   photo  — stream one submission's selfie back as image bytes, for the card
+//            printer to draw onto a canvas.
+//   printed — record that cards have been produced, in batches, because that is
+//            how they come off the printer.
 //
 // Files never pass through this function. Vercel caps request bodies at 4.5MB
 // and it cannot be raised, so base64-through-a-function (what the expense form
@@ -23,6 +30,7 @@ import { randomUUID } from "crypto";
 import {
   getMicrosoftToken, sendMail, requireAdmin, SITE_ID,
   EVENT_DOCS_DRIVE_ID, CREDENTIALS_FOLDER, CREDENTIALS_LIST_ID,
+  sharePointUrl, LIST_TEXT_MAX,
 } from "./_lib.js";
 
 const G = "https://graph.microsoft.com/v1.0";
@@ -70,14 +78,17 @@ function ageOn(dob, on) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const action = req.body?.action;
-  // start/finish are the public form. list/verify are the admin side and are
-  // gated — they read personal data. Everything shares one function because the
-  // Hobby plan allows 12 and the project is at 12.
+  // start/finish are the public form. Everything else is the admin side and is
+  // gated — those actions read personal data. It all shares one function
+  // because the Hobby plan allows 12 and the project is at 12.
   if (action === "start") return start(req, res);
   if (action === "finish") return finish(req, res);
-  if (action === "list" || action === "verify") {
+  if (action === "list" || action === "verify" || action === "photo" || action === "printed") {
     if (!await requireAdmin(req, res)) return;
-    return action === "list" ? list(req, res) : verify(req, res);
+    if (action === "list") return list(req, res);
+    if (action === "verify") return verify(req, res);
+    if (action === "printed") return printed(req, res);
+    return photo(req, res);
   }
   return res.status(400).json({ error: "Unknown action" });
 }
@@ -110,14 +121,18 @@ async function list(req, res) {
           needsSelfie: !!f.NeedsSelfie,
           credentialLevel: f.CredentialLevel || "",
           provincialCertified: !!f.ProvincialCertified,
-          provincialCertUrl: f.ProvincialCertUrl || "",
+          provincialCertUrl: sharePointUrl(f.ProvincialCertUrl),
           status: f.Status || "Incomplete",
+          // Stored relative to the library; turned back into links here so the
+          // UI does not need to know either form.
           folderUrl: f.FolderUrl || "",
-          vscUrl: f.VSCUrl || "",
-          proofOfAgeUrl: f.ProofOfAgeUrl || "",
-          credentialUrl: f.CredentialUrl || "",
-          selfieUrl: f.SelfieUrl || "",
+          vscUrl: sharePointUrl(f.VSCUrl),
+          proofOfAgeUrl: sharePointUrl(f.ProofOfAgeUrl),
+          credentialUrl: sharePointUrl(f.CredentialUrl),
+          selfieUrl: sharePointUrl(f.SelfieUrl),
           submittedAt: f.SubmittedAt || f.Created || i.createdDateTime || null,
+          cardPrinted: !!f.CardPrinted,
+          cardPrintedOn: f.CardPrintedOn || null,
         });
       }
       url = d["@odata.nextLink"] || null;
@@ -146,6 +161,147 @@ async function verify(req, res) {
     res.json({ ok: true, status });
   } catch (e) {
     console.error("credential verify error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+
+// The card printer needs the coach's photo as pixels, but the files sit in
+// SharePoint behind app-only auth that the browser cannot reach.
+//
+// For formats a canvas can decode we hand back the original bytes — the card
+// prints at 300dpi and every resample costs detail. HEIC is the exception:
+// phones shoot it by default and no browser will decode it, so we ask Graph for
+// a rendered thumbnail instead. Thumbnails also come back already rotated,
+// which the camera original is not.
+async function photo(req, res) {
+  const { itemId } = req.body || {};
+  if (!itemId) return res.status(400).json({ error: "itemId is required" });
+
+  try {
+    const msToken = await getMicrosoftToken();
+    const H = { Authorization: `Bearer ${msToken}` };
+
+    const rowRes = await fetch(
+      `${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items/${itemId}?$expand=fields`,
+      { headers: H }
+    );
+    if (!rowRes.ok) throw new Error(`Row lookup failed: ${await rowRes.text()}`);
+    const folderPath = (await rowRes.json()).fields?.FolderUrl || "";
+    if (!folderPath) return res.status(404).json({ error: "No folder recorded for this submission" });
+
+    // Found by listing the folder rather than rebuilding the filename, because
+    // the extension depends on whatever the coach's phone produced.
+    const kidsRes = await fetch(
+      `${G}/drives/${EVENT_DOCS_DRIVE_ID}/root:/${encodeURI(folderPath)}:/children`,
+      { headers: H }
+    );
+    if (!kidsRes.ok) throw new Error(`Folder listing failed: ${await kidsRes.text()}`);
+    const selfie = ((await kidsRes.json()).value || [])
+      .find((c) => c.name && c.name.startsWith(`${FIELDS.selfie} -`));
+    if (!selfie) return res.status(404).json({ error: "No selfie on file" });
+
+    const ext = String(selfie.name.split(".").pop() || "").toLowerCase();
+    const canvasSafe = ["jpg", "jpeg", "png", "webp"].includes(ext);
+
+    // A HEIC has to be rendered by SharePoint, and there are three ways to ask.
+    // Measured against a 2400x3200 portrait, none of them crops:
+    //
+    //   1. content conversion. One request, keeps the aspect ratio, returns the
+    //      bytes directly. width/height are mandatory - it 400s without them.
+    //   2. the thumbnails QUERY form. The path form, /thumbnails/0/c1600x1600,
+    //      makes SharePoint answer with malformed JSON, so it is not used.
+    //   3. `large`, capped at 800px on the long edge. Still ample for a 390px
+    //      card window, but last.
+    //
+    // A thumbnail's reported width/height describe the box that was requested,
+    // not the image inside it: that 2400x3200 photo comes back 600x800 from a
+    // box reported as 800x800.
+    let fileRes = null;
+    if (canvasSafe) {
+      fileRes = await fetch(`${G}/drives/${EVENT_DOCS_DRIVE_ID}/items/${selfie.id}/content`, { headers: H });
+    } else {
+      const converted = await fetch(
+        `${G}/drives/${EVENT_DOCS_DRIVE_ID}/items/${selfie.id}/content?format=jpg&width=1600&height=1600`,
+        { headers: H }
+      );
+      if (converted.ok) fileRes = converted;
+
+      for (const size of ["c1600x1600", "large"]) {
+        if (fileRes) break;
+        const t = await fetch(
+          `${G}/drives/${EVENT_DOCS_DRIVE_ID}/items/${selfie.id}/thumbnails?$select=${size}`,
+          { headers: H }
+        );
+        if (!t.ok) continue;
+        const url = (await t.json()).value?.[0]?.[size]?.url;
+        if (!url) continue;
+        // Pre-signed already, so this one must NOT carry our bearer token.
+        const got = await fetch(url);
+        if (got.ok) fileRes = got;
+      }
+
+      if (!fileRes) {
+        return res.status(415).json({ error: `SharePoint could not render this ${ext.toUpperCase()} photo` });
+      }
+    }
+    if (!fileRes.ok) return res.status(fileRes.status).json({ error: "Photo download failed" });
+
+    res.setHeader("Content-Type", fileRes.headers.get("content-type") || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(await fileRes.arrayBuffer()));
+  } catch (e) {
+    console.error("credential photo error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+
+// Records that cards have come off the printer.
+//
+// Takes a batch, because that is how cards are produced: a stack goes through
+// the Magicard and the whole run is marked at once. Each row is patched
+// separately - Graph has no bulk field update for list items - so one failure
+// is reported without discarding the rest. Printing a card is the expensive,
+// physical step; losing the record of a successful one would mean printing it
+// twice.
+async function printed(req, res) {
+  const { itemIds, printed: value = true } = req.body || {};
+  const ids = (Array.isArray(itemIds) ? itemIds : []).map(String).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: "itemIds is required" });
+  if (ids.length > 200) return res.status(400).json({ error: "Too many cards in one batch" });
+
+  const on = value ? new Date().toISOString() : null;
+  const fields = { CardPrinted: !!value, CardPrintedOn: on };
+
+  try {
+    const msToken = await getMicrosoftToken();
+    const H = { Authorization: `Bearer ${msToken}`, "Content-Type": "application/json" };
+
+    const results = await Promise.all(ids.map(async (id) => {
+      try {
+        const r = await fetch(
+          `${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items/${id}/fields`,
+          { method: "PATCH", headers: H, body: JSON.stringify(fields) }
+        );
+        if (!r.ok) return { id, ok: false, error: (await r.text()).slice(0, 200) };
+        return { id, ok: true };
+      } catch (e) {
+        return { id, ok: false, error: e.message };
+      }
+    }));
+
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length) console.error("credential printed: %d of %d failed", failed.length, ids.length);
+    res.status(failed.length ? 207 : 200).json({
+      ok: !failed.length,
+      printed: !!value,
+      printedOn: on,
+      updated: results.filter((r) => r.ok).map((r) => r.id),
+      failed,
+    });
+  } catch (e) {
+    console.error("credential printed error:", e.message);
     res.status(500).json({ error: e.message });
   }
 }
@@ -281,20 +437,36 @@ async function finish(req, res) {
     for (const f of files) {
       const col = URL_FIELD[f.field];
       if (!col || !f.name) continue;
+      const rel = `${folderPath}/${f.name}`;
       const meta = await fetch(
-        `${G}/drives/${EVENT_DOCS_DRIVE_ID}/root:/${encodeURI(`${folderPath}/${f.name}`)}`,
+        `${G}/drives/${EVENT_DOCS_DRIVE_ID}/root:/${encodeURI(rel)}`,
         { headers: { Authorization: `Bearer ${msToken}` } }
       );
       // A file that didn't land leaves its column empty rather than failing the
       // whole submission — the row still shows what did arrive.
-      if (meta.ok) patch[col] = (await meta.json()).webUrl || "";
-      else console.warn(`missing uploaded file ${f.name}: ${meta.status}`);
+      if (!meta.ok) { console.warn(`missing uploaded file ${f.name}: ${meta.status}`); continue; }
+      // The path, not the absolute webUrl Graph just returned: see
+      // EVENT_DOCS_WEB_BASE in _lib.js for why. list() turns it back into a link.
+      if (rel.length > LIST_TEXT_MAX) { console.warn(`path too long for ${col}: ${rel.length}`); continue; }
+      patch[col] = rel;
     }
 
-    const r = await fetch(`${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items/${itemId}/fields`, {
+    let r = await fetch(`${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items/${itemId}/fields`, {
       method: "PATCH", headers: H, body: JSON.stringify(patch),
     });
-    if (!r.ok) throw new Error(`Update failed: ${await r.text()}`);
+    if (!r.ok) {
+      // The documents are safely in SharePoint by this point. Rather than leave
+      // the row on Incomplete — which is what a rejected field used to do, and
+      // which means nobody is told their submission arrived — record the status
+      // on its own and let the missing links be fixed later.
+      const why = await r.text();
+      console.error("credential finish: full patch rejected, retrying status only:", why.slice(0, 300));
+      r = await fetch(`${G}/sites/${SITE_ID}/lists/${CREDENTIALS_LIST_ID}/items/${itemId}/fields`, {
+        method: "PATCH", headers: H,
+        body: JSON.stringify({ Status: patch.Status, SubmittedAt: patch.SubmittedAt }),
+      });
+      if (!r.ok) throw new Error(`Update failed: ${await r.text()}`);
+    }
     const saved = await r.json();
 
     // The documents are already in SharePoint by now, so a failed email must

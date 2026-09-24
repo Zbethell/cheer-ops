@@ -5773,6 +5773,7 @@ function CardPrinter({ isMobile: m, showToast, onPrinted }) {
   const [marking, setMarking] = useState(false);
   const [folder, setFolder] = useState(null);       // remembered directory handle
   const [folderReady, setFolderReady] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
 
   const post = (body) => fetch("/api/credentials", {
     method: "POST",
@@ -6070,6 +6071,40 @@ function CardPrinter({ isMobile: m, showToast, onPrinted }) {
               : <>The first time you press Save, choose the <strong>Cheer Ops Cards</strong> folder on this PC.
                   It is remembered after that, and cards print by themselves.</>}
         </div>
+      </div>
+
+      <div className="card" style={{ padding: m ? "10px 14px" : "12px 18px" }}>
+        <button onClick={() => setSetupOpen((v) => !v)}
+          style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 13,
+                   color: "#374151", cursor: "pointer", fontWeight: 500 }}>
+          {setupOpen ? "▾" : "▸"} Setting up a different PC to print
+        </button>
+        {setupOpen && (
+          <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.65, marginTop: 10 }}>
+            <p style={{ margin: "0 0 10px" }}>
+              Only needed once, and only on the PC the card printer is plugged into.
+              Whoever prints day to day never runs any of this — they just use this page.
+            </p>
+            <ol style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+              <li>On that PC, open this page and download all three files <strong>into the same folder</strong>:
+                <div style={{ marginTop: 6, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                  {["install-card-printer.ps1", "watch-and-print.ps1", "print-cards.ps1"].map((f) => (
+                    <a key={f} href={`/setup/${f}`} download
+                      style={{ color: "#2563eb", fontSize: 12, textDecoration: "none", fontWeight: 500 }}>
+                      {f} ↓
+                    </a>
+                  ))}
+                </div>
+              </li>
+              <li>Right-click <strong>install-card-printer.ps1</strong> and choose <strong>Run with PowerShell</strong>.</li>
+              <li>It creates the cards folder, puts a shortcut on the Desktop, and starts printing at login from then on.</li>
+            </ol>
+            <p style={{ margin: 0, color: "#6b7280", fontSize: 12 }}>
+              It assumes the printer is called <code>Magicard 300 (V2)</code>; the script lists what is
+              installed if it cannot find it. To undo it, run the same file with <code>-Uninstall</code>.
+            </p>
+          </div>
+        )}
       </div>
 
       {!visible.length && (

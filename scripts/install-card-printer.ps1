@@ -81,7 +81,17 @@ if ($Uninstall) {
 
 if (-not (Test-Path -LiteralPath $watcher)) {
   Write-Host "Cannot find watch-and-print.ps1 beside this script." -ForegroundColor Red
+  Write-Host "All three .ps1 files must be in the same folder." -ForegroundColor Yellow
   exit 1
+}
+
+# Anything downloaded from the web carries a Mark-of-the-Web tag, and PowerShell
+# refuses to run tagged scripts without prompting. The watcher starts from a
+# Startup shortcut where there is nobody to answer that prompt, so the tag is
+# cleared from all three now.
+foreach ($f in "install-card-printer.ps1", "watch-and-print.ps1", "print-cards.ps1") {
+  $full = Join-Path $PSScriptRoot $f
+  if (Test-Path -LiteralPath $full) { Unblock-File -LiteralPath $full -ErrorAction SilentlyContinue }
 }
 
 Write-Host ""
